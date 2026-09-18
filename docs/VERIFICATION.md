@@ -25,22 +25,34 @@ Result: **15 unverified prices move the ladder. 11 unverified prices do not.**
 That split matters — it is the difference between an afternoon of work and a week
 of it.
 
-## Tier A — the model is wrong until these are answered
+## Tier A — answered
 
-These are not price corrections. Each one means the planner is computing the
-wrong thing, and no amount of price accuracy fixes it.
+Confirmed by the player at the build menu or in game. Details in
+`MILESTONES.md`; the live sheet is the Verification Desk artifact.
+
+| id | answer |
+|---|---|
+| CAP-1 | Mission cap = count of your most-built building type, +1. |
+| REQ-1 | Requirements count **buildings**, not vehicles. |
+| REQ-2 | Range matters. A call picks a building and spawns in **that building's** range; extensions on it add special calls; specialisation restricts it to those only. |
+| CRED-1 | The listed figure is what you receive. A range means the mission spawns at various intensities — which is why one mission name appears several times in the dataset. |
+| CRED-2 | No partial credit. A mission completes only when every required vehicle arrives **with correctly trained personnel**. Alliance missions pay **every participant the full amount**. |
+| POI-1 | POIs are free and effectively unlimited. |
+| POI-2 | A POI must sit inside your own coverage area. |
+| SPAWN-1 | Missions spawn continuously up to the cap; timing looks random. Understaffed stations cause low-credit phases. Player's rule: fill a small station to max vehicles before building the next. |
+| EMS-3 | Hospital beds and specialist departments gate nothing. **Hospitals leave the ladder.** |
+| NAME-1 | Federal Police Station and Federal Police Extension are the same for mission spawn. A standalone station exists with its own building and personnel. |
+
+## Tier A — still open
 
 | id | question | why |
 |---|---|---|
-| EMS-1 | What does an ambulance mission actually pay? | **54 of the 175 EMS-path missions have no credit value in the dataset.** Ambulance missions pay through patient transport and that payout was never captured. The EMS ladder is computed on 69% of its own path, and the missing third is the routine work an ambulance player runs all day. This is the single highest-value item on the list. |
-| EMS-2 | Is transport pay flat, or does it scale with distance / specialist / patient count? | Decides whether hospitals are a per-mission multiplier or a flat unlock, and therefore whether the planner should ever recommend one. |
-| CRED-1 | Is the listed "average credits" what you actually receive? | Every rung is ranked on this number. A mean of a range is still rankable; a figure that *excludes* patient and prisoner transport is not, and would skew the entire tool toward fire. |
-| REQ-1 | Does "40 fire stations" mean 40 buildings, or the vehicles they imply? | The whole cost model assumes buildings. If requirements count vehicles, every rung above 1,000,000 is wrong. |
-| REQ-2 | Must a required extension be within dispatch range of the mission? | If range matters, the tool under-costs every rung — you would need the same extension once per area. |
-| POI-1 | Are POIs free, unlimited, and placeable anywhere? | **629 of 1,261 missions are gated behind a POI** and the planner prices them at zero. A cap or a cost changes every rung that needs one. |
-| CAP-1 | Exact concurrent mission cap formula. | The premise of the whole algorithm — the reason it ranks the highest-paying mission instead of mission count. If the cap is much larger than assumed, breadth becomes a real strategy again. |
-| SPAWN-1 | What drives mission spawn rate? | Decides whether "buy more small stations" is a strategy in itself. Unmodelled, and the reason the tool refuses to print credits per hour. |
-| NAME-1 | Is "Federal Police Station" the menu's "Federal Police Extension"? | 55 missions, including most top-tier fire missions. A wrong mapping distorts the entire upper fire path. |
+| EMS-1 | **How many credits in total land in your account for one completed ambulance call?** | 54 of the 175 EMS-path missions carry no credit value and the mission list shows no number for them. Confirmed so far: transport is free and hospitals gate nothing — neither says what the call *pays*. Until this number exists the EMS ladder runs on 69% of its own path. |
+| SPEC-1 | What specialisations exist, what do they cost, can they be undone? | A specialised station generates only its specialised calls. This is the game's own path mechanism and it is absent from the dataset — more important to the planner than any single price. |
+| SPEC-2 | Does specialising cut total spawn volume, or only redirect it? | Decides whether a path costs income, and by how much. |
+| RANGE-1 | How large is a building's range, and does each area need its own copy of an extension? | The planner prices each extension once, globally. If you need one per area, **every extension rung is under-costed by a multiple** — the largest known cost error in the tool. |
+| ALLY-3 | How do alliance missions work: who starts them, how often, is there a cap? | Every participant is paid in full. That is a credit multiplier no purchase on any path competes with. |
+| PERS-1 | Which vehicles need which training, how long is each course, how many seats per classroom? | Unlocking a mission and being able to earn from it are different things, and the second is untracked. |
 | NAME-2 | Is "Traffic Police Extension" the menu's "Traffic Control Extension"? | 29 missions. If they are two buildings, the price is on the wrong one. |
 
 ## Tier A prices — unverified *and* ladder-critical
@@ -75,7 +87,7 @@ holds 6 vehicles and 1 extension · `PRICE-3` exact small→full upgrade cost ·
 mission requirements · `REQ-3` does "Foam Extension ×2" mean two total or two
 stations · `EX-1` do the two exercise missions self-spawn · `EMS-3` do hospital
 departments gate missions · `CRED-2` do credits scale with response size ·
-`POI-2` must a POI sit in your coverage area · `NAME-3` the three coastal air names.
+`NAME-3` the three coastal air names · `VEH-1` vehicle cost and count per mission · `CAP-2` do small stations count toward the mission cap (if they do, one more small station of your most-built type may be the cheapest income upgrade in the game).
 
 **Unverified but *not* currently ladder-critical** — do these last, despite the
 mission counts looking alarming: Wildland Commando (51 missions), Wildland Air

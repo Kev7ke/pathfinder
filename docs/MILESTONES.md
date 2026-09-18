@@ -1,140 +1,150 @@
 # Path milestones: making the planner answer "what do I buy next"
 
-A design spec, not an implementation. It changes what the planner *presents*; it
-does not redesign the frontier algorithm in `ALGORITHM.md`, which stays as the
-layer underneath.
+Revision 2. The first version treated the ambulance path's drift into fire
+stations as a presentation problem. Player answers since then show it is partly a
+*model* problem: the planner is missing the mechanic the game already provides
+for playing a path.
 
-## The complaint
+## What the player confirmed
 
-Pick the ambulance path as a new player and the tool eventually tells you to buy
-fire stations. That is not a bug in the frontier — it is the frontier doing
-exactly what it was specified to do. A small fire station is the cheapest
-building in the game (50,000) and fire appears in the requirements of almost
-every large mission, so "the cheapest state that raises your ceiling" very often
-contains fire stations.
+| | answer | consequence |
+|---|---|---|
+| Mission cap | count of your **most-built building type**, +1 | Concentration raises your income ceiling. 25 fire stations = 26 concurrent missions. |
+| How a call spawns | a call **picks a building** and spawns inside **that building's** range | Requirements are local, not global. |
+| Extensions | an extension on a building lets **that building** spawn special calls | An extension is a spawn source, not just a permission. |
+| Specialisation | a specialised station generates **only** its specialised calls | **The game's own path mechanism.** Not in the dataset at all. |
+| POIs | free, effectively unlimited, must sit in your coverage area | Free, but geographic. |
+| Listed credits | what you actually receive; a range means the mission spawns at various intensities | Validates ranking by the listed average, and explains duplicate mission names in the data. |
+| Completion | every required vehicle must arrive **with correctly trained personnel** | Unlocking a mission is not the same as earning from it. |
+| Alliance missions | **every participant is paid the full amount** | A 2,000 mission pays 2,000 to each player, even one who sent a single vehicle. |
+| Hospitals | gate no mission; transport is free | Hospitals leave the ladder entirely. |
+| Requirements | count **buildings**, not vehicles | The existing cost model was right about this. |
 
-Run `python3 tools/path_purity.py` to see it. The EMS path from a fresh account:
+## What this does to the algorithm's premise
 
-| cost | ceiling | gain per 100k | EMS share of spend | mission |
-|---|---|---|---|---|
-| 100,000 | 2,500 | 2,500 | 100% | Fired Employee Spills Cleaning Chemicals |
-| 200,000 | 5,000 | 2,500 | 100% | Hunting accident |
-| 600,000 | 5,600 | 150 | 100% | Small avalanche |
-| 1,000,000 | 14,000 | 2,100 | 100% | Moderate gravity avalanche |
-| **1,600,000** | **15,400** | **233** | **19%** | **Massive Debris from Rockslide** |
-| 1,800,000 | 20,000 | 2,300 | 56% | Airplane Crash in Urban Area with Fire |
-| 2,100,000 | 22,500 | 833 | 48% | Airplane Crash with Explosion |
-| 2,800,000 | 40,000 | 2,500 | 54% | Roller Coaster Derailment (Major) |
+`ALGORITHM.md` ranks the *highest-paying single mission* and dismisses mission
+count, on the grounds that the concurrent cap makes extra low-value missions
+displace each other. That reasoning is now only half right.
 
-The bold row is what makes the tool feel stupid. It costs 600,000 more than the
-rung above, spends 75% of that on fire stations, and raises the ceiling by 1,400
-credits — a tenth of the return of the rung below it and a tenth of the rung
-above it. A new player following the list in order pays 600,000 for the worst
-purchase on the path, immediately before the best one.
+The cap is `max(count of one building type) + 1`. A mid-game player with 25 fire
+stations is running **26 concurrent missions**, not a handful. Filling 26 slots
+well is a different optimisation from reaching one 56,500 mission — it is about
+the *mix* of what spawns, and the mix is controlled by which buildings exist,
+what extensions sit on them, and what they are specialised into.
 
-The police path has the same shape: rung 5 (*Fire in Aquarium*) costs 1,550,000
-more than rung 4, spends 77% of it outside police, and buys 3,000 credits of
-ceiling. Rung 6 costs 700,000 and is 100% police.
+So the tool is currently optimising a real thing (the ceiling) while ignoring the
+thing the player actually asked about (profit). Both matter. They are not the
+same ladder.
 
-## The data problem underneath it
+**This is a change to the algorithm's behaviour, so it is a question, not a
+decision.** See "Open decision" at the end.
 
-**54 of the 175 EMS-path missions carry no credit value at all.** Ambulance
-missions pay through patient transport, which is not in the dataset. The EMS
-ladder is computed on two thirds of its own path, and the missing third is the
-ordinary high-frequency work an ambulance player actually runs.
+## Why the ambulance path drifted — the real reason
 
-No presentation layer fixes this. It is `EMS-1` in `VERIFICATION.md` and it
-should be answered before anyone tunes the EMS path further.
+Not because fire stations are cheap. Because the planner had no concept of
+*where missions come from*.
 
-## Five changes
+Fire dominates because most players build mostly fire stations, which makes fire
+their most-built type (raising the cap on fire terms) and makes fire buildings
+the ones that spawn calls. It is a consequence of build choices, not a law of the
+game. Specialisation and extensions let a player choose a different mix
+deliberately — and the planner never mentioned either.
 
-### 1. Rank by marginal efficiency, not absolute cost
+The player's own read is that fire pays better early and mid game. The dataset
+supports the volume half of that: **795 fire missions on the fire path against
+291 police and 175 EMS**. Police still wins decisively on ceiling per credit
+spent — four small police stations, 200,000, unlock a 10,500 mission — but fire
+wins on how often anything spawns at all. Both statements are true, and the tool
+should print both rather than pick one.
 
-The frontier sorts by absolute cost from the current state — right for drawing a
-ladder, wrong for picking a next step. Add:
+## The revised plan
 
-```
-gain_per_100k = (credits[i] - credits[i-1]) / ((cost[i] - cost[i-1]) / 100000)
-```
+### Layer 1 — the ladder (exists, keep it)
 
-Anything under roughly 400 on this data is a **trap rung**: on the frontier only
-because nothing cheaper beats it, not because it is worth buying. Mark it, and
-never let it be the headline recommendation.
+Cheapest state that raises your ceiling. Unchanged, still correct, still the
+thing that answers "what is the biggest mission I can reach".
 
-### 2. Tax the detour, do not ban it
+### Layer 2 — presentation (specified in revision 1, still valid)
 
-Per rung, compute the share of cost landing in the path's own department
-(`tools/path_purity.py` does this). Under 50% is a detour. Detours are real — the
-EMS ceiling genuinely needs 14 fire stations — so they stay visible, but in a
-separate lane labelled *cross-department requirement*, with the reason attached:
-"the top EMS mission needs a fire response; this is when you start building it."
+1. **Marginal efficiency.** `gain_per_100k` between rungs; anything under ~400 on
+   this data is a trap rung and never the headline.
+2. **Detour tax.** Share of each rung's cost landing in the path's own
+   department; under 50% is a detour and goes in a labelled lane with its reason.
+3. **Milestone spine.** 4–6 derived checkpoints per path instead of 8–21 raw
+   rungs.
+4. **Single-purchase granularity.** One line on the front page: *buy this next*.
+5. **Path contract up front.** Say at rung 0 that the EMS ceiling eventually
+   needs fire and police.
 
-What must never happen is a detour appearing as step 1 of the EMS plan with no
-explanation.
+The worked example still holds: on the EMS path, rung 5 costs 600,000 more than
+rung 4, spends 75% of it on fire stations, and raises the ceiling by 1,400
+credits — a tenth of the return of the rungs on either side.
 
-### 3. Give each path a milestone spine
+### Layer 3 — spawn mix (new, and the real answer to "maximize profit")
 
-A milestone is **the cheapest state that unlocks a new credit band of that path's
-own missions**, computed with the detour tax applied and trap rungs removed. That
-yields 4–6 named checkpoints per path instead of 8–21 raw rungs. The spine is
-what the player sees; the rungs are the detail behind it.
+This is what was missing. Three inputs the planner does not yet have:
 
-Because it is derived from the same data, a price correction moves the spine
-automatically. There is no editorial list to maintain — which matters, because
-several of the prices these milestones sit on are still estimates.
+- **Specialisation** steers which calls a station generates. This is how a path
+  becomes real instead of aspirational. Blocked on `SPEC-1` / `SPEC-2`.
+- **Building range** decides how often an extension must be replicated. The
+  planner prices every extension **once, globally**. If each area needs its own,
+  every extension rung is under-costed by a multiple. Blocked on `RANGE-1`. This
+  is now the largest known cost error in the tool.
+- **Cap concentration.** Because the cap follows your most-built type, "one more
+  small station of the type you already have most of" may be the cheapest
+  income upgrade in the game. Blocked on `CAP-2` — whether small stations count
+  toward the cap.
 
-### 4. Break milestones into single purchases
+### Layer 4 — the two levers that dwarf the ladder
 
-"2,800,000 — 14 fire, 15 ambulance, 10 police, Technical Rescue ×2" is not an
-instruction anyone can act on. Each milestone needs an ordered purchase queue
-where every individual purchase is independently useful, ordered by how many
-*already-unlocked* missions it also strengthens. The front page shows one line:
-**Buy this next** — one building, its price, what it moves you toward. Everything
-else is one click away.
+Neither is a build order, and both should be stated plainly rather than modelled:
 
-### 5. State the path contract up front
-
-When a player picks EMS, tell them the shape of the road before they start: the
-first 1,000,000 is pure ambulance, and above 15,000 credits every EMS ceiling
-needs a fire and police response too — that is the game's design, not the tool's.
-A path that silently turns into a fire build at rung 5 feels like a bait and
-switch. A path that says so at rung 0 feels like a plan.
+- **Alliance missions pay every participant in full.** Joining one with a single
+  vehicle pays the same as carrying it. No purchase on any path competes with
+  that. `ALLY-3` is about the rules around it, not whether it matters.
+- **Staffing beats unlocking.** A mission completes only when every required
+  vehicle arrives with trained personnel. The player's own rule — *fill a small
+  station to its maximum vehicles before building the next one* — is better
+  advice than any rung on any ladder, and the tool should say so on the front
+  page. `PERS-1`, `VEH-1`.
 
 ## The spine as the current data gives it
 
-These move when the prices in `VERIFICATION.md` are confirmed. Several sit on
-estimates right now, noted inline.
+Unchanged from revision 1 in its numbers, with two corrections: hospitals are
+removed (they gate nothing), and every EMS milestone is provisional until `EMS-1`
+gives a payout figure for ambulance calls.
 
-**Ambulance**
-1. *Get spawning* — 2 small ambulance stations, 200,000, ceiling 5,000.
-2. *The avalanche branch* — 3 more ambulance stations + Mountain Rescue, Sked,
-   Litter, 1,000,000, ceiling 14,000, still 100% EMS. **Three of those four
-   prices are estimates.**
-3. *First cross-department step* — the airport branch, 1,800,000, ceiling 20,000.
-   Fire enters here, and the tool should say so out loud.
-4. *Ceiling* — Roller Coaster Derailment, 2,800,000, 40,000. Needs Technical
-   Rescue Equipment, **currently an estimate**.
+**Ambulance** — 2 small ambulance stations (200,000, ceiling 5,000) → avalanche
+branch (1,000,000, ceiling 14,000, three of its four prices are estimates) →
+airport branch (1,800,000, ceiling 20,000, fire enters here) → Roller Coaster
+Derailment (2,800,000, 40,000).
 
-**Police**
-1. *Four small police stations* — 200,000, ceiling 10,500. The best
-   credits-per-credit in the entire dataset, on any path.
-2. *Riot Police* — 600,000, ceiling 13,000, still pure police.
-3. *The helicopter tier* — 2,850,000, ceiling 17,000, pure police again. Skip the
-   Aquarium rung: detour and trap.
-4. *Ceiling* — Clash and assault of risky fans, 4,500,000, 23,000.
+**Police** — 4 small police stations (200,000, ceiling 10,500, best value in the
+dataset) → Riot Police (600,000, 13,000) → helicopter tier (2,850,000, 17,000;
+skip the Aquarium rung, it is a detour and a trap) → Clash and assault of risky
+fans (4,500,000, 23,000).
 
-**Fire**
-1. *Five small fire stations* — 250,000, ceiling 4,800.
-2. *Forestry* — 700,000, ceiling 24,000. Excellent value and the last cheap thing
-   on the path.
-3. *Flood / Disaster Response* — 2,100,000, ceiling 25,000. **Both prices are
-   estimates and both are ladder-critical.**
-4. *Industrial tier* — 2,850,000 upward: refineries, chemical plants, power
-   plants, to 56,500.
+**Fire** — 5 small fire stations (250,000, ceiling 4,800) → Forestry (700,000,
+24,000, last cheap thing on the path) → Flood / Disaster Response (2,100,000,
+25,000, both prices estimates and both ladder-critical) → industrial tier
+(2,850,000 upward, to 56,500).
+
+## Open decision for the player
+
+`ALGORITHM.md` says to ask before changing the algorithm's behaviour, so:
+
+**Should the planner gain a second ladder that optimises the spawn mix for a
+26-slot mission cap, alongside the existing ceiling ladder?**
+
+It would rank "what should fill my concurrent slots" rather than "what is the
+biggest mission I can reach". It cannot be built until `SPEC-1`, `SPEC-2`,
+`RANGE-1` and `CAP-2` are answered — and it must not print credits per hour,
+because spawn timing is still unmeasured and the player's own description of it
+is "it seems random".
 
 ## Still deliberately excluded
 
-No credits per hour. Spawn rate, vehicle tie-up and the concurrent-mission cap
-are not in the data (`SPAWN-1`, `CAP-1`), and a fabricated rate would undo the
-one thing this tool is good at. Milestones rank **unlock efficiency**. Say so on
-the screen.
+No credits per hour. Confirmed as unknowable from the current data: spawn timing
+looks random to the player, and low-credit phases come from understaffing rather
+than from building choices. Milestones rank **unlock efficiency**; the spawn-mix
+layer would rank **slot quality**. Neither is an income prediction.
