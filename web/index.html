@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pathfinder — MissionChief build planner</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --paper:#E9EDF2;--surface:#FFF;--surface-2:#F4F6F9;--ink:#101720;--ink-2:#4C5866;
+  --hair:#CFD7E1;--hair-soft:#E2E8EF;--accent:#2F4490;--accent-soft:#E4E9F7;--on-accent:#FFF;
+  --ok:#10705A;--ok-bg:#DFF0EA;--chk:#8C6104;--chk-bg:#F7EBD2;--weak:#A94D17;--weak-bg:#F8E6DA;
+  --bad:#9E2B22;--bad-bg:#F8E0DE;--idle:#66727F;--idle-bg:#E8ECF1;
+  --fire:#A9331F;--ems:#1F6F4A;--police:#27458F;
+  --shadow:0 1px 2px rgba(16,23,32,.06),0 8px 24px -12px rgba(16,23,32,.18);
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+  --disp:"Archivo",var(--sans);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0E1319;--surface:#161D25;--surface-2:#1B232D;--ink:#E4EAF1;--ink-2:#97A3B2;
+  --hair:#2A3440;--hair-soft:#222B36;--accent:#8FA6E6;--accent-soft:#1E2740;--on-accent:#0E1319;
+  --ok:#5CC7A5;--ok-bg:#10312A;--chk:#E0AE4C;--chk-bg:#332713;--weak:#EE9563;--weak-bg:#371F13;
+  --bad:#F0837A;--bad-bg:#37191A;--idle:#8A97A6;--idle-bg:#1E262F;
+  --fire:#E98B79;--ems:#6FC79C;--police:#93A9E8;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.7);
+}}
+:root[data-theme="dark"]{
+  --paper:#0E1319;--surface:#161D25;--surface-2:#1B232D;--ink:#E4EAF1;--ink-2:#97A3B2;
+  --hair:#2A3440;--hair-soft:#222B36;--accent:#8FA6E6;--accent-soft:#1E2740;--on-accent:#0E1319;
+  --ok:#5CC7A5;--ok-bg:#10312A;--chk:#E0AE4C;--chk-bg:#332713;--weak:#EE9563;--weak-bg:#371F13;
+  --bad:#F0837A;--bad-bg:#37191A;--idle:#8A97A6;--idle-bg:#1E262F;
+  --fire:#E98B79;--ems:#6FC79C;--police:#93A9E8;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;
+  padding-inline:16px;padding-block:0 60px}
+.wrap{max-width:1140px;margin:0 auto}
+h1,h2,h3{font-family:var(--disp);margin:0;text-wrap:balance}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:40;background:var(--paper);
+  margin-inline:-16px;padding:16px 16px 0;border-bottom:1px solid var(--hair)}
+.titlerow{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:baseline;justify-content:space-between}
+h1{font-size:22px;font-weight:700;letter-spacing:-.015em}
+h1 span{color:var(--ink-2);font-weight:500;font-size:14px;margin-left:8px}
+.pathbar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 10px}
+.pathbtn{appearance:none;cursor:pointer;font-family:var(--disp);font-weight:600;font-size:14px;
+  border:1px solid var(--hair);background:var(--surface);color:var(--ink-2);border-radius:8px;padding:9px 16px}
+.pathbtn[aria-pressed="true"]{border-color:currentColor;background:var(--surface);box-shadow:var(--shadow)}
+.pathbtn[data-p="F"][aria-pressed="true"]{color:var(--fire)}
+.pathbtn[data-p="E"][aria-pressed="true"]{color:var(--ems)}
+.pathbtn[data-p="P"][aria-pressed="true"]{color:var(--police)}
+nav.tabs{display:flex;gap:2px;overflow-x:auto}
+nav.tabs button{appearance:none;background:none;border:0;border-bottom:2px solid transparent;cursor:pointer;
+  font-family:var(--disp);font-size:13.5px;font-weight:600;color:var(--ink-2);padding:9px 13px;white-space:nowrap}
+nav.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+.card{background:var(--surface);border:1px solid var(--hair-soft);border-radius:10px;box-shadow:var(--shadow);padding:16px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px;margin-block:16px}
+.hint{font-size:12.5px;color:var(--ink-2);margin:6px 0 0}
+.big{font-family:var(--disp);font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
+.big small{font-size:13px;font-weight:500;color:var(--ink-2);display:block;margin-top:3px}
+
+.owned{display:flex;flex-wrap:wrap;gap:10px}
+.owned label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-2)}
+.owned input{width:78px}
+input,select{font-family:var(--sans);font-size:13px;color:var(--ink);background:var(--surface);
+  border:1px solid var(--hair);border-radius:6px;padding:6px 9px}
+input.num{font-family:var(--mono);text-align:right}
+.seg{display:inline-flex;border:1px solid var(--hair);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{appearance:none;background:none;border:0;padding:6px 11px;font-size:12.5px;cursor:pointer;
+  color:var(--ink-2);font-family:var(--sans);white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--ink);font-weight:600}
+.btn{appearance:none;cursor:pointer;font-family:var(--disp);font-weight:600;font-size:13px;
+  border:1px solid var(--hair);background:var(--surface);color:var(--ink);border-radius:6px;padding:7px 12px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--hair-soft);
+  border-radius:999px;padding:3px 6px 3px 10px;font-size:12.5px}
+.chip button{appearance:none;border:0;background:none;cursor:pointer;color:var(--ink-2);font-size:15px;line-height:1;padding:0 3px}
+.chip input{width:50px;padding:2px 5px;font-size:12px}
+
+.pill{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 6px;border-radius:4px;background:var(--idle-bg);color:var(--idle);font-weight:500;white-space:nowrap}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}.pill.chk{background:var(--chk-bg);color:var(--chk)}
+.pill.weak{background:var(--weak-bg);color:var(--weak)}.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.acc{background:var(--accent-soft);color:var(--accent)}
+
+.steps{display:grid;gap:10px;margin-top:12px}
+.step{display:grid;grid-template-columns:34px 1fr auto;gap:12px;align-items:start;
+  background:var(--surface);border:1px solid var(--hair-soft);border-left:3px solid var(--accent);
+  border-radius:0 8px 8px 0;padding:12px 14px}
+.step .n{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent);
+  background:var(--accent-soft);border-radius:5px;width:26px;height:26px;display:grid;place-items:center}
+.step .t{font-family:var(--disp);font-weight:600;font-size:14.5px}
+.step .d{font-size:12.5px;color:var(--ink-2);margin-top:3px}
+.step .c{text-align:right;white-space:nowrap}
+.step .c .cr{font-family:var(--disp);font-weight:700;font-size:16px}
+.step .c .co{font-family:var(--mono);font-size:12px;color:var(--ink-2)}
+
+.scroller{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:720px}
+thead th{background:var(--surface-2);font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--ink-2);text-align:left;padding:9px 10px;border-bottom:1px solid var(--hair);
+  font-weight:500;white-space:nowrap}
+tbody td{padding:8px 10px;border-bottom:1px solid var(--hair-soft);vertical-align:top;font-size:13px}
+tbody tr:last-child td{border-bottom:0}
+tbody tr{border-left:3px solid transparent}
+tbody tr.trap{border-left-color:var(--chk)}
+tbody tr.detour{border-left-color:var(--weak)}
+tbody tr:hover td{background:var(--surface-2)}
+td.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.warn{font-size:12px;color:var(--weak);margin-top:4px}
+.note{border-left:3px solid var(--accent);background:var(--surface);border-radius:0 8px 8px 0;
+  padding:12px 14px;margin:14px 0;box-shadow:var(--shadow)}
+.note.alert{border-left-color:var(--bad)}
+.note h3{font-size:14px;margin-bottom:4px}
+.note p{margin:4px 0;font-size:13px;color:var(--ink-2)}
+.note p b{color:var(--ink)}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-block:14px 10px}
+.toolbar input[type=search]{flex:1 1 200px;min-width:0}
+.foot{color:var(--ink-2);font-size:12px;margin-top:26px;border-top:1px solid var(--hair);padding-top:14px}
+@media (max-width:620px){h1{font-size:19px}.big{font-size:25px}.step{grid-template-columns:28px 1fr}.step .c{grid-column:2;text-align:left;margin-top:6px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="titlerow">
+      <h1 id="h-title">Pathfinder<span id="h-tag">MissionChief build planner</span></h1>
+      <div class="seg" id="lang">
+        <button aria-pressed="true" data-v="en">EN</button>
+        <button aria-pressed="false" data-v="de">DE</button>
+      </div>
+    </div>
+    <div class="pathbar" id="pathbar">
+      <button class="pathbtn" data-p="F" aria-pressed="true">Fire</button>
+      <button class="pathbtn" data-p="P" aria-pressed="false">Police</button>
+      <button class="pathbtn" data-p="E" aria-pressed="false">Ambulance</button>
+    </div>
+    <nav class="tabs" role="tablist" id="tabs">
+      <button role="tab" data-t="plan" aria-selected="true">Plan</button>
+      <button role="tab" data-t="ladder" aria-selected="false">Ladder</button>
+      <button role="tab" data-t="missions" aria-selected="false">Missions</button>
+      <button role="tab" data-t="prices" aria-selected="false">Prices</button>
+    </nav>
+  </header>
+
+  <div id="boot" class="note alert" hidden><p id="boot-msg"></p></div>
+
+  <section id="p-plan">
+    <div class="grid2">
+      <div class="card">
+        <span class="eyebrow" id="l-yours">What you own</span>
+        <div class="owned" style="margin-top:10px">
+          <label><span id="l-fire">Fire stations</span><input class="num" type="number" min="0" id="own-fire" value="0"></label>
+          <label><span id="l-ems">Ambulance stations</span><input class="num" type="number" min="0" id="own-ems" value="0"></label>
+          <label><span id="l-police">Police stations</span><input class="num" type="number" min="0" id="own-police" value="0"></label>
+        </div>
+        <div style="margin-top:14px">
+          <span class="eyebrow" id="l-ext">Extensions you own</span>
+          <input type="search" id="ext-add" style="width:100%;margin-top:6px" placeholder="Search an extension to add…" list="ext-list">
+          <datalist id="ext-list"></datalist>
+          <div class="chips" id="ext-chips"></div>
+        </div>
+        <div style="margin-top:14px">
+          <span class="eyebrow" id="l-size">Price growth with</span><br>
+          <div class="seg" id="sizeseg" style="margin-top:6px">
+            <button aria-pressed="true" data-v="small">Small stations</button>
+            <button aria-pressed="false" data-v="full">Full stations</button>
+          </div>
+          <p class="hint" id="l-sizenote"></p>
+        </div>
+      </div>
+      <div class="card">
+        <span class="eyebrow" id="l-ceiling">Your ceiling now</span>
+        <div class="big" id="ceil-v">—</div>
+        <p class="hint" id="l-ceilhint"></p>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--hair-soft)">
+          <span class="eyebrow" id="l-buy">Buy this next</span>
+          <div class="big" id="buy-v">—</div>
+          <p class="hint" id="buy-d"></p>
+        </div>
+      </div>
+    </div>
+    <div class="note" id="contract"><p id="contract-t"></p></div>
+    <div class="note alert" id="emsgap" hidden><p id="emsgap-t"></p></div>
+    <h2 id="l-spine" style="font-size:17px;margin-top:22px">Your milestones</h2>
+    <p class="hint" id="l-spinehint"></p>
+    <div class="steps" id="spine"></div>
+    <div class="note"><h3 id="l-levers"></h3><p id="lever1"></p><p id="lever2"></p></div>
+    <div class="note"><h3 id="l-notmod"></h3><p id="notmod-b"></p></div>
+  </section>
+
+  <section id="p-ladder" hidden>
+    <h2 id="l-ladder" style="font-size:17px;margin-top:18px">Every rung</h2>
+    <p class="hint" id="l-ladderhint"></p>
+    <div class="card" style="padding:0;margin-top:12px"><div class="scroller"><table>
+      <thead><tr>
+        <th id="th-cost">Cost</th><th id="th-cr">Credits</th><th id="th-gain">Gain per 100k</th>
+        <th id="th-own">On-path spend</th><th id="th-m">Mission</th><th id="th-n">What it needs</th>
+      </tr></thead><tbody id="ladder-body"></tbody>
+    </table></div></div>
+  </section>
+
+  <section id="p-missions" hidden>
+    <div class="toolbar">
+      <input type="search" id="m-search" placeholder="Search…">
+      <span class="hint" id="m-count"></span>
+    </div>
+    <div class="card" style="padding:0"><div class="scroller"><table>
+      <thead><tr>
+        <th id="th-m2">Mission</th><th id="th-cr2">Credits</th><th>F</th><th>A</th><th>P</th>
+        <th id="th-n2">What it needs</th><th id="th-poi">POI</th>
+      </tr></thead><tbody id="missions-body"></tbody>
+    </table></div></div>
+  </section>
+
+  <section id="p-prices" hidden>
+    <div class="toolbar">
+      <div class="seg" id="pr-filter">
+        <button aria-pressed="true" data-v="unver">Unverified only</button>
+        <button aria-pressed="false" data-v="all">All</button>
+      </div>
+      <input type="search" id="pr-search" placeholder="Search…">
+      <button class="btn primary" id="pr-export">Copy prices.json</button>
+      <button class="btn" id="pr-reset">Reset to file</button>
+      <span class="hint" id="pr-msg"></span>
+    </div>
+    <p class="hint" id="l-priceshint"></p>
+    <div class="card" style="padding:0;margin-top:10px"><div class="scroller"><table>
+      <thead><tr>
+        <th id="th-item">Item</th><th id="th-price">Price</th><th id="th-src">Source</th><th id="th-use">Used by</th>
+      </tr></thead><tbody id="prices-body"></tbody>
+    </table></div></div>
+  </section>
+
+  <p class="foot">MissionChief (missionchief.com) — not Leitstellenspiel.de. Prices and rules carry their provenance; anything not read off the player's own build menu is marked. See docs/VERIFICATION.md.</p>
+</div>
+<script type="module" src="../src/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+{
+  "_comment": "Confirmed MissionChief mechanics. 'source' is provenance, exactly as in prices.json. build_menu and player_report are the player's own screen and are treated as truth; everything else must be re-verified. See docs/VERIFICATION.md.",
+  "concurrent_mission_cap": {
+    "value": "count of the most-built building type, +1",
+    "source": "build_menu",
+    "note": "Usually fire stations. This is why the planner ranks the highest-paying mission rather than the number of missions unlocked."
+  },
+  "mission_spawn_model": {
+    "value": "a call picks a building and spawns inside that building's range",
+    "source": "player_report",
+    "note": "Requirements are local, not global. An extension on a building lets THAT building spawn special calls."
+  },
+  "specialisation": {
+    "value": "a specialised station generates only its specialised calls",
+    "source": "player_report",
+    "note": "The game's own path mechanism. Not in the dataset; see SPEC-1 and SPEC-2 in docs/VERIFICATION.md."
+  },
+  "requirements_count": {
+    "value": "buildings, not vehicles",
+    "source": "player_report",
+    "note": "Each building type spawns its own kind of call."
+  },
+  "listed_credits": {
+    "value": "the listed figure is what you receive",
+    "source": "player_report",
+    "note": "A range means the mission spawns at various intensities, which is why one mission name appears several times in the dataset."
+  },
+  "completion_gate": {
+    "value": "every required vehicle present, with correctly trained personnel",
+    "source": "player_report",
+    "note": "No partial credit. Unlocking a mission is not the same as being able to earn from it."
+  },
+  "alliance_payout": {
+    "value": "every participant receives the full amount",
+    "source": "player_report",
+    "note": "A 2,000-credit alliance mission pays 2,000 to each player, even one who sent a single vehicle."
+  },
+  "hospitals": {
+    "value": "gate no mission; patient transport is free",
+    "source": "player_report",
+    "note": "Hospitals are not unlock items and are therefore not in the ladder. What a transport PAYS is still unknown - see EMS-1."
+  },
+  "poi": {
+    "value": "free and effectively unlimited, but must sit inside your own coverage area",
+    "source": "player_report",
+    "note": "629 of 1,261 missions are gated behind a POI. The planner shows the POI but does not price it."
+  },
+  "spawn_rate": {
+    "value": "continuous up to the cap; timing looks random",
+    "source": "player_report",
+    "note": "Understaffed stations cause low-credit phases. Player's rule: fill a small station to its maximum vehicles before building the next one."
+  },
+  "dispatch_centers": {
+    "value": "1 + 1 per 15 buildings, dispatch centers not counted",
+    "source": "build_menu",
+    "note": "Free to build. The official help centre still says 1 per 25; that figure is wrong."
+  },
+  "small_stations": {
+    "value": "count identically toward requirements, hold 6 vehicles and one extension, cost half",
+    "source": "player_report",
+    "note": "Upgrading to a full station costs the difference and takes 24 hours. Exact figures unconfirmed."
+  }
+}
