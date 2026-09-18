@@ -95,3 +95,22 @@ measured it).
 Build menu or the dataset, or it stays flagged. Two independent sources, or your
 own screen. Nothing from a `leitstellenspiel.*` domain is evidence about
 MissionChief. See `CORRECTIONS.md` for what happens when that rule is relaxed.
+
+## Source note: the Xyrality help centre
+
+Xyrality's own help centre (`xyrality.helpshift.com/hc/en/23-mission-chief/`) is
+the developer's site and looks authoritative. It is not reliable on its own.
+
+Its dispatch-centre article still states **1 dispatch centre per 25 buildings**.
+That is the exact figure `CORRECTIONS.md` records as wrong: the build menu says
+**1 + 1 per 15 buildings**, and the wrong figure had already caused the
+coverage-area strategy to be dismissed as unreachable.
+
+So the help centre gets its own provenance level, `official_help`, ranked with
+`wiki_table` as **weak** — above a fan wiki, below the player's own screen. Use
+it for mechanics that have no number attached (what a building does, what
+unlocks what) and never for a figure that the build menu can settle.
+
+Note for future sessions: `xyrality.helpshift.com`, `board.missionchief.com` and
+`missionchief.fandom.com` are all blocked by the network egress policy in the
+Claude Code web environment. Help-centre content has to be pasted in by hand.
