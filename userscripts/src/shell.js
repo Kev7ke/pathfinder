@@ -402,22 +402,46 @@ function openWindow(moduleId) {
  * open a lightbox to reach is a tool you stop using. Those get a context
  * without a mount.
  *
- * It runs once the document is ready, and a throw is logged rather than left to
- * break the game's page.
+ * `fn` returns truthy once it has done its job. Until then it is tried again
+ * whenever the page grows, because **waiting for DOMContentLoaded was the
+ * mistake**: a mission window pulls in the game's application bundle and
+ * whatever else the player has installed, and the log showed the panel landing
+ * as much as sixteen seconds after the markup it needed already existed. The
+ * markup is what matters, not the last script.
+ *
+ * A throw is logged rather than left to break the game's page.
  */
 YMCA.inject = function inject(moduleId, fn) {
-    const run = () => {
+    const ctx = context(moduleId);
+    let done = false;
+    const attempt = () => {
+        if (done) return true;
         try {
-            fn(context(moduleId));
+            done = !!fn(ctx);
         } catch (err) {
+            done = true;                       // a module that throws is not retried into a loop
             logger.error(moduleId, 'injection failed', err.message);
         }
+        return done;
     };
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', run, { once: true });
-    } else {
-        run();
-    }
+    if (attempt()) return;
+
+    /* Retry as the page fills in. Coalesced into a frame so a page building
+     * itself does not run this once per node. */
+    let queued = false;
+    const observer = new MutationObserver(() => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => {
+            queued = false;
+            if (attempt()) observer.disconnect();
+        });
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+
+    /* A page that never grows what was wanted stops being watched rather than
+     * observing for the rest of the session. */
+    setTimeout(() => observer.disconnect(), 30000);
 };
 
 /** What a module is handed. Nothing here touches the shell's own chrome. */

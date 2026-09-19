@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.10
+// @version      0.0.11
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.10',
+    version: '0.0.11',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1084,22 +1084,46 @@ function openWindow(moduleId) {
  * open a lightbox to reach is a tool you stop using. Those get a context
  * without a mount.
  *
- * It runs once the document is ready, and a throw is logged rather than left to
- * break the game's page.
+ * `fn` returns truthy once it has done its job. Until then it is tried again
+ * whenever the page grows, because **waiting for DOMContentLoaded was the
+ * mistake**: a mission window pulls in the game's application bundle and
+ * whatever else the player has installed, and the log showed the panel landing
+ * as much as sixteen seconds after the markup it needed already existed. The
+ * markup is what matters, not the last script.
+ *
+ * A throw is logged rather than left to break the game's page.
  */
 YMCA.inject = function inject(moduleId, fn) {
-    const run = () => {
+    const ctx = context(moduleId);
+    let done = false;
+    const attempt = () => {
+        if (done) return true;
         try {
-            fn(context(moduleId));
+            done = !!fn(ctx);
         } catch (err) {
+            done = true;                       // a module that throws is not retried into a loop
             logger.error(moduleId, 'injection failed', err.message);
         }
+        return done;
     };
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', run, { once: true });
-    } else {
-        run();
-    }
+    if (attempt()) return;
+
+    /* Retry as the page fills in. Coalesced into a frame so a page building
+     * itself does not run this once per node. */
+    let queued = false;
+    const observer = new MutationObserver(() => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => {
+            queued = false;
+            if (attempt()) observer.disconnect();
+        });
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+
+    /* A page that never grows what was wanted stops being watched rather than
+     * observing for the rest of the session. */
+    setTimeout(() => observer.disconnect(), 30000);
 };
 
 /** What a module is handed. Nothing here touches the shell's own chrome. */
@@ -1889,7 +1913,57 @@ const MM_REQUIREMENTS = {
     mobile_air_vehicles: { flag: 'gwa', label: 'Mobile air', source: 'the "F-MA" AAO selects on gwa=1' },
     platform_trucks: { flag: 'dlk', label: 'Platform trucks', source: 'the "F-PlT" AAO selects on dlk=1' },
     water_tankers: { flag: 'gwl2wasser_only', label: 'Water tankers', source: 'the "F-WaTa" AAO' },
+
+    /* The "one of these will do" family. The key spells out the alternatives, so
+     * these are read rather than guessed: any vehicle carrying any one of the
+     * flags satisfies it, which is also why they are the easiest requirement to
+     * fill and end up last in the scarcity order. Only the ones whose every
+     * alternative already has a flag above are listed; the rest stay unmatched
+     * and say so. */
+    oneof_fire_engine_or_rescue: {
+        anyOf: ['fire', 'rw'], label: 'An engine or a rescue',
+        source: 'the key names its own alternatives',
+    },
+    oneof_fire_engine_or_ladder: {
+        anyOf: ['fire', 'dlk'], label: 'An engine or a ladder',
+        source: 'the key names its own alternatives',
+    },
+    oneof_fire_engine_or_rescue_or_ladder: {
+        anyOf: ['fire', 'rw', 'dlk'], label: 'An engine, rescue or ladder',
+        source: 'the key names its own alternatives',
+    },
+    oneof_fire_rescue_or_ladder: {
+        anyOf: ['rw', 'dlk'], label: 'A rescue or a ladder',
+        source: 'the key names its own alternatives',
+    },
+
+    /* Not a key in `requirements` at all — patients live under `additional`, and
+     * that is why a mission with three of them asked for no ambulance. See
+     * mmPatients(). */
+    patients: { flag: 'any_rtw', label: 'Patients needing an ambulance', source: 'additional.possible_patient' },
 };
+
+/**
+ * How many ambulances the patients want.
+ *
+ * `requirements` says nothing about patients; the catalogue carries them under
+ * `additional.possible_patient` as the most this mission can produce, with
+ * `possible_patient_min` as the fewest. The window itself knows the real number
+ * for this instance and states it in `#patient_missing_requirements` — "1x We
+ * need: Ambulance" — so the leading count there is preferred, and the
+ * catalogue's figure is the fallback for a window that has not said yet.
+ *
+ * One ambulance per patient. `chances.patient_transport` is the chance of a
+ * *transport to hospital* afterwards, which is a different question and not
+ * this one.
+ */
+function mmPatients(record) {
+    const stated = document.querySelector('#patient_missing_requirements strong');
+    const fromPage = stated ? parseInt(stated.textContent, 10) : NaN;
+    if (Number.isFinite(fromPage) && fromPage > 0) return { count: fromPage, from: 'page' };
+    const possible = Number(record?.additional?.possible_patient) || 0;
+    return possible ? { count: possible, from: 'catalogue' } : null;
+}
 
 /** Requirements that are an amount to reach, not a count of vehicles. */
 const MM_AMOUNTS = {
@@ -1897,8 +1971,22 @@ const MM_AMOUNTS = {
     foam_needed: { attr: 'foam_amount_display', label: 'Foam', unit: 'gal.' },
 };
 
-/** Every flag a requirement can ask for, so only those are worth remembering. */
-const MM_FLAGS = Object.values(MM_REQUIREMENTS).map((r) => r.flag);
+/** Every flag any requirement can ask for, so only those are worth remembering. */
+const MM_FLAGS = [...new Set(Object.values(MM_REQUIREMENTS)
+    .flatMap((r) => r.anyOf || [r.flag]))];
+
+/** Does this vehicle answer the requirement — one flag, or any of several? */
+function mmMeets(v, rule) {
+    return rule.anyOf ? rule.anyOf.some((f) => v.has(f)) : v.has(rule.flag);
+}
+
+/** The same question for a type already at the mission, whose flags were learnt. */
+function mmSceneCount(scene, rule) {
+    if (!rule.anyOf) return scene.counts[rule.flag] || 0;
+    /* A vehicle carrying two of the alternatives must not be counted twice, so
+     * the per-vehicle flag sets are kept and asked, not the per-flag totals. */
+    return scene.vehicles.filter((flags) => rule.anyOf.some((f) => flags.includes(f))).length;
+}
 
 /** How long the game's own mission catalogue is worth keeping. It changes when
  * the game is updated, not while anyone is playing. */
@@ -1950,6 +2038,7 @@ function mmOnScene(known) {
         '#mission_vehicle_at_mission tbody tr[id^="vehicle_row"], '
         + '#mission_vehicle_driving tbody tr[id^="vehicle_row"]');
     const counts = {};
+    const vehicles = [];
     let unknown = 0;
     let total = 0;
     for (const row of rows) {
@@ -1958,9 +2047,10 @@ function mmOnScene(known) {
         total += 1;
         const flags = known[typeId];
         if (!flags) { unknown += 1; continue; }
+        vehicles.push(flags);
         for (const flag of flags) counts[flag] = (counts[flag] || 0) + 1;
     }
-    return { counts, unknown, total };
+    return { counts, vehicles, unknown, total };
 }
 
 /** Only what the panel reads, so the stored catalogue is a fraction of the original. */
@@ -1972,6 +2062,10 @@ function mmShrinkCatalogue(data) {
             name: m.name,
             requirements: m.requirements || {},
             average_credits: m.average_credits || null,
+            // Patients are here, not in requirements — the one field that mattered.
+            additional: m.additional?.possible_patient
+                ? { possible_patient: m.additional.possible_patient }
+                : undefined,
         };
     }
     return byId;
@@ -2086,12 +2180,13 @@ function mmOrder(a, b) {
 async function mmPlan(page, ctx, cfg) {
     let requirements = null;
     let name = null;
+    let record = null;
     try {
         /* Kept across page loads. Every mission window is its own load, so the
          * whole catalogue was being refetched each time one opened — which is
          * what made the panel take a moment to appear. */
         const byId = await ctx.gameCached('/einsaetze.json', MM_CATALOGUE_MS, mmShrinkCatalogue);
-        const record = byId[String(page.missionType)];
+        record = byId[String(page.missionType)] || null;
         if (record) {
             requirements = record.requirements || {};
             name = record.name;
@@ -2104,6 +2199,7 @@ async function mmPlan(page, ctx, cfg) {
     if (cfg.fastestFirst !== false) vehicles.sort(mmOrder);
     const untimed = vehicles.filter((v) => v.seconds === null).length;
     const scene = mmOnScene(mmLearnTypes(vehicles));
+    const patients = mmPatients(record);
 
     const picked = new Map();   // id -> vehicle, so one vehicle can serve two requirements
     const lines = [];
@@ -2117,20 +2213,24 @@ async function mmPlan(page, ctx, cfg) {
          * requirements are taken in order of how few vehicles can meet them.
          * No setting and no special case for either: it falls out of filling
          * the hardest requirement first. */
-        const counted = Object.entries(requirements)
-            .filter(([key]) => !MM_AMOUNTS[key])
+        const wants = Object.entries(requirements).filter(([key]) => !MM_AMOUNTS[key]);
+        /* Patients are not a requirement key, so they are added as one. */
+        if (patients) wants.push(['patients', patients.count]);
+
+        const counted = wants
             .map(([key, wanted]) => {
                 const rule = MM_REQUIREMENTS[key];
-                return { key, wanted, rule, able: rule ? vehicles.filter((v) => v.has(rule.flag)) : [] };
+                return { key, wanted, rule, able: rule ? vehicles.filter((v) => mmMeets(v, rule)) : [] };
             })
             .sort((a, b) => a.able.length - b.able.length);
 
         for (const { key, wanted, rule, able } of counted) {
             if (!rule) {
                 lines.push({ key, label: mmPretty(key), wanted, found: null, unmatched: true });
+                mmRememberUnmatched(key, page.missionType);
                 continue;
             }
-            const already = scene.counts[rule.flag] || 0;
+            const already = mmSceneCount(scene, rule);
             const stillWanted = Math.max(0, wanted - already);
             // Anything picked for another requirement counts here too, and costs nothing more.
             let have = able.filter((v) => picked.has(v.id)).length;
@@ -2171,10 +2271,28 @@ async function mmPlan(page, ctx, cfg) {
         available: vehicles.length,
         untimed,
         scene,
+        patients,
         missionType: page.missionType,
     };
 }
 
+
+/**
+ * Keep a note of a requirement nothing could be matched to.
+ *
+ * It rides out in the one report rather than waiting for somebody to notice the
+ * warning in the panel and mention it. Key and mission type only — both are the
+ * game's own names for things.
+ */
+function mmRememberUnmatched(key, missionType) {
+    const store = 'ymca-missionmagician-unmatched';
+    try {
+        const seen = JSON.parse(localStorage.getItem(store)) || [];
+        if (seen.some((e) => e.key === key)) return;
+        seen.push({ key, firstSeenOnMissionType: Number(missionType) || missionType });
+        localStorage.setItem(store, JSON.stringify(seen.slice(-40)));
+    } catch (e) { /* private window: the panel still says it */ }
+}
 
 /** firetrucks -> Firetrucks, for a requirement with no entry in the map. */
 function mmPretty(key) {
@@ -2521,9 +2639,13 @@ const MM_PANEL_ID = 'ymca-mm-panel';
  * the first look was the whole picture. */
 const MM_REDRAW_MS = 400;
 
+/* Returns true once the panel is in. Until then the shell tries again as the
+ * mission window builds itself, so the panel appears with the markup rather
+ * than after the last script on the page has finished loading. */
 YMCA.inject('missionmagician', (ctx) => {
-    if (!mmReadMissionPage().onMissionPage) return;
+    if (!mmReadMissionPage().onMissionPage) return false;
     mmMountPanel(ctx);
+    return true;
 });
 
 function mmMountPanel(ctx) {
@@ -2546,6 +2668,7 @@ function mmMountPanel(ctx) {
     else document.getElementById('iframe-inside-container')?.prepend(panel);
 
     let timer = null;
+    let lastPlan = null;
     const draw = async () => {
         const page = mmReadMissionPage();
         if (!page.onMissionPage) return;
@@ -2553,6 +2676,8 @@ function mmMountPanel(ctx) {
         const plan = await mmPlan(page, ctx, cfg);
         panel.dataset.pick = plan.pick.map((v) => v.id).join(',');
         panel.dataset.type = String(plan.missionType || '');
+        plan.surplus = mmSurplus(plan);
+        lastPlan = plan;
         panel.innerHTML = mmGamePanelHtml(plan, cfg, ctx);
     };
     const redraw = () => {
@@ -2573,6 +2698,20 @@ function mmMountPanel(ctx) {
             if (done) done.hidden = true;
         } else if (e.target.closest('[data-do="type"]')) {
             mmCopyType(ctx, panel.dataset.type);
+        } else if (e.target.closest('[data-do="cancel"]')) {
+            /* This one writes to the account, so it says exactly what it will do
+             * and waits to be told yes. It is undoable in the only way that
+             * matters here — the vehicles can be sent again — and it clicks the
+             * game's own send-back button rather than posting anything. */
+            const drop = mmSurplus(lastPlan);
+            if (!drop.length) { ctx.status('Nothing is spare.'); return; }
+            const ok = confirm(`Send ${drop.length} vehicle${drop.length > 1 ? 's' : ''} back?\n\n`
+                + 'Every requirement was checked again after each one, so what is left still '
+                + 'covers the mission. They can be alarmed again afterwards.');
+            if (!ok) return;
+            for (const v of drop) v.back.click();
+            ctx.log.info('sent back', `${drop.length} surplus vehicles`);
+            ctx.status(`Sent ${drop.length} back.`);
         }
     });
 
@@ -2584,13 +2723,23 @@ function mmMountPanel(ctx) {
         draw();
     });
 
-    const body = document.getElementById('vehicle_show_table_body_all');
-    if (body) {
-        // childList for rows arriving, attributes for the travel times landing.
-        new MutationObserver(redraw).observe(body, {
-            childList: true, subtree: true, attributes: true, attributeFilter: ['timevalue'],
-        });
-    }
+    /* Watch the whole mission, not only the selection table. Rows arriving and
+     * travel times landing are one half; a vehicle reaching the mission is the
+     * other, and that turns up in a different table entirely — which is how a
+     * panel that only watched the selection list ended up showing a plan made
+     * before anything had been sent.
+     *
+     * Its own writes are skipped, or rendering would trigger another render. */
+    const watched = document.getElementById('iframe-inside-container') || document.body;
+    new MutationObserver((records) => {
+        for (const rec of records) {
+            if (rec.target instanceof Node && panel.contains(rec.target)) continue;
+            redraw();
+            return;
+        }
+    }).observe(watched, {
+        childList: true, subtree: true, attributes: true, attributeFilter: ['timevalue'],
+    });
     draw();
     ctx.log.info('panel placed in the mission window');
 }
@@ -2614,6 +2763,60 @@ function mmSelectIds(ids) {
  * No colour is chosen here. `label-success` and `label-danger` are the game's,
  * so a met requirement and a short one read the same as everywhere else in it.
  */
+/**
+ * Which vehicles at the mission are surplus.
+ *
+ * Not "more than the requirement asks for" — that is the trap. A Quint at the
+ * mission may be the only thing covering the ladder *and* one of the engines,
+ * so removing it looks safe against the engine count and is not. The only
+ * honest test is to take one away and check every requirement again, which is
+ * what this does: try each candidate, keep the removal only if everything is
+ * still met afterwards, and carry that forward so two removals are checked
+ * together rather than each against the full set.
+ *
+ * Slowest first, so what is given back is what would have arrived last.
+ */
+function mmSurplus(plan) {
+    const known = mmKnownTypes();
+    const here = [];
+    const rows = document.querySelectorAll(
+        '#mission_vehicle_at_mission tbody tr[id^="vehicle_row"], '
+        + '#mission_vehicle_driving tbody tr[id^="vehicle_row"]');
+    for (const row of rows) {
+        const back = row.querySelector('.btn-backalarm-ajax');
+        const typeId = row.querySelector('[vehicle_type_id]')?.getAttribute('vehicle_type_id');
+        // Without a way to send it back, or without knowing what it covers, leave it alone.
+        if (!back || !typeId || !known[typeId]) continue;
+        here.push({ back, typeId, flags: known[typeId] });
+    }
+    if (!here.length) return [];
+
+    /* Only requirements that can be judged. An unmatched one is unknown, and
+     * nothing is sent back on the strength of a requirement nobody can check. */
+    const checks = plan.lines
+        .filter((l) => !l.unmatched && !l.unit && MM_REQUIREMENTS[l.key])
+        .map((l) => ({ wanted: l.wanted, rule: MM_REQUIREMENTS[l.key] }));
+    if (!checks.length) return [];
+
+    const covers = (flags, rule) => (rule.anyOf
+        ? rule.anyOf.some((f) => flags.includes(f))
+        : flags.includes(rule.flag));
+    const met = (kept) => checks.every(({ wanted, rule }) =>
+        kept.filter((v) => covers(v.flags, rule)).length >= wanted);
+
+    if (!met(here)) return [];   // already short — nothing is spare
+
+    let kept = here.slice();
+    const drop = [];
+    for (let i = here.length - 1; i >= 0; i -= 1) {
+        const without = kept.filter((v) => v !== here[i]);
+        if (!met(without)) continue;
+        kept = without;
+        drop.push(here[i]);
+    }
+    return drop;
+}
+
 /**
  * Hand back one mission type, complete.
  *
@@ -2671,6 +2874,12 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         <tbody>${rows}</tbody>
       </table>
 
+      ${plan.patients ? `<p class="text-muted" style="margin:0 0 8px">
+        ${plan.patients.count} patient${plan.patients.count > 1 ? 's' : ''}, ${
+        plan.patients.from === 'page' ? 'as this window states' : 'from the mission catalogue'} —
+        one ambulance each. The game keeps patients out of the requirement list entirely, which is
+        why they used to be missed.</p>` : ''}
+
       ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.scene.total} already at the mission or on the way, subtracted above${
         plan.scene.unknown ? ` — except ${plan.scene.unknown} whose type has not been seen in a
@@ -2689,6 +2898,8 @@ function mmGamePanelHtml(plan, cfg, ctx) {
       <button type="button" class="btn btn-success btn-sm" data-do="select">
         Tick ${plan.pick.length} vehicles</button>
       <button type="button" class="btn btn-default btn-sm" data-do="clear">Reset selection</button>
+      ${plan.surplus.length ? `<button type="button" class="btn btn-warning btn-sm"
+        data-do="cancel">Cancel ${plan.surplus.length} unused</button>` : ''}
       <label style="font-weight:normal;margin:0 0 0 10px">
         <input type="checkbox" data-cfg="fastestFirst" ${cfg.fastestFirst !== false ? 'checked' : ''}>
         Fastest first, by travel time</label>
@@ -3216,12 +3427,13 @@ YMCA.register({
         el.innerHTML = `
       <div class="ymca-card">
         <b>Report a problem</b>
-        <p class="ymca-sub" style="margin:4px 0 10px">Start here when something is wrong. The
-          report carries what YMCA did, what failed, your browser and the game it ran on
-          &mdash; and nothing about your account beyond its station and vehicle counts.</p>
-        <button class="ymca-btn primary" data-do="report">Copy problem report</button>
+        <p class="ymca-sub" style="margin:4px 0 10px">One button, everything that answers a
+          question about YMCA: what it did and what failed, which endpoints answered, the game's
+          own styling, what TrackOps has measured, and every requirement MissionMagician could not
+          match. It carries nothing about your account beyond its station and vehicle counts
+          &mdash; no names, no coordinates.</p>
+        <button class="ymca-btn primary" data-do="report">Copy the report</button>
         <button class="ymca-btn" data-do="feedback">Send feedback</button>
-        <button class="ymca-btn" data-do="ui">Copy interface probe</button>
         <button class="ymca-btn" data-do="clearlog">Clear the log</button>
       </div>
 
@@ -3232,10 +3444,6 @@ YMCA.register({
           building coordinates, so share it only where you are happy to.</p>
         <button class="ymca-btn primary" data-do="export-all">Download everything</button>
         <button class="ymca-btn" data-do="missions">Mission list only</button>
-        <button class="ymca-btn" data-do="buildings">Station types</button>
-        <button class="ymca-btn" data-do="vehicles">Vehicle types</button>
-        <button class="ymca-btn" data-do="dispatch">Dispatch centers</button>
-        <button class="ymca-btn" data-do="endpoints">Which endpoints answer</button>
       </div>
 
       <div class="ymca-card">
@@ -3295,86 +3503,6 @@ async function run(what, ctx, put) {
         return;
     }
 
-    if (what === 'ui') {
-        // Whoever styles YMCA cannot open the game, so this has to do the
-        // looking. Computed styles give the resting state; the stylesheet scan
-        // below is the only way to see hover and active, which nothing renders
-        // until a mouse is over it.
-        const pick = (sel, props) => {
-            const el = document.querySelector(sel);
-            if (!el) return 'not on this page';
-            const cs = getComputedStyle(el);
-            return Object.fromEntries(props.map((p) => [p, cs.getPropertyValue(p)]));
-        };
-        const box = ['background-color', 'color', 'border-color', 'border-radius',
-            'font-family', 'font-size'];
-
-        /** Rules the game itself declares for the selectors that matter. */
-        const INTERESTING =
-            /(^|[\s,])(\.btn|\.navbar|\.modal|\.panel|\.nav\b|\.alert|\.well|\.table|\.label|\.badge|\.dropdown-menu|body|a)/;
-        const rules = [];
-        let unreadableSheets = 0;
-        for (const sheet of document.styleSheets) {
-            let list;
-            try {
-                list = sheet.cssRules;
-            } catch (err) {
-                unreadableSheets++;    // cross-origin, and not readable by design
-                continue;
-            }
-            for (const rule of list || []) {
-                if (!rule.selectorText || !rule.cssText) continue;
-                if (!/:hover|:focus|:active|\.active|\.disabled/.test(rule.selectorText)) continue;
-                if (!INTERESTING.test(rule.selectorText)) continue;
-                rules.push(rule.cssText.slice(0, 220));
-                if (rules.length >= 60) break;
-            }
-            if (rules.length >= 60) break;
-        }
-
-        put({
-            note: 'the game\u2019s own chrome, so YMCA can be matched to it rather than guessed at',
-            navbarSelectorsPresent: [
-                '#navbar-main-collapse > ul', '#navbar-main-collapse ul.navbar-nav',
-                '.navbar-fixed-top .navbar-nav', '.navbar-nav', '#navbar-mobile-footer',
-            ].filter((sel) => !!document.querySelector(sel)),
-            navbarEntryPlaced: !!document.getElementById('ymca-nav'),
-            usingFloatingButton: !!document.getElementById('ymca-fab'),
-            bootstrapPresent: !!document.querySelector('.navbar, .panel, .btn-default'),
-            resting: {
-                body: pick('body', box),
-                navbar: pick('.navbar', box),
-                navbarLink: pick('.navbar-nav a', ['color', 'font-size', 'padding', 'font-weight']),
-                navbarActive: pick('.navbar-nav .active a', ['color', 'background-color']),
-                modal: pick('.modal-content', box),
-                modalHeader: pick('.modal-header', box),
-                modalBody: pick('.modal-body', box),
-                panel: pick('.panel', box),
-                panelHeading: pick('.panel-heading', box),
-                panelBody: pick('.panel-body', box),
-                well: pick('.well', box),
-                alert: pick('.alert', box),
-                buttonDefault: pick('.btn-default', box),
-                buttonPrimary: pick('.btn-primary', box),
-                buttonSuccess: pick('.btn-success', box),
-                buttonDanger: pick('.btn-danger', box),
-                input: pick('input[type=text], .form-control', box),
-                table: pick('table.table', ['background-color', 'font-size', 'color']),
-                tableHeader: pick('table.table th', ['background-color', 'color', 'border-color']),
-                link: pick('a', ['color', 'text-decoration-line']),
-                heading: pick('h1, h2, h3', ['color', 'font-size', 'font-weight', 'font-family']),
-            },
-            // Everything above is the resting state only. These are the rules
-            // that change it on hover, focus and active.
-            stateRules: rules,
-            unreadableSheets,
-            openLightboxes: [...document.querySelectorAll('.modal, .lightbox_content')]
-                .map((el) => el.className).slice(0, 5),
-            viewport: `${window.innerWidth}x${window.innerHeight}`,
-        }, 'the interface probe');
-        return;
-    }
-
     if (what === 'report') {
         const report = {
             ymca: YMCA.version,
@@ -3395,16 +3523,31 @@ async function run(what, ctx, put) {
             endpoints: {},
             log: YMCA.logger.read().slice(-60),
         };
-        // Counts only — never the buildings themselves, which carry coordinates.
-        for (const path of ['/api/buildings', '/api/vehicles']) {
+        /* Every endpoint, not the two it used to be. Which of them answer was a
+         * button of its own, and a question only asked when something is wrong
+         * is a question that should already be answered when it is. Counts and
+         * key names only — never the buildings themselves, which carry
+         * coordinates. */
+        for (const ep of ENDPOINTS) {
             try {
-                const data = await ctx.game(path);
-                report.endpoints[path] = `ok, ${data.length} entries`;
+                const data = await ctx.rawGame(ep.path);
+                report.endpoints[ep.path] = Array.isArray(data)
+                    ? `ok, ${data.length} entries`
+                    : `ok, object with keys: ${Object.keys(data).slice(0, 8).join(', ')}`;
             } catch (err) {
-                report.endpoints[path] = `failed: ${err.message}`;
+                report.endpoints[ep.path] = `failed: ${err.message}`;
             }
+            await ctx.sleep(60);
         }
-        put(report, 'the problem report');
+
+        /* What the other tools have worked out. Folding these in is the point of
+         * one button: the answer to "how is it going" used to be spread across
+         * three tools and a paste each. */
+        report.trackops = moduleStore('trackops');
+        report.missionmagician = moduleStore('missionmagician');
+        report.interface = interfaceProbe();
+
+        put(report, 'the report');
         return;
     }
 
@@ -3521,6 +3664,155 @@ async function run(what, ctx, put) {
             check: `${B.length} buildings, ${centres.length} of them centers`,
         }, 'the dispatch centers');
     }
+}
+
+
+/**
+ * The game’s own chrome, so YMCA can be matched to it rather than guessed at.
+ *
+ * This is part of the one report now rather than a button of its own. A reading
+ * somebody has to remember to ask for is a reading they will not have when they
+ * need it, and whoever styles YMCA cannot open the game to take it themselves.
+ */
+function interfaceProbe() {
+        // Whoever styles YMCA cannot open the game, so this has to do the
+        // looking. Computed styles give the resting state; the stylesheet scan
+        // below is the only way to see hover and active, which nothing renders
+        // until a mouse is over it.
+        const pick = (sel, props) => {
+            const el = document.querySelector(sel);
+            if (!el) return 'not on this page';
+            const cs = getComputedStyle(el);
+            return Object.fromEntries(props.map((p) => [p, cs.getPropertyValue(p)]));
+        };
+        const box = ['background-color', 'color', 'border-color', 'border-radius',
+            'font-family', 'font-size'];
+
+        /** Rules the game itself declares for the selectors that matter. */
+        const INTERESTING =
+            /(^|[\s,])(\.btn|\.navbar|\.modal|\.panel|\.nav\b|\.alert|\.well|\.table|\.label|\.badge|\.dropdown-menu|body|a)/;
+        const rules = [];
+        let unreadableSheets = 0;
+        for (const sheet of document.styleSheets) {
+            let list;
+            try {
+                list = sheet.cssRules;
+            } catch (err) {
+                unreadableSheets++;    // cross-origin, and not readable by design
+                continue;
+            }
+            for (const rule of list || []) {
+                if (!rule.selectorText || !rule.cssText) continue;
+                if (!/:hover|:focus|:active|\.active|\.disabled/.test(rule.selectorText)) continue;
+                if (!INTERESTING.test(rule.selectorText)) continue;
+                rules.push(rule.cssText.slice(0, 220));
+                if (rules.length >= 60) break;
+            }
+            if (rules.length >= 60) break;
+        }
+
+        return {
+            note: 'the game\u2019s own chrome, so YMCA can be matched to it rather than guessed at',
+            navbarSelectorsPresent: [
+                '#navbar-main-collapse > ul', '#navbar-main-collapse ul.navbar-nav',
+                '.navbar-fixed-top .navbar-nav', '.navbar-nav', '#navbar-mobile-footer',
+            ].filter((sel) => !!document.querySelector(sel)),
+            navbarEntryPlaced: !!document.getElementById('ymca-nav'),
+            usingFloatingButton: !!document.getElementById('ymca-fab'),
+            bootstrapPresent: !!document.querySelector('.navbar, .panel, .btn-default'),
+            resting: {
+                body: pick('body', box),
+                navbar: pick('.navbar', box),
+                navbarLink: pick('.navbar-nav a', ['color', 'font-size', 'padding', 'font-weight']),
+                navbarActive: pick('.navbar-nav .active a', ['color', 'background-color']),
+                modal: pick('.modal-content', box),
+                modalHeader: pick('.modal-header', box),
+                modalBody: pick('.modal-body', box),
+                panel: pick('.panel', box),
+                panelHeading: pick('.panel-heading', box),
+                panelBody: pick('.panel-body', box),
+                well: pick('.well', box),
+                alert: pick('.alert', box),
+                buttonDefault: pick('.btn-default', box),
+                buttonPrimary: pick('.btn-primary', box),
+                buttonSuccess: pick('.btn-success', box),
+                buttonDanger: pick('.btn-danger', box),
+                input: pick('input[type=text], .form-control', box),
+                table: pick('table.table', ['background-color', 'font-size', 'color']),
+                tableHeader: pick('table.table th', ['background-color', 'color', 'border-color']),
+                link: pick('a', ['color', 'text-decoration-line']),
+                heading: pick('h1, h2, h3', ['color', 'font-size', 'font-weight', 'font-family']),
+            },
+            // Everything above is the resting state only. These are the rules
+            // that change it on hover, focus and active.
+            stateRules: rules,
+            unreadableSheets,
+            openLightboxes: [...document.querySelectorAll('.modal, .lightbox_content')]
+                .map((el) => el.className).slice(0, 5),
+            viewport: `${window.innerWidth}x${window.innerHeight}`,
+    };
+        return;
+}
+
+/**
+ * What another module has worked out, summarised for the report.
+ *
+ * Diagnostics deliberately does not import from the other modules: it reads
+ * what they stored, which is the same thing they would have to hand over
+ * anyway, and it means a module can be removed without breaking the report.
+ *
+ * Counts and the game's own constants only. No mission instances, no balance,
+ * no names.
+ */
+function moduleStore(moduleId) {
+    const read = (key, fallback) => {
+        try {
+            return JSON.parse(localStorage.getItem(`ymca-${moduleId}-${key}`)) ?? fallback;
+        } catch (e) {
+            return fallback;
+        }
+    };
+
+    if (moduleId === 'trackops') {
+        const log = read('log', []) || [];
+        const byType = new Map();
+        for (const e of log) {
+            const row = byType.get(e.type) || { type: e.type, runs: 0, measured: 0, total: 0 };
+            row.runs += 1;
+            if (e.alone && e.delta > 0) { row.measured += 1; row.total += e.delta; }
+            byType.set(e.type, row);
+        }
+        return {
+            missionsEnded: log.length,
+            since: log.length ? new Date(log[0].at).toISOString().slice(0, 10) : null,
+            byMissionType: [...byType.values()]
+                .sort((a, b) => b.runs - a.runs)
+                .map((r) => ({
+                    type: r.type,
+                    runs: r.runs,
+                    measured: r.measured,
+                    averagePaid: r.measured ? Math.round(r.total / r.measured) : null,
+                })),
+        };
+    }
+
+    if (moduleId === 'missionmagician') {
+        /* The learnt fleet and, more usefully, every requirement it met and
+         * could not match a vehicle attribute to. That list is the next thing
+         * to fix, and it should arrive without anyone having to notice it. */
+        let types = {};
+        try {
+            types = JSON.parse(localStorage.getItem('ymca-missionmagician-types')) || {};
+        } catch (e) { /* nothing learnt yet */ }
+        return {
+            vehicleTypesLearnt: Object.keys(types).length,
+            capabilitiesByType: types,
+            unmatchedRequirements: read('unmatched', []),
+            settings: read('cfg', null),
+        };
+    }
+
+    return null;
 }
 
 

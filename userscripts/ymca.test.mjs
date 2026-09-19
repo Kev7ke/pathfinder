@@ -213,7 +213,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.10');
+assert.equal(report.ymca, '0.0.11');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -222,10 +222,16 @@ assert.ok(!JSON.stringify(report).includes('Central Dispatch'),
   'the problem report must not carry building names');
 console.log('report endpoints  :', JSON.stringify(report.endpoints));
 
-// ---- the interface probe, which is how the styling gets matched ----
-await pg.click('[data-do="ui"]');
-await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('navbar'));
-const probe = JSON.parse(await pg.inputValue('#ymca-diag-out'));
+// ---- one report carries what used to be four buttons ----
+console.log('report gathers    :',
+  ['interface', 'trackops', 'missionmagician'].filter((k) => k in report).join(', '));
+assert.ok(report.interface && report.trackops && report.missionmagician,
+  'the one report must fold in the probe and what the other tools have worked out');
+assert.ok(Object.keys(report.endpoints).length > 2,
+  'the report should say which of every endpoint answered, not just two');
+assert.equal(await pg.locator('[data-do="ui"]').count(), 0,
+  'the interface probe is part of the report now, not a button of its own');
+const probe = report.interface;
 console.log('probe found       :', JSON.stringify(probe.navbarSelectorsPresent));
 assert.ok(probe.navbarSelectorsPresent.includes('#navbar-main-collapse > ul'));
 assert.ok(probe.stateRules.some((r) => r.includes(':hover')),
@@ -559,6 +565,92 @@ console.log('tick rescue       :', tickRescue.trim());
 assert.ok(/Tick 2 vehicles/.test(tickRescue),
   'the Rescue Engine covers the heavy rescue and one of the two engines, so one pumper: 2');
 
+// ---- patients want ambulances, and the game keeps them out of `requirements` ----
+// The record is the one the player sent back: patients live under additional.possible_patient,
+// and the window states the real number for this instance in #patient_missing_requirements.
+await mission.evaluate(() => {
+  window.__catalogue = [{
+    id: '1002', name: 'Hand Pierced By Sharp Catfish Bone', average_credits: 1500,
+    requirements: { oneof_fire_engine_or_rescue_or_ladder: 1, firetrucks: 1 },
+    chances: { patient_transport: 20 },
+    additional: { possible_patient: 1, possible_patient_min: 1 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1002');
+  const missing = document.createElement('div');
+  missing.id = 'patient_missing_requirements';
+  missing.className = 'alert alert-danger';
+  missing.innerHTML = '<strong>2x</strong> We need: Ambulance';
+  document.getElementById('col_right').append(missing);
+  const tbody = document.getElementById('vehicle_show_table_body_all');
+  const row = (id, secs, attrs) => `
+    <tr class="vehicle_select_table_tr" vehicle_id="${id}" data-distance="1">
+      <td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_${id}"
+        value="${id}" name="vehicle_ids[]" ${attrs}></td>
+      <td id="vehicle_sort_${id}" timevalue="${secs}">x</td></tr>`;
+  tbody.innerHTML = [
+    row(51, 10, 'vehicle_type_id="33" fire="1"'),                 // pumper
+    row(52, 20, 'vehicle_type_id="5" rtw="1" any_rtw="1"'),       // ambulance
+    row(53, 30, 'vehicle_type_id="5" rtw="1" any_rtw="1"'),       // ambulance
+  ].join('');
+});
+await mission.waitForTimeout(900);
+const withPatients = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('patients          :', JSON.stringify(withPatients));
+const amb = withPatients.find((r) => /Patients/.test(r[0]));
+assert.ok(amb, 'patients must appear as a requirement even though `requirements` omits them');
+assert.equal(amb[1], '2', 'the window states two, and the window beats the catalogue maximum');
+// oneof: the pumper answers "an engine, rescue or ladder" AND "firetrucks" at once.
+assert.ok(withPatients.some((r) => /engine, rescue or ladder/i.test(r[0])),
+  'the oneof_ family must be matched, not left as an unmatched requirement');
+const tickPatients = await mission.textContent('#ymca-mm-panel [data-do="select"]');
+console.log('tick w/ patients  :', tickPatients.trim());
+assert.ok(/Tick 3 vehicles/.test(tickPatients),
+  'one pumper covers both fire requirements, plus two ambulances for the patients');
+
+// ---- Cancel unused: the overlap has to be re-checked, not assumed ----
+// A Quint on scene covers the ladder and an engine at once. Counting per requirement says the
+// engines are over-supplied and the Quint can go; checking again after taking it away says no.
+await mission.evaluate(() => {
+  window.__catalogue = [{
+    id: '211', name: 'Overlap test', average_credits: 100,
+    requirements: { platform_trucks: 1, firetrucks: 2 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('patient_missing_requirements').remove();
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '211');
+  const t = document.createElement('table');
+  t.id = 'mission_vehicle_at_mission';
+  t.innerHTML = `<tbody>
+    <tr id="vehicle_row_61"><td vehicle_type_id="13"></td>
+      <td><a class="btn-backalarm-ajax" vehicle_id="61" href="#">back</a></td></tr>
+    <tr id="vehicle_row_62"><td vehicle_type_id="33"></td>
+      <td><a class="btn-backalarm-ajax" vehicle_id="62" href="#">back</a></td></tr>
+    <tr id="vehicle_row_63"><td vehicle_type_id="33"></td>
+      <td><a class="btn-backalarm-ajax" vehicle_id="63" href="#">back</a></td></tr></tbody>`;
+  document.getElementById('col_right').append(t);
+  window.__backalarms = [];
+  for (const a of t.querySelectorAll('.btn-backalarm-ajax')) {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.__backalarms.push(a.getAttribute('vehicle_id'));
+    });
+  }
+  window.confirm = () => true;
+});
+await mission.waitForTimeout(900);
+console.log('panel now         :', (await mission.textContent('#ymca-mm-panel')).replace(/\s+/g, ' ').slice(0, 220));
+console.log('known types       :', await mission.evaluate(() => localStorage.getItem('ymca-missionmagician-types')));
+const cancelLabel = await mission.textContent('#ymca-mm-panel [data-do="cancel"]');
+console.log('cancel unused     :', cancelLabel.trim(), '(Quint + 2 pumpers, needs 1 ladder + 2 engines)');
+assert.ok(/Cancel 1 unused/.test(cancelLabel),
+  'the Quint covers the ladder and an engine, so exactly one pumper is spare — not two');
+await mission.click('#ymca-mm-panel [data-do="cancel"]');
+const sentBack = await mission.evaluate(() => window.__backalarms);
+console.log('sent back         :', JSON.stringify(sentBack));
+assert.deepEqual(sentBack, ['63'], 'the last-arriving pumper goes, and the Quint stays');
+
 // And it re-reads itself when another engine turns up in the table afterwards. Mission 210 wants
 // two engines and only one pumper was left over; a second pumper arriving should change nothing
 // about the count, but a third engine appearing must be picked up rather than ignored.
@@ -578,7 +670,8 @@ const after = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('panel redrew      :', JSON.stringify(after));
 assert.ok(after.length >= 1, 'the panel should re-read itself when the vehicle table changes');
-assert.ok(after.every((r) => r[1] === r[3]), 'every requirement is still covered after the redraw');
+assert.ok(after.every((r) => Number(r[3]) >= Number(r[1])),
+  'every requirement is still at least covered after the redraw');
 console.log('mission panel     :', missionErrs.length ? missionErrs : 'no page errors');
 assert.equal(missionErrs.length, 0);
 await mission.close();

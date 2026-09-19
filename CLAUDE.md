@@ -157,6 +157,17 @@ time inside the mission and a module that belongs there simply runs there. No
 reaching across from the parent, ever. Inside the frame there is no navbar, so
 it is the floating button that opens it.
 
+**Patients are not in `requirements`.** They are `additional.possible_patient`
+in the mission catalogue, and the window states the real number for the instance
+in `#patient_missing_requirements` ("1x We need: Ambulance"). One ambulance per
+patient; `chances.patient_transport` is the chance of a transport to hospital
+afterwards and answers a different question. A mission with three patients asks
+for no ambulance anywhere in `requirements`, which is why they were missed.
+
+**The `oneof_…` requirement keys name their own alternatives**
+(`oneof_fire_engine_or_rescue_or_ladder`), so they are read rather than guessed:
+any vehicle with any one of those flags satisfies them.
+
 **Inside a mission**, `#mission-form` posts to `/missions/<id>/alarm`,
 `#vehicle_show_table_body_all` holds the rows, a row is
 `.vehicle_select_table_tr`, and the checkbox `.vehicle_checkbox` carries
@@ -170,6 +181,14 @@ available.
 counter, water bar and AAO state from `$("body").on("change", ".vehicle_checkbox", …)`.
 Setting `checked` alone shows the player something different from what would
 be sent.
+
+**A vehicle can satisfy two requirements at once.** A Quint is flagged `fire`
+and `dlk`, a Rescue Engine `fire` and `rw`. Fill requirements in order of how
+few vehicles can meet them and this falls out on its own — fill the common one
+first and the shared vehicle is spent as an ordinary engine. No setting, no
+special case per vehicle. The same overlap is why "more than the requirement
+asks for" is not a safe test for sending one back: take the candidate away and
+check every requirement again.
 
 **Order vehicles by travel time, never by distance.** The row's `data-distance`
 is how far the dot is; the fourth cell's `timevalue`, in seconds, is when the
@@ -242,8 +261,13 @@ panel and is logged — it never takes the window down with it.
 A tool you have to open a lightbox to reach is a tool you stop using, and YMCA's
 window is built before a mission frame has finished loading, so it read an empty
 page until it was reopened. `YMCA.inject(moduleId, fn)` hands a module a `ctx`
-without a mount, once the document is ready, with a throw logged rather than
-left to break the game's page.
+without a mount, with a throw logged rather than left to break the game's page.
+
+**`fn` returns truthy once it has done its job**, and until then it is tried
+again as the page grows. Waiting for `DOMContentLoaded` was the mistake: a
+mission window pulls in the game's bundle and whatever else the player has
+installed, and the log showed the panel landing up to sixteen seconds after the
+markup it needed already existed. Watch for the markup, not the last script.
 
 ```js
 YMCA.inject('missionmagician', (ctx) => {
@@ -276,22 +300,24 @@ The player sees the game; whoever maintains this does not. Diagnostics exists to
 close that gap, and **every new module should add whatever button would let a
 question about it be answered with the game's own data.**
 
-- **Copy problem report** — version, page, browser, script manager, which grants
-  are present, how YMCA was reached, the module list, endpoint reachability and
-  the last 60 log entries. Deliberately carries **no** building names or
-  coordinates.
+**One report, not a button per question.** A reading somebody has to remember to
+ask for is a reading they will not have when they need it, so the buttons that
+each copied one thing are gone and what they copied rides in the report.
+
+- **Copy the report** — version, page, browser, script manager, grants, how YMCA
+  was reached, the module list, **which of every endpoint answered**, the last 60
+  log entries, **the interface probe**, **what TrackOps has measured**, and
+  **every requirement MissionMagician could not match**. Deliberately carries
+  **no** building names or coordinates.
 - **Send feedback** — a typed note packaged with the version, the page, which
   tool was open and the last 25 log entries. Nothing is transmitted; it lands on
   the clipboard for the player to paste wherever they like.
-- **Copy interface probe** — the computed styles of the game's own navbar,
-  modal, panel and buttons, plus which navbar selectors exist on this page.
-  **This is how YMCA gets styled to match the game.** Whoever works on the look
-  cannot open the game, so the alternative is guessing at colours.
 - **Download everything** — every endpoint, into one file. This one *does* carry
   the player's name, alliance and building coordinates, so it is described as
   such and is never committed to the repo.
-- The rest copy one focused thing: station types, vehicle types, dispatch
-  centres, which endpoints answer.
+
+Diagnostics reads the other modules' **stored state** rather than importing from
+them, so a module can change or go without breaking the report.
 
 Every game request goes through `getJSON` in the shell, so every failure is in
 the log without a module having to remember to log it.

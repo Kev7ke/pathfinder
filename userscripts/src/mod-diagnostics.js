@@ -49,12 +49,13 @@ YMCA.register({
         el.innerHTML = `
       <div class="ymca-card">
         <b>Report a problem</b>
-        <p class="ymca-sub" style="margin:4px 0 10px">Start here when something is wrong. The
-          report carries what YMCA did, what failed, your browser and the game it ran on
-          &mdash; and nothing about your account beyond its station and vehicle counts.</p>
-        <button class="ymca-btn primary" data-do="report">Copy problem report</button>
+        <p class="ymca-sub" style="margin:4px 0 10px">One button, everything that answers a
+          question about YMCA: what it did and what failed, which endpoints answered, the game's
+          own styling, what TrackOps has measured, and every requirement MissionMagician could not
+          match. It carries nothing about your account beyond its station and vehicle counts
+          &mdash; no names, no coordinates.</p>
+        <button class="ymca-btn primary" data-do="report">Copy the report</button>
         <button class="ymca-btn" data-do="feedback">Send feedback</button>
-        <button class="ymca-btn" data-do="ui">Copy interface probe</button>
         <button class="ymca-btn" data-do="clearlog">Clear the log</button>
       </div>
 
@@ -65,10 +66,6 @@ YMCA.register({
           building coordinates, so share it only where you are happy to.</p>
         <button class="ymca-btn primary" data-do="export-all">Download everything</button>
         <button class="ymca-btn" data-do="missions">Mission list only</button>
-        <button class="ymca-btn" data-do="buildings">Station types</button>
-        <button class="ymca-btn" data-do="vehicles">Vehicle types</button>
-        <button class="ymca-btn" data-do="dispatch">Dispatch centers</button>
-        <button class="ymca-btn" data-do="endpoints">Which endpoints answer</button>
       </div>
 
       <div class="ymca-card">
@@ -128,86 +125,6 @@ async function run(what, ctx, put) {
         return;
     }
 
-    if (what === 'ui') {
-        // Whoever styles YMCA cannot open the game, so this has to do the
-        // looking. Computed styles give the resting state; the stylesheet scan
-        // below is the only way to see hover and active, which nothing renders
-        // until a mouse is over it.
-        const pick = (sel, props) => {
-            const el = document.querySelector(sel);
-            if (!el) return 'not on this page';
-            const cs = getComputedStyle(el);
-            return Object.fromEntries(props.map((p) => [p, cs.getPropertyValue(p)]));
-        };
-        const box = ['background-color', 'color', 'border-color', 'border-radius',
-            'font-family', 'font-size'];
-
-        /** Rules the game itself declares for the selectors that matter. */
-        const INTERESTING =
-            /(^|[\s,])(\.btn|\.navbar|\.modal|\.panel|\.nav\b|\.alert|\.well|\.table|\.label|\.badge|\.dropdown-menu|body|a)/;
-        const rules = [];
-        let unreadableSheets = 0;
-        for (const sheet of document.styleSheets) {
-            let list;
-            try {
-                list = sheet.cssRules;
-            } catch (err) {
-                unreadableSheets++;    // cross-origin, and not readable by design
-                continue;
-            }
-            for (const rule of list || []) {
-                if (!rule.selectorText || !rule.cssText) continue;
-                if (!/:hover|:focus|:active|\.active|\.disabled/.test(rule.selectorText)) continue;
-                if (!INTERESTING.test(rule.selectorText)) continue;
-                rules.push(rule.cssText.slice(0, 220));
-                if (rules.length >= 60) break;
-            }
-            if (rules.length >= 60) break;
-        }
-
-        put({
-            note: 'the game\u2019s own chrome, so YMCA can be matched to it rather than guessed at',
-            navbarSelectorsPresent: [
-                '#navbar-main-collapse > ul', '#navbar-main-collapse ul.navbar-nav',
-                '.navbar-fixed-top .navbar-nav', '.navbar-nav', '#navbar-mobile-footer',
-            ].filter((sel) => !!document.querySelector(sel)),
-            navbarEntryPlaced: !!document.getElementById('ymca-nav'),
-            usingFloatingButton: !!document.getElementById('ymca-fab'),
-            bootstrapPresent: !!document.querySelector('.navbar, .panel, .btn-default'),
-            resting: {
-                body: pick('body', box),
-                navbar: pick('.navbar', box),
-                navbarLink: pick('.navbar-nav a', ['color', 'font-size', 'padding', 'font-weight']),
-                navbarActive: pick('.navbar-nav .active a', ['color', 'background-color']),
-                modal: pick('.modal-content', box),
-                modalHeader: pick('.modal-header', box),
-                modalBody: pick('.modal-body', box),
-                panel: pick('.panel', box),
-                panelHeading: pick('.panel-heading', box),
-                panelBody: pick('.panel-body', box),
-                well: pick('.well', box),
-                alert: pick('.alert', box),
-                buttonDefault: pick('.btn-default', box),
-                buttonPrimary: pick('.btn-primary', box),
-                buttonSuccess: pick('.btn-success', box),
-                buttonDanger: pick('.btn-danger', box),
-                input: pick('input[type=text], .form-control', box),
-                table: pick('table.table', ['background-color', 'font-size', 'color']),
-                tableHeader: pick('table.table th', ['background-color', 'color', 'border-color']),
-                link: pick('a', ['color', 'text-decoration-line']),
-                heading: pick('h1, h2, h3', ['color', 'font-size', 'font-weight', 'font-family']),
-            },
-            // Everything above is the resting state only. These are the rules
-            // that change it on hover, focus and active.
-            stateRules: rules,
-            unreadableSheets,
-            openLightboxes: [...document.querySelectorAll('.modal, .lightbox_content')]
-                .map((el) => el.className).slice(0, 5),
-            viewport: `${window.innerWidth}x${window.innerHeight}`,
-        }, 'the interface probe');
-        return;
-    }
-
     if (what === 'report') {
         const report = {
             ymca: YMCA.version,
@@ -228,16 +145,31 @@ async function run(what, ctx, put) {
             endpoints: {},
             log: YMCA.logger.read().slice(-60),
         };
-        // Counts only — never the buildings themselves, which carry coordinates.
-        for (const path of ['/api/buildings', '/api/vehicles']) {
+        /* Every endpoint, not the two it used to be. Which of them answer was a
+         * button of its own, and a question only asked when something is wrong
+         * is a question that should already be answered when it is. Counts and
+         * key names only — never the buildings themselves, which carry
+         * coordinates. */
+        for (const ep of ENDPOINTS) {
             try {
-                const data = await ctx.game(path);
-                report.endpoints[path] = `ok, ${data.length} entries`;
+                const data = await ctx.rawGame(ep.path);
+                report.endpoints[ep.path] = Array.isArray(data)
+                    ? `ok, ${data.length} entries`
+                    : `ok, object with keys: ${Object.keys(data).slice(0, 8).join(', ')}`;
             } catch (err) {
-                report.endpoints[path] = `failed: ${err.message}`;
+                report.endpoints[ep.path] = `failed: ${err.message}`;
             }
+            await ctx.sleep(60);
         }
-        put(report, 'the problem report');
+
+        /* What the other tools have worked out. Folding these in is the point of
+         * one button: the answer to "how is it going" used to be spread across
+         * three tools and a paste each. */
+        report.trackops = moduleStore('trackops');
+        report.missionmagician = moduleStore('missionmagician');
+        report.interface = interfaceProbe();
+
+        put(report, 'the report');
         return;
     }
 
@@ -354,4 +286,153 @@ async function run(what, ctx, put) {
             check: `${B.length} buildings, ${centres.length} of them centers`,
         }, 'the dispatch centers');
     }
+}
+
+
+/**
+ * The game’s own chrome, so YMCA can be matched to it rather than guessed at.
+ *
+ * This is part of the one report now rather than a button of its own. A reading
+ * somebody has to remember to ask for is a reading they will not have when they
+ * need it, and whoever styles YMCA cannot open the game to take it themselves.
+ */
+function interfaceProbe() {
+        // Whoever styles YMCA cannot open the game, so this has to do the
+        // looking. Computed styles give the resting state; the stylesheet scan
+        // below is the only way to see hover and active, which nothing renders
+        // until a mouse is over it.
+        const pick = (sel, props) => {
+            const el = document.querySelector(sel);
+            if (!el) return 'not on this page';
+            const cs = getComputedStyle(el);
+            return Object.fromEntries(props.map((p) => [p, cs.getPropertyValue(p)]));
+        };
+        const box = ['background-color', 'color', 'border-color', 'border-radius',
+            'font-family', 'font-size'];
+
+        /** Rules the game itself declares for the selectors that matter. */
+        const INTERESTING =
+            /(^|[\s,])(\.btn|\.navbar|\.modal|\.panel|\.nav\b|\.alert|\.well|\.table|\.label|\.badge|\.dropdown-menu|body|a)/;
+        const rules = [];
+        let unreadableSheets = 0;
+        for (const sheet of document.styleSheets) {
+            let list;
+            try {
+                list = sheet.cssRules;
+            } catch (err) {
+                unreadableSheets++;    // cross-origin, and not readable by design
+                continue;
+            }
+            for (const rule of list || []) {
+                if (!rule.selectorText || !rule.cssText) continue;
+                if (!/:hover|:focus|:active|\.active|\.disabled/.test(rule.selectorText)) continue;
+                if (!INTERESTING.test(rule.selectorText)) continue;
+                rules.push(rule.cssText.slice(0, 220));
+                if (rules.length >= 60) break;
+            }
+            if (rules.length >= 60) break;
+        }
+
+        return {
+            note: 'the game\u2019s own chrome, so YMCA can be matched to it rather than guessed at',
+            navbarSelectorsPresent: [
+                '#navbar-main-collapse > ul', '#navbar-main-collapse ul.navbar-nav',
+                '.navbar-fixed-top .navbar-nav', '.navbar-nav', '#navbar-mobile-footer',
+            ].filter((sel) => !!document.querySelector(sel)),
+            navbarEntryPlaced: !!document.getElementById('ymca-nav'),
+            usingFloatingButton: !!document.getElementById('ymca-fab'),
+            bootstrapPresent: !!document.querySelector('.navbar, .panel, .btn-default'),
+            resting: {
+                body: pick('body', box),
+                navbar: pick('.navbar', box),
+                navbarLink: pick('.navbar-nav a', ['color', 'font-size', 'padding', 'font-weight']),
+                navbarActive: pick('.navbar-nav .active a', ['color', 'background-color']),
+                modal: pick('.modal-content', box),
+                modalHeader: pick('.modal-header', box),
+                modalBody: pick('.modal-body', box),
+                panel: pick('.panel', box),
+                panelHeading: pick('.panel-heading', box),
+                panelBody: pick('.panel-body', box),
+                well: pick('.well', box),
+                alert: pick('.alert', box),
+                buttonDefault: pick('.btn-default', box),
+                buttonPrimary: pick('.btn-primary', box),
+                buttonSuccess: pick('.btn-success', box),
+                buttonDanger: pick('.btn-danger', box),
+                input: pick('input[type=text], .form-control', box),
+                table: pick('table.table', ['background-color', 'font-size', 'color']),
+                tableHeader: pick('table.table th', ['background-color', 'color', 'border-color']),
+                link: pick('a', ['color', 'text-decoration-line']),
+                heading: pick('h1, h2, h3', ['color', 'font-size', 'font-weight', 'font-family']),
+            },
+            // Everything above is the resting state only. These are the rules
+            // that change it on hover, focus and active.
+            stateRules: rules,
+            unreadableSheets,
+            openLightboxes: [...document.querySelectorAll('.modal, .lightbox_content')]
+                .map((el) => el.className).slice(0, 5),
+            viewport: `${window.innerWidth}x${window.innerHeight}`,
+    };
+        return;
+}
+
+/**
+ * What another module has worked out, summarised for the report.
+ *
+ * Diagnostics deliberately does not import from the other modules: it reads
+ * what they stored, which is the same thing they would have to hand over
+ * anyway, and it means a module can be removed without breaking the report.
+ *
+ * Counts and the game's own constants only. No mission instances, no balance,
+ * no names.
+ */
+function moduleStore(moduleId) {
+    const read = (key, fallback) => {
+        try {
+            return JSON.parse(localStorage.getItem(`ymca-${moduleId}-${key}`)) ?? fallback;
+        } catch (e) {
+            return fallback;
+        }
+    };
+
+    if (moduleId === 'trackops') {
+        const log = read('log', []) || [];
+        const byType = new Map();
+        for (const e of log) {
+            const row = byType.get(e.type) || { type: e.type, runs: 0, measured: 0, total: 0 };
+            row.runs += 1;
+            if (e.alone && e.delta > 0) { row.measured += 1; row.total += e.delta; }
+            byType.set(e.type, row);
+        }
+        return {
+            missionsEnded: log.length,
+            since: log.length ? new Date(log[0].at).toISOString().slice(0, 10) : null,
+            byMissionType: [...byType.values()]
+                .sort((a, b) => b.runs - a.runs)
+                .map((r) => ({
+                    type: r.type,
+                    runs: r.runs,
+                    measured: r.measured,
+                    averagePaid: r.measured ? Math.round(r.total / r.measured) : null,
+                })),
+        };
+    }
+
+    if (moduleId === 'missionmagician') {
+        /* The learnt fleet and, more usefully, every requirement it met and
+         * could not match a vehicle attribute to. That list is the next thing
+         * to fix, and it should arrive without anyone having to notice it. */
+        let types = {};
+        try {
+            types = JSON.parse(localStorage.getItem('ymca-missionmagician-types')) || {};
+        } catch (e) { /* nothing learnt yet */ }
+        return {
+            vehicleTypesLearnt: Object.keys(types).length,
+            capabilitiesByType: types,
+            unmatchedRequirements: read('unmatched', []),
+            settings: read('cfg', null),
+        };
+    }
+
+    return null;
 }
