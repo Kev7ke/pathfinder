@@ -55,6 +55,7 @@ await pg.evaluate(() => {
     throw new Error('unexpected fetch: ' + url);
   };
   window.confirm = () => true;
+  window.GM_registerMenuCommand = () => {};
 });
 
 await pg.addScriptTag({ content: script });
@@ -88,6 +89,49 @@ assert.equal(posts[0].entries['authenticity_token'], 'CSRF-TOKEN-XYZ', 'CSRF tok
 assert.equal(posts[0].entries['vehicle[keep_this]'], 'preserve-me', 'an unrelated field was lost');
 assert.equal(posts[0].entries['vehicle[hospital_max_price]'], '42', 'a setting was lost');
 console.log('post[0] fields    :', JSON.stringify(posts[0].entries));
+// ---- the undo path ----
+// The mock now reports the NEW names, as the game would after a rename.
+await pg.evaluate(() => {
+  const renamed = { 11:'Downtown Fire Type 1 Engine 01', 12:'Downtown Fire Type 1 Engine 02', 13:'North EMS Ambulance 01' };
+  const inner = window.fetch;
+  window.fetch = async (url, opts = {}) => {
+    if (String(url) === '/api/vehicles') {
+      return new Response(JSON.stringify([
+        { id:11, caption: renamed[11], building_id:1, vehicle_type_caption:'Type 1 Engine' },
+        { id:12, caption: renamed[12], building_id:1, vehicle_type_caption:'Type 1 Engine' },
+        { id:13, caption: renamed[13], building_id:2, vehicle_type_caption:'Ambulance' },
+      ]), {status:200});
+    }
+    return inner(url, opts);
+  };
+  window.__posts = [];
+  document.getElementById('pf-vehicle-renamer')?.remove();
+});
+
+await pg.evaluate(() => window.pfRenamer());
+await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.includes('vehicles found'));
+const hasBackup = await pg.locator('[data-pf="undo"]').count();
+console.log('backup offered    :', hasBackup === 1 ? 'yes' : 'NO');
+assert.equal(hasBackup, 1, 'the backup panel did not appear after a rename');
+
+await pg.click('[data-pf="undo"]');
+await pg.waitForTimeout(200);
+const undoRows = await pg.$$eval('#pf-preview tbody tr', trs => trs.map(tr => [...tr.cells].map(c => c.textContent)));
+console.log('undo preview      :', JSON.stringify(undoRows));
+assert.deepEqual(undoRows, [
+  ['Downtown Fire Type 1 Engine 01', 'Old A'],
+  ['Downtown Fire Type 1 Engine 02', 'Old B'],
+  ['North EMS Ambulance 01', 'Old C'],
+], 'undo did not offer the original names back');
+
+await pg.click('[data-pf="apply"]');
+await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.startsWith('Renamed'));
+const undoPosts = await pg.evaluate(() => window.__posts);
+assert.equal(undoPosts.length, 3, 'undo did not write three vehicles');
+assert.equal(undoPosts[0].entries['vehicle[caption]'], 'Old A', 'undo wrote the wrong name');
+assert.equal(undoPosts[0].entries['authenticity_token'], 'CSRF-TOKEN-XYZ', 'undo lost the CSRF token');
+console.log('undo post[0]      :', JSON.stringify(undoPosts[0].entries));
+
 console.log('page errors       :', errs.length ? errs : 'none');
 assert.equal(errs.length, 0);
 console.log('\nALL ASSERTIONS PASSED');

@@ -64,14 +64,28 @@ docs/
 ## Tampermonkey script: bulk vehicle renaming
 
 `userscripts/vehicle-renamer.user.js` renames your vehicles from a pattern such
-as `{building} {type} {nn}`, with a **mandatory preview** before anything is
-written. Install it by opening the raw file with Tampermonkey active.
+as `{building} {type} {nn}`. Install it by opening the raw file with Tampermonkey
+active. Three ways to open it, because the game's navbar markup was never
+verified from here: the **Tampermonkey menu** (always works), an entry in the
+profile menu, or `pfRenamer()` in the console.
+
+- Filters by station and by vehicle type; the counter restarts per station.
+- **Preview is mandatory** — nothing is written until you have seen the list and
+  confirmed a second time.
+- **Undo.** Every run records what each name was before it changed, in this
+  browser. Reopen the dialog to preview and apply the reverse, or copy the
+  backup out as JSON. If the backup cannot be written the run says so, loudly,
+  instead of leaving you without a way back.
 
 It never posts a hand-built request. For each vehicle it fetches
 `/vehicles/<id>/edit`, takes the real form out of the response and builds a
 `FormData` from it, so the CSRF token and every other setting travel along
-untouched; only `vehicle[caption]` is replaced. `vehicle-renamer.test.mjs`
-drives it against a stand-in game server and asserts exactly that.
+untouched; only `vehicle[caption]` is replaced.
+
+`vehicle-renamer.test.mjs` drives the whole cycle — rename, backup, undo — in a
+headless browser against a stand-in game server, and asserts the preview names,
+the per-station counter, and that both directions keep the CSRF token and every
+unrelated vehicle setting. It needs Playwright and a static server on :8777.
 
 The request pattern and the 150-character caption limit come from
 [jxn-30/LSS-Scripts](https://github.com/jxn-30/LSS-Scripts) (MIT), which

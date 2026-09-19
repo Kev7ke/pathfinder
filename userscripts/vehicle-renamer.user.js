@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief Vehicle Renamer
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      1.0.0
+// @version      1.1.0
 // @description  Bulk-rename your vehicles from a pattern, with a preview before anything is written.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -14,7 +14,7 @@
 // @match        https://www.missionchief-australia.com/*
 // @match        https://police.missionchief-australia.com/*
 // @run-at       document-idle
-// @grant        none
+// @grant        GM_registerMenuCommand
 // ==/UserScript==
 
 /*
@@ -54,6 +54,32 @@
             ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    // Renaming writes to the account and the game offers no undo, so every run
+    // records what each name was before it changed. Kept in this browser only.
+    const BACKUP_KEY = 'pf-vehicle-renamer-backups';
+    const BACKUP_KEEP = 10;
+
+    function readBackups() {
+        try {
+            return JSON.parse(localStorage.getItem(BACKUP_KEY)) || [];
+        } catch (e) {
+            return [];
+        }
+    }
+    function writeBackup(entries) {
+        if (!entries.length) return null;
+        const record = { at: new Date().toISOString(), entries };
+        try {
+            localStorage.setItem(BACKUP_KEY,
+                JSON.stringify([record, ...readBackups()].slice(0, BACKUP_KEEP)));
+        } catch (e) {
+            // A full or blocked store must not stop the rename; the user is
+            // told instead, so they can copy the backup out by hand.
+            return null;
+        }
+        return record;
+    }
 
     async function getJSON(url) {
         const res = await fetch(url, { credentials: 'include' });
@@ -135,6 +161,7 @@
               <button class="btn btn-danger" data-pf="apply" disabled>Apply</button>
               <span id="pf-status" style="margin-left:10px"></span>
             </div>
+            <div id="pf-restore"></div>
             <div id="pf-preview"></div>
           </div>
         </div>
@@ -142,7 +169,7 @@
         return wrap;
     }
 
-    async function openRenamer() {
+    async function openRenamer(undoMode = false) {
         document.getElementById(MODAL_ID)?.remove();
         const modal = buildModal();
         document.body.append(modal);
@@ -171,6 +198,34 @@
             return;
         }
         status.textContent = `${vehicles.length} vehicles found.`;
+
+        // Restoring uses the same preview-then-apply path as renaming: the
+        // backup simply supplies the target names instead of a pattern.
+        const backups = readBackups();
+        const restoreBox = $('pf-restore');
+        if (backups.length) {
+            const newest = backups[0];
+            restoreBox.innerHTML = `
+        <div class="alert alert-info" style="margin-top:12px">
+          Last rename: <b>${esc(new Date(newest.at).toLocaleString())}</b>,
+          ${newest.entries.length} vehicle${newest.entries.length === 1 ? '' : 's'}.
+          <button class="btn btn-xs btn-default" data-pf="undo" style="margin-left:8px">Preview undo</button>
+          <button class="btn btn-xs btn-link" data-pf="copy-backup">Copy backup</button>
+        </div>`;
+            restoreBox.querySelector('[data-pf="copy-backup"]').addEventListener('click', () => {
+                navigator.clipboard.writeText(JSON.stringify(newest, null, 2))
+                    .then(() => { status.textContent = 'Backup copied to the clipboard.'; })
+                    .catch(() => { status.textContent = 'Could not copy — open the console and run localStorage.getItem("' + BACKUP_KEY + '")'; });
+            });
+            restoreBox.querySelector('[data-pf="undo"]').addEventListener('click', () => {
+                const byId = new Map(vehicles.map((v) => [v.id, v]));
+                planned = newest.entries
+                    .map((e) => ({ vehicle: byId.get(e.id), to: e.from }))
+                    .filter((r) => r.vehicle && r.to && r.to !== r.vehicle.caption);
+                showPlan(newest.entries.length, 'Undo');
+            });
+        }
+        if (undoMode) restoreBox.querySelector('[data-pf="undo"]')?.click();
 
         const buildingSel = $('pf-building');
         const typeSel = $('pf-type');
@@ -205,14 +260,20 @@
                 return { vehicle: v, to: applyPattern(pattern, v, i, buildings) };
             }).filter((r) => r.to && r.to !== r.vehicle.caption);
 
+            showPlan(rows.length, 'Apply');
+        });
+
+        function showPlan(considered, verb) {
             const applyBtn = modal.querySelector('[data-pf="apply"]');
             applyBtn.disabled = planned.length === 0;
             applyBtn.textContent = planned.length
-                ? `Apply to ${planned.length} vehicle${planned.length === 1 ? '' : 's'}`
-                : 'Apply';
+                ? `${verb} ${planned.length} vehicle${planned.length === 1 ? '' : 's'}`
+                : verb;
+            applyBtn.classList.toggle('btn-warning', verb === 'Undo');
+            applyBtn.classList.toggle('btn-danger', verb !== 'Undo');
             status.textContent = planned.length
-                ? `${planned.length} of ${rows.length} would change.`
-                : `Nothing would change in those ${rows.length}.`;
+                ? `${planned.length} of ${considered} would change.`
+                : `Nothing would change in those ${considered}.`;
 
             previewBox.innerHTML = planned.length ? `
         <table class="table table-condensed">
@@ -222,15 +283,18 @@
           </tbody>
         </table>${planned.length > 200
             ? `<p class="help-block">…and ${planned.length - 200} more.</p>` : ''}` : '';
-        });
+        }
 
         modal.querySelector('[data-pf="apply"]').addEventListener('click', async (e) => {
             const btn = e.target;
             if (!planned.length) return;
             if (!confirm(
                 `Rename ${planned.length} vehicles?\n\n` +
-                `This writes to your account and there is no undo. ` +
-                `Take a look at the preview first.`)) return;
+                `This writes to your account. The old names are saved in this ` +
+                `browser so you can undo it, but check the preview first.`)) return;
+
+            const saved = writeBackup(planned.map(
+                ({ vehicle, to }) => ({ id: vehicle.id, from: vehicle.caption, to })));
 
             btn.disabled = true;
             let done = 0;
@@ -245,9 +309,13 @@
                 }
                 await sleep(DELAY_MS);
             }
-            status.innerHTML = failed.length
+            const undoNote = saved
+                ? ' The old names are saved — reopen this dialog to undo.'
+                : ' <span class="text-danger">The old names could NOT be saved,'
+                  + ' so there is no undo for this run.</span>';
+            status.innerHTML = (failed.length
                 ? `Renamed ${done}. <span class="text-danger">${failed.length} failed.</span>`
-                : `Renamed ${done}. Reload the page to see the new names.`;
+                : `Renamed ${done}. Reload the page to see the new names.`) + undoNote;
             if (failed.length) {
                 previewBox.innerHTML =
                     `<div class="alert alert-danger"><b>Failed:</b><br>${
@@ -256,11 +324,21 @@
         });
     }
 
-    // Menu entry, next to the other tools in the navbar.
+    // Three ways in, because the navbar markup is the one thing here that was
+    // never verified against the live game.
+    //
+    // 1. The Tampermonkey menu. Always present, needs no DOM at all.
+    if (typeof GM_registerMenuCommand === 'function') {
+        GM_registerMenuCommand('Rename vehicles', openRenamer);
+        GM_registerMenuCommand('Undo last rename', () => openRenamer(true));
+    }
+
+    // 2. An entry in the profile menu, when that menu can be found.
     function addMenuEntry() {
+        if (document.getElementById('pf-renamer-entry')) return;
         const menu = document.querySelector('#menu_profile + .dropdown-menu')
             || document.querySelector('.navbar-nav .dropdown-menu');
-        if (!menu || document.getElementById('pf-renamer-entry')) return;
+        if (!menu) return;
         const li = document.createElement('li');
         li.id = 'pf-renamer-entry';
         const a = document.createElement('a');
@@ -273,11 +351,13 @@
         li.append(a);
         menu.append(li);
     }
-
     addMenuEntry();
-    // The navbar is rebuilt on some page transitions; re-add if it disappears.
     setInterval(addMenuEntry, 5000);
 
-    // Fallback so it is always reachable: run pfRenamer() in the console.
-    window.pfRenamer = openRenamer;
+    // 3. The console, in case both of the above fail.
+    try {
+        (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window).pfRenamer = openRenamer;
+    } catch (e) {
+        window.pfRenamer = openRenamer;
+    }
 })();
