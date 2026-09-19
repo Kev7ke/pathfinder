@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.4
+// @version      0.0.5
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.4',
+    version: '0.0.5',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1766,6 +1766,24 @@ YMCA.register({
  * So this module ships as its settings plus one button: open a mission, press
  * "Capture this mission window", and it takes the structure — not the content —
  * of the window back. That is the missing piece.
+ *
+ * What the first real capture settled. A mission is its own page at
+ * /missions/<id>. The dispatch is a plain form: `input[name="vehicle_ids[]"]`
+ * checkboxes carrying `data-direct`, `data-distance` and `data-equipment-types`,
+ * and an `input[name="commit"]` submit labelled Dispatch, beside `.alert_next`
+ * and `.alert_next_alliance`. `#mission_general_info` holds the header and
+ * `#missing_text` the missing-vehicle line, as text with no child elements.
+ * `.aao` buttons are present; `#mission_aao_group` is not.
+ *
+ * That is the safe-write shape already: tick the game's own boxes, submit the
+ * game's own form. Nothing has to be hand-built.
+ *
+ * What it did not settle is what *holds* the checkboxes — the table is neither
+ * `#vehicle_show_table_body` nor `table.vehicle_table` — and how a row says
+ * which vehicle type it is. Both are needed to match a row against the
+ * requirements, which come from /einsaetze.json rather than from reading the
+ * page's text. So the capture no longer guesses at container names: it walks up
+ * from a checkbox and reports what it passes.
  * -------------------------------------------------------------------------- */
 
 YMCA.register({
@@ -1780,9 +1798,11 @@ YMCA.register({
         const cfg = ctx.store.read('cfg', { enabled: false, showTable: true, confirmBeforeAlarm: true });
 
         el.innerHTML = `
-      <div class="ymca-note warn"><b>Not working yet.</b> Everything below is settings and a
-        way to send the one thing that is missing. Turning it on does nothing until the mission
-        window has been read once.</div>
+      <div class="ymca-note warn"><b>Not working yet</b>, but half-known now. The first capture
+        showed the dispatch is a normal form — the game's own checkboxes and its own Dispatch
+        button — so nothing will ever have to be hand-built. What is still missing is what holds
+        those checkboxes and how a row says which vehicle type it is. One more capture, below,
+        and that is answered.</div>
 
       <div class="ymca-card">
         <b>Settings</b>
@@ -1797,7 +1817,7 @@ YMCA.register({
       </div>
 
       <div class="ymca-card">
-        <b>What is needed to build it</b>
+        <b>The one capture still needed</b>
         <p class="ymca-sub" style="margin:4px 0 10px">The order matters, because YMCA is a
           lightbox and clicking a mission navigates away from it:</p>
         <ol class="ymca-sub" style="margin:0 0 10px;padding-left:20px">
@@ -1853,60 +1873,156 @@ YMCA.register({
 /**
  * Describe the mission window without reading its content.
  *
- * Structure is what is needed — which container holds the requirements, how the
- * vehicle rows are marked up, what the alarm control is. Mission text, street
+ * Structure is what is needed — which form carries the dispatch, how a vehicle
+ * row is marked up, what the alarm control is called. Mission text, street
  * names and player names are not, so they are not taken.
+ *
+ * The first real capture answered half of it: the dispatch is a plain form with
+ * `input[name="vehicle_ids[]"]` checkboxes and an `input[name="commit"]` submit,
+ * which is exactly the shape the safe-write rule wants — tick the game's own
+ * boxes and submit the game's own form, never build one. What it could not
+ * answer is what holds those checkboxes, because the table is not
+ * `#vehicle_show_table_body` or `table.vehicle_table`. So this version stops
+ * guessing at container names and walks up from a checkbox instead.
  */
 function captureMissionWindow() {
     const CANDIDATES = [
-        '#mission_general_info', '#missing_text', '.mission_header', '#mission_vehicle_driving',
-        '#vehicle_show_table_all', '#vehicle_show_table_body', 'table.vehicle_table',
-        '#mission_vehicle_amount', '.alert-missing-vehicles', '#mission_aao_group',
-        'form#vehicle_select', 'input[name="vehicle_ids[]"]', '.aao', '#vehicle_list',
+        // Confirmed present on a real mission page.
+        '#mission_general_info', '#missing_text', '#vehicle_show_table_all',
+        '.alert-missing-vehicles', 'input[name="vehicle_ids[]"]', '.aao',
+        'input[name="commit"]', '.alert_next', '.vehicle_checkbox',
+        // Confirmed absent, kept so a future game change shows up as a diff.
+        '.mission_header', '#mission_vehicle_driving', '#vehicle_show_table_body',
+        'table.vehicle_table', '#mission_vehicle_amount', '#mission_aao_group',
+        'form#vehicle_select', '#vehicle_list',
+        // Not yet looked for.
+        '#mission_help', '.mission_help', '#vehicle_show_table', '.vehicle_select_table',
     ];
     const seen = CANDIDATES.filter((sel) => !!document.querySelector(sel));
 
-    const describe = (el, depth = 0) => {
-        if (!el || depth > 3) return null;
-        return {
-            tag: el.tagName.toLowerCase(),
-            id: el.id || undefined,
-            class: el.className && typeof el.className === 'string'
-                ? el.className.slice(0, 120) : undefined,
-            children: [...el.children].slice(0, 8)
-                .map((c) => describe(c, depth + 1)).filter(Boolean),
-        };
-    };
+    const classOf = (el) => (typeof el.className === 'string' ? el.className.trim().slice(0, 120) : '');
+    /** Digits out, so an id is reported as a shape rather than as a particular thing. */
+    const shapeId = (id) => String(id || '').replace(/\d+/g, '#').slice(0, 48);
 
-    // The vehicle list is the part that matters most: how a row is identified,
-    // and what the checkbox is called.
-    const row = document.querySelector('#vehicle_show_table_body tr, table.vehicle_table tbody tr');
-    const checkbox = document.querySelector('input[type=checkbox][name*="vehicle"], .vehicle_checkbox');
+    const outline = (el) => (el ? { tag: el.tagName.toLowerCase(), id: shapeId(el.id) || undefined, class: classOf(el) || undefined } : null);
+
+    const checkbox = document.querySelector('input[name="vehicle_ids[]"], .vehicle_checkbox');
+
+    /* --- the form that actually dispatches ---
+     * Its field names are what a safe write needs: everything unrelated has to
+     * survive, so it has to be known what "everything unrelated" is. Names only;
+     * a value could be a CSRF token or a caption. */
+    // :has() is recent enough that an older browser would throw and take the whole
+    // capture with it, and closest() answers this on every page seen so far anyway.
+    let form = checkbox?.closest('form') || null;
+    if (!form) {
+        try {
+            form = document.querySelector('form:has(input[name="vehicle_ids[]"])');
+        } catch (e) { /* no :has() here */ }
+    }
+    const dispatchForm = form ? {
+        id: shapeId(form.id) || undefined,
+        class: classOf(form) || undefined,
+        action: (form.getAttribute('action') || '').split('?')[0].replace(/\d+/g, '#'),
+        method: form.getAttribute('method') || 'get',
+        fieldNames: [...new Set([...form.elements].map((f) => f.name).filter(Boolean))].slice(0, 30),
+        submitNames: [...form.querySelectorAll('[type=submit]')].map((b) => b.name || '(unnamed)'),
+        checkboxCount: form.querySelectorAll('input[name="vehicle_ids[]"]').length,
+    } : 'no form wraps the vehicle checkboxes';
+
+    /* --- what holds a vehicle, found by walking up rather than by guessing --- */
+    const chain = [];
+    for (let node = checkbox?.parentElement; node && node !== document.body && chain.length < 8; node = node.parentElement) {
+        chain.push(outline(node));
+        if (node.tagName === 'FORM') break;
+    }
+
+    const row = checkbox?.closest('tr') || chain[1] && checkbox?.parentElement?.parentElement || null;
+    const describeRow = (el) => (el ? {
+        tag: el.tagName.toLowerCase(),
+        class: classOf(el) || undefined,
+        idShape: shapeId(el.id) || undefined,
+        attrs: [...el.attributes].map((a) => a.name),
+        // Numbers in attributes are how a row says which vehicle type it is. Text is not taken.
+        numericAttrs: Object.fromEntries([...el.attributes]
+            .filter((a) => /^-?\d+$/.test(a.value) && a.value.length <= 12)
+            .map((a) => [a.name, Number(a.value)])),
+        cellCount: el.cells?.length,
+        cells: [...(el.cells || el.children)].slice(0, 10).map((c) => ({
+            tag: c.tagName.toLowerCase(),
+            class: classOf(c) || undefined,
+            childTags: [...c.children].slice(0, 5).map((x) => x.tagName.toLowerCase()),
+            childClasses: [...c.children].slice(0, 5).map((x) => classOf(x)).filter(Boolean),
+        })),
+    } : 'no vehicle row found');
+
+    /* --- everything the page marks as mission-ish ---
+     * The mission's *type* has to be findable, because that is the key into
+     * /einsaetze.json where the requirements and the credit figure already are.
+     * Reading the requirements off the page would mean reading its text. */
+    const missionHints = [];
+    for (const el of document.querySelectorAll('[id*="mission"], [class*="mission"], [data-mission-type-id], [data-mission-id]')) {
+        const hint = {
+            tag: el.tagName.toLowerCase(),
+            idShape: shapeId(el.id) || undefined,
+            class: classOf(el) || undefined,
+            numericData: Object.fromEntries(Object.entries(el.dataset || {})
+                .filter(([, v]) => /^-?\d+$/.test(v) && v.length <= 12)
+                .map(([k, v]) => [k, Number(v)])),
+        };
+        if (!hint.idShape && !hint.class && !Object.keys(hint.numericData).length) continue;
+        if (missionHints.some((h) => h.idShape === hint.idShape && h.class === hint.class)) continue;
+        missionHints.push(hint);
+        if (missionHints.length >= 25) break;
+    }
+
+    const aaos = [...document.querySelectorAll('.aao')];
 
     return {
-        note: 'structure only — no mission text, addresses or player names',
-        url: location.pathname,
+        note: 'structure only — element, class and field names and the numbers in them. '
+            + 'No mission text, addresses, player names or field values.',
+        url: location.pathname.replace(/\d+/g, '#'),
         looksLikeMissionWindow: /\/missions?\//.test(location.pathname)
             || !!document.querySelector('#mission_general_info, #missing_text'),
         found: seen,
         missing: CANDIDATES.filter((sel) => !seen.includes(sel)),
-        vehicleRow: row ? {
-            outline: describe(row),
-            cellCount: row.cells?.length,
-            dataAttributes: Object.keys(row.dataset || {}),
-        } : 'no vehicle row found',
+        dispatchForm,
+        vehicleContainerChain: chain,
+        vehicleRow: describeRow(row),
         checkbox: checkbox ? {
-            name: checkbox.name, class: checkbox.className,
-            dataAttributes: Object.keys(checkbox.dataset || {}),
+            name: checkbox.name,
+            class: classOf(checkbox),
+            // Names and types, not values: data-distance is a number about where you are.
+            dataAttributes: Object.entries(checkbox.dataset || {})
+                .map(([k, v]) => `${k}:${/^-?[\d.]+$/.test(v) ? 'number' : 'string'}`),
         } : 'no vehicle checkbox found',
+        aao: aaos.length ? {
+            count: aaos.length,
+            sample: {
+                tag: aaos[0].tagName.toLowerCase(),
+                class: classOf(aaos[0]),
+                attrs: [...aaos[0].attributes].map((a) => a.name),
+                numericData: Object.fromEntries(Object.entries(aaos[0].dataset || {})
+                    .filter(([, v]) => /^-?\d+$/.test(v))
+                    .map(([k, v]) => [k, Number(v)])),
+            },
+        } : 'no AAO buttons found',
+        missionHints,
         alarmControls: [...document.querySelectorAll('input[type=submit], button[type=submit], .btn-success')]
-            .slice(0, 6).map((b) => ({
+            .slice(0, 8).map((b) => ({
                 tag: b.tagName.toLowerCase(), type: b.type, name: b.name || undefined,
-                class: typeof b.className === 'string' ? b.className.slice(0, 80) : undefined,
+                class: classOf(b).slice(0, 80) || undefined,
                 text: (b.value || b.textContent || '').trim().slice(0, 30),
             })),
         requirementBlocks: [...document.querySelectorAll('#missing_text, .missing_text, #mission_general_info')]
-            .map((e) => ({ id: e.id, class: e.className, childTags: [...e.children].map((c) => c.tagName) })),
+            .map((e) => ({
+                id: e.id, class: classOf(e),
+                childTags: [...e.children].map((c) => c.tagName),
+                // Whether the requirement is text or markup decides whether it can be parsed
+                // at all, without saying what it says.
+                textLength: (e.textContent || '').trim().length,
+                hasElementChildren: e.children.length > 0,
+            })),
     };
 }
 

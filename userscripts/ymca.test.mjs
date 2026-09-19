@@ -211,7 +211,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.4');
+assert.equal(report.ymca, '0.0.5');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -266,6 +266,65 @@ assert.ok(Array.isArray(cap.missing) && cap.missing.length, 'it should report wh
 assert.equal(await pg.locator('#mm-wrongpage').isVisible(), true,
   'a capture taken off a mission page must say so rather than copy an empty one');
 console.log('capture           : reports', cap.missing.length, 'selectors not present, warns about the page');
+
+// ---- the capture on a mission page, built to what the first real one reported ----
+// The dispatch form, the checkbox names and the data attributes below are the ones the game
+// actually sent back; the container around them is invented, which is exactly the part the
+// capture must describe rather than assume.
+await pg.evaluate(() => {
+  const page = document.createElement('div');
+  page.innerHTML = `
+    <div id="mission_general_info" class="col-md-6"><div></div><h3>x</h3><small>y</small></div>
+    <div id="missing_text" class="alert alert-danger alert-missing-vehicles">x</div>
+    <form id="vehicle_select_form" action="/missions/505949001/alarm" method="post">
+      <input type="hidden" name="authenticity_token" value="CSRF-XYZ">
+      <a id="vehicle_show_table_all" class="btn btn-success">50 km</a>
+      <table id="vehicle_show_table"><tbody>
+        <tr class="vehicle_row vehicle_type_13" data-vehicle-type-id="13" data-vehicle-id="11">
+          <td class="vehicle_select_td">
+            <input type="checkbox" name="vehicle_ids[]" class="vehicle_checkbox"
+              data-direct="1" data-distance="3.2" data-equipment-types="[]">
+          </td>
+          <td class="building_name"><a href="#">FS01</a></td>
+        </tr>
+      </tbody></table>
+      <a class="aao btn btn-xs" data-aao-id="7">AAO</a>
+      <input type="submit" name="commit" class="btn btn-success" value="Dispatch">
+    </form>`;
+  document.body.append(page);
+  history.replaceState({}, '', '/missions/505949001');
+});
+await pg.click('[data-do="capture"]');
+await pg.waitForFunction(() => document.querySelector('#mm-out')?.value.includes('dispatchForm'));
+const cap2 = JSON.parse(await pg.inputValue('#mm-out'));
+assert.equal(cap2.looksLikeMissionWindow, true, 'a mission page should be recognised as one');
+assert.equal(await pg.locator('#mm-wrongpage').isVisible(), false,
+  'the wrong-page warning must clear once a real mission page is captured');
+console.log('capture url       :', cap2.url);
+assert.equal(cap2.url, '/missions/#', 'the mission id must be shaped out of the url');
+console.log('dispatch form     :', JSON.stringify(cap2.dispatchForm));
+assert.equal(cap2.dispatchForm.action, '/missions/#/alarm', 'the form action was not shaped');
+assert.ok(cap2.dispatchForm.fieldNames.includes('authenticity_token'),
+  'the capture must show that a CSRF token is among the fields');
+assert.ok(!JSON.stringify(cap2).includes('CSRF-XYZ'), 'the capture must never carry a field value');
+assert.deepEqual(cap2.dispatchForm.submitNames, ['commit']);
+// Walking up rather than guessing is the point: the container is named by the page, not by us.
+const chain = cap2.vehicleContainerChain.map((c) => c.tag + (c.id ? '#' + c.id : ''));
+console.log('container chain   :', JSON.stringify(chain));
+assert.ok(chain.includes('table#vehicle_show_table'),
+  'the walk up from a checkbox should name the table the game actually uses');
+assert.equal(cap2.vehicleRow.numericAttrs['data-vehicle-type-id'], 13,
+  'the row must give up the vehicle type id, which is how it matches a requirement');
+assert.ok(cap2.vehicleRow.class.includes('vehicle_type_13'));
+assert.ok(cap2.checkbox.dataAttributes.includes('distance:number'),
+  'checkbox data attributes should be reported by name and type, never by value');
+assert.ok(!JSON.stringify(cap2.checkbox).includes('3.2'),
+  'the distance to your own station is a value, so it must not be carried');
+assert.equal(cap2.aao.count, 1);
+assert.ok(cap2.requirementBlocks.some((b) => b.id === 'missing_text' && !b.hasElementChildren),
+  'the missing-vehicle block should be reported as text-only');
+assert.ok(!JSON.stringify(cap2).includes('FS01'), 'no building name may leave in a capture');
+console.log('capture on mission: form, container chain and vehicle type id all named');
 
 // ---- TrackOps: the watcher names what left the list and what the credits did ----
 await pg.click('#ymca-back');
