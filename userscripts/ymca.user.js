@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.8
+// @version      0.0.9
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.8',
+    version: '0.0.9',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2543,9 +2543,9 @@ const TO_LOG_MAX = 2000;
  * to it. The payout is pushed over the same channel, a beat behind. */
 const TO_SETTLE_MS = 5000;
 
-/* Two missions ending inside this window cannot be told apart by a balance
- * that moved once, so neither is trusted. */
-const TO_CONCURRENT_MS = 6000;
+/* The game announces the same mission ending more than once. An id seen again
+ * inside this window is the same ending, not a second one. */
+const TO_DEDUPE_MS = 120000;
 
 function toRead(key, fallback) {
     try {
@@ -2581,23 +2581,37 @@ YMCA.register({
         const listed = await toListedCredits(ctx);
         const rows = toSummarise(log, listed);
         const totalPaid = trusted.reduce((n, e) => n + e.delta, 0);
+        const share = toShareOfListed(log, listed);
 
         el.innerHTML = `
       <div class="ymca-card">
         <b>Since ${log.length ? new Date(log[0].at).toLocaleDateString() : 'you turned it on'}</b>
-        <p style="font-size:26px;font-weight:700;margin:8px 0 2px">${trusted.length}
-          <span class="ymca-dim" style="font-size:14px;font-weight:400">missions measured</span></p>
-        <p class="ymca-dim">${ctx.fmt(totalPaid)} credits, across ${rows.length} kinds of mission.
-          ${log.length - trusted.length} more ended without a payout that could be told apart.</p>
+        <p style="font-size:26px;font-weight:700;margin:8px 0 2px">${log.length}
+          <span class="ymca-dim" style="font-size:14px;font-weight:400">missions finished</span></p>
+        <p class="ymca-dim">Across ${rows.length} kinds of mission. The count is the solid part —
+          every ending the game announces is one here, and the same mission announced twice is
+          counted once.</p>
         <label style="display:block;margin:10px 0 0"><input type="checkbox" data-cfg="recording"
           ${cfg.recording ? 'checked' : ''}> Keep recording</label>
       </div>
 
-      <div class="ymca-note"><b>How the payout is arrived at.</b> The game announces that a
-        mission ended, not what it paid you. So TrackOps reads your balance before and after and
-        takes the difference, and only trusts it when no second mission ended at the same time.
-        A figure here is a measurement, not the game's own number — which is the point, because
-        <b>96 of the 197 ambulance missions have no listed number at all</b>.</div>
+      ${share ? `<div class="ymca-card">
+        <b>What a mission actually pays</b>
+        <p style="font-size:26px;font-weight:700;margin:8px 0 2px">${(share.ratio * 100).toFixed(0)}%
+          <span class="ymca-dim" style="font-size:14px;font-weight:400">of what the game lists</span></p>
+        <p class="ymca-dim">${ctx.fmt(share.paid)} received where ${ctx.fmt(share.listed)} was
+          listed, over ${share.missions} missions measured one at a time.
+          ${share.missions < 10 ? '<b>Too few to rely on yet</b> — it wants a few dozen.'
+        : 'Steady enough to be worth something.'}</p>
+      </div>` : ''}
+
+      <div class="ymca-note"><b>The count is measured. The payout is inferred.</b> The game
+        announces that a mission ended and, separately, what your balance became. Putting the two
+        together is TrackOps' own doing: a rise is credited to the longest-waiting ending, and only
+        trusted when nothing else was waiting. ${trusted.length} of ${log.length} are trusted that
+        way. That is why the figure above is a measurement rather than the game's own number —
+        which is the point, because <b>96 of the 197 ambulance missions have no listed number at
+        all</b>.</div>
 
       ${rows.length ? `
       <div class="ymca-card">
@@ -2615,7 +2629,8 @@ YMCA.register({
           </tbody>
         </table>
         <p class="ymca-sub" style="margin-top:8px">Rows where the game lists nothing are the ones
-          worth having. Those are what the planner has been guessing at.</p>
+          worth having — those are what the planner has been guessing at. StepOps does not use any
+          of this yet: changing what the ladder costs things at is not something to do quietly.</p>
       </div>` : `
       <div class="ymca-card">
         <b>Nothing counted yet</b>
@@ -2710,6 +2725,28 @@ function toSummarise(log, listed) {
 }
 
 /**
+ * How much of the listed figure actually arrives.
+ *
+ * Only missions measured on their own, and only where the game lists a figure
+ * to compare against. It is a ratio of two totals rather than an average of
+ * ratios, so one cheap mission cannot swing it.
+ */
+function toShareOfListed(log, listed) {
+    let paid = 0;
+    let quoted = 0;
+    let missions = 0;
+    for (const e of log) {
+        if (!e.alone || !(e.delta > 0)) continue;
+        const figure = listed[String(e.type)]?.listed;
+        if (!figure) continue;
+        paid += e.delta;
+        quoted += figure;
+        missions += 1;
+    }
+    return missions ? { paid, listed: quoted, missions, ratio: paid / quoted } : null;
+}
+
+/**
  * What goes back for the planner's sake.
  *
  * Mission type ids and credit figures, which are the game's own constants, and
@@ -2724,6 +2761,13 @@ function toExport(log, listed) {
         measuredFrom: log.length ? new Date(log[0].at).toISOString().slice(0, 10) : null,
         missionsEnded: log.length,
         missionsMeasured: log.filter((e) => e.alone && e.delta > 0).length,
+        shareOfListed: (() => {
+            const share = toShareOfListed(log, listed);
+            return share ? {
+                paid: share.paid, listed: share.listed,
+                missions: share.missions, ratio: Number(share.ratio.toFixed(4)),
+            } : null;
+        })(),
         byMissionType: rows.map((r) => ({
             type: Number(r.type) || r.type,
             name: r.name,
@@ -2771,6 +2815,8 @@ let toHooked = false;
 let toOriginals = null;
 let toBalance = null;
 let toPending = [];
+/** Mission ids already counted, so the game announcing one twice counts once. */
+const toRecent = new Map();
 
 /** The account balance, from the game's own endpoint rather than off the page. */
 async function toReadBalance() {
@@ -2790,23 +2836,39 @@ async function toReadBalance() {
  * The type id is read off the panel before the game takes it away — it is the
  * key into /einsaetze.json, where the name and the listed figure live, so
  * nothing has to be read out of the page's text.
+ *
+ * THE SAME MISSION IS ANNOUNCED MORE THAN ONCE. The first run recorded 15
+ * endings that were really 9 missions: six of them arrived twice, and because
+ * a second ending inside the window marked both unattributable, every
+ * duplicated mission measured nothing. A mission can only end once, so the
+ * instance id is remembered and a repeat is dropped.
  */
 function toMissionEnded(missionId) {
-    const panel = document.getElementById(`mission_${missionId}`);
+    const id = String(missionId);
+    const at = Date.now();
+
+    if (toPending.some((e) => e.mission === id)) return;
+    if (toRecent.get(id) > at - TO_DEDUPE_MS) return;
+    toRecent.set(id, at);
+    for (const [key, when] of toRecent) if (when < at - TO_DEDUPE_MS) toRecent.delete(key);
+
+    const panel = document.getElementById(`mission_${id}`);
     const type = panel?.getAttribute('mission_type_id') || null;
     if (type === null) return; // not one of ours, or already gone
 
-    const at = Date.now();
-    /* Anything else ending in the same window makes both unattributable: one
-     * balance change cannot be split between two missions. */
-    for (const other of toPending) other.alone = false;
-    const entry = { at, type: Number(type) || type, delta: null, alone: toPending.length === 0 };
+    const entry = { mission: id, at, type: Number(type) || type, delta: null, alone: toPending.length === 0 };
+    /* Something else already waiting means a balance change could belong to
+     * either, so neither is trusted for the averages — it is still counted. */
+    if (toPending.length) for (const other of toPending) other.alone = false;
     toPending.push(entry);
 
     setTimeout(() => {
         toPending = toPending.filter((e) => e !== entry);
         const log = toRead(TO_LOG_KEY, []);
-        log.push({ at: entry.at, type: entry.type, delta: entry.delta, alone: entry.alone });
+        log.push({
+            at: entry.at, mission: entry.mission, type: entry.type,
+            delta: entry.delta, alone: entry.alone,
+        });
         toWrite(TO_LOG_KEY, log.slice(-TO_LOG_MAX));
     }, TO_SETTLE_MS);
 }
@@ -2814,8 +2876,12 @@ function toMissionEnded(missionId) {
 /**
  * The balance changed. Give it to whatever ended just before it.
  *
- * A rise while nothing ended is the player selling or being paid for something
- * else, and is simply the new baseline. A fall is never a payout.
+ * One rise belongs to one mission, so it goes to the longest-waiting ending
+ * that has not been paid yet. The first version added every rise to every
+ * pending mission, which double-counted the moment two ended together.
+ *
+ * A rise while nothing is pending is the player selling or being paid for
+ * something else, and is simply the new baseline. A fall is never a payout.
  */
 function toCreditsChanged(next) {
     if (typeof next !== 'number' || !isFinite(next)) return;
@@ -2824,9 +2890,9 @@ function toCreditsChanged(next) {
     if (previous === null) return;
     const delta = next - previous;
     if (delta <= 0) return;
-    for (const entry of toPending) {
-        entry.delta = (entry.delta || 0) + delta;
-    }
+    const waiting = toPending.filter((e) => e.delta === null);
+    if (!waiting.length) return;
+    waiting[0].delta = delta;
 }
 
 /**

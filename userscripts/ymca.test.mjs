@@ -211,7 +211,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.8');
+assert.equal(report.ymca, '0.0.9');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -512,15 +512,19 @@ assert.equal(hooks.globals.creditsUpdate, 'function',
 assert.equal(hooks.hooked, true, 'TrackOps did not wrap missionDelete');
 
 // A mission ends. The game calls its own function; the wrapper must pass it straight through.
+// It announces the same ending twice, which is what made six of nine real missions unmeasurable.
 await pg.evaluate(() => {
+  window.missionDelete(4711);
   window.missionDelete(4711);
   window.creditsUpdate(502340);
 });
 await pg.waitForFunction(
   () => JSON.parse(localStorage.getItem('ymca-trackops-log') || '[]').length > 0,
   null, { timeout: 8000 });
-assert.deepEqual(await pg.evaluate(() => window.__missionDeleteCalls), [4711],
-  'the game\'s own missionDelete must still run, exactly once');
+// Both calls reach the game untouched — the wrapper never swallows one. The dedupe is only
+// about what TrackOps writes down, never about what the game gets to do.
+assert.deepEqual(await pg.evaluate(() => window.__missionDeleteCalls), [4711, 4711],
+  'every call must be passed through to the game\'s own missionDelete');
 assert.deepEqual(await pg.evaluate(() => window.__creditsUpdateCalls), [502340],
   'the game\'s own creditsUpdate must still run, exactly once');
 const recorded = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-trackops-log')));
@@ -528,6 +532,8 @@ console.log('trackops recorded :', JSON.stringify(recorded));
 assert.equal(recorded[0].type, 3, 'the mission type id must be read off the panel before it goes');
 assert.equal(recorded[0].delta, 2340, 'the payout is the balance difference');
 assert.equal(recorded[0].alone, true, 'one ending at a time is attributable');
+assert.equal(recorded.length, 1,
+  'a mission can only end once, so the second announcement must be dropped');
 
 // It reads as a table, named from the mission list rather than from the page's text.
 await pg.click('#ymca-back');
@@ -549,6 +555,32 @@ assert.equal(exported.byMissionType[0].averagePaid, 2340);
 assert.equal(exported.byMissionType[0].listedByGame, 9000);
 assert.ok(!JSON.stringify(exported).includes('502340') && !JSON.stringify(exported).includes('500000'),
   'the export must never carry a balance');
+// Two different missions ending together: one rise belongs to one mission, never to both.
+await pg.evaluate(() => {
+  const list = document.getElementById('mission_list');
+  for (const [id, type] of [[5001, 1], [5002, 2]]) {
+    const div = document.createElement('div');
+    div.id = `mission_${id}`;
+    div.setAttribute('mission_id', String(id));
+    div.setAttribute('mission_type_id', String(type));
+    list.append(div);
+  }
+  window.missionDelete(5001);
+  window.missionDelete(5002);
+  window.creditsUpdate(503340);   // 1000 for the first
+  window.creditsUpdate(503540);   // 200 for the second
+});
+await pg.waitForFunction(
+  () => JSON.parse(localStorage.getItem('ymca-trackops-log') || '[]').length >= 3,
+  null, { timeout: 8000 });
+const both = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-trackops-log')).slice(1));
+console.log('two at once       :', JSON.stringify(both.map((e) => ({ t: e.type, d: e.delta, a: e.alone }))));
+assert.deepEqual(both.map((e) => e.delta), [1000, 200],
+  'one rise belongs to one mission — the first version gave every rise to every pending one');
+// Neither is trusted: pairing them relies on the game paying in the order the missions ended,
+// which has not been established. The deltas are kept and counted, just not averaged.
+assert.deepEqual(both.map((e) => e.alone), [false, false],
+  'two endings waiting together means neither payout is attributable');
 console.log('trackops          : the game announces, TrackOps measures, nothing is assumed');
 
 console.log('page errors       :', errs.length ? errs : 'none');

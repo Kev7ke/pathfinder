@@ -144,6 +144,13 @@ the game is probably already announcing it.
 `mission_id` and `mission_type_id` as **plain attributes, not `data-`**, and
 `mission_type_id` is the key straight into `/einsaetze.json`.
 
+**The game announces the same ending more than once**, so anything hooking
+`missionDelete` has to key on the mission instance id. TrackOps' first run
+recorded 15 endings that were really 9 missions, and because a second ending
+inside the window marked both unattributable, every duplicated mission measured
+nothing. Pass every call through to the game; deduplicate only what is written
+down.
+
 **On the big map, a mission window is an iframe.** The address bar still says
 `/`. YMCA is not locked out: the `@match` covers frames, so it boots a second
 time inside the mission and a module that belongs there simply runs there. No
@@ -303,7 +310,14 @@ the log without a module having to remember to log it.
   is the example: derived by matching datasets in both directions with identical
   counts, after a one-way match produced confident nonsense.
 - **Ask before changing the ladder's behaviour.** `docs/ALGORITHM.md` explains
-  why it is as it is.
+  why it is as it is. TrackOps measuring what missions actually pay is exactly
+  the sort of thing that should feed StepOps, and exactly the sort of thing not
+  to wire in quietly — it is shown in TrackOps and goes no further until asked.
+- **Separate what is measured from what is inferred, on screen and not only in
+  the code.** TrackOps counts endings, which the game states, and infers
+  payouts, which it does not: the balance rising after a mission ended is
+  TrackOps' own pairing. The panel says which is which, because a number that
+  looks equally solid gets used as though it is.
 - Anything that writes to the player's account needs a **mandatory preview**, a
   confirmation, and a **backup that makes it undoable** — and must say so
   plainly when the backup could not be written.
