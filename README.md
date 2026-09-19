@@ -65,9 +65,14 @@ docs/
 
 `userscripts/vehicle-renamer.user.js` renames your vehicles from a pattern such
 as `{building} {type} {nn}`. Install it by opening the raw file with Tampermonkey
-active. Three ways to open it, because the game's navbar markup was never
-verified from here: the **Tampermonkey menu** (always works), an entry in the
-profile menu, or `pfRenamer()` in the console.
+active. It puts a **"Rename vehicles" button in the bottom right of the game**.
+If that button is not there, the script is not running — that is the whole
+diagnosis. It also registers in the Tampermonkey menu, adds a profile-menu entry
+where that markup is found, and exposes `pfRenamer()` in the console.
+
+Run `pfRenamerCheck()` in the console when something is wrong: it reports
+whether the script is loaded and whether `/api/vehicles` and `/api/buildings`
+actually answer on this game.
 
 - Filters by station and by vehicle type; the counter restarts per station.
 - **Preview is mandatory** — nothing is written until you have seen the list and

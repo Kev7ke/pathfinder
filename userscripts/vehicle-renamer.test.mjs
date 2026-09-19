@@ -59,7 +59,16 @@ await pg.evaluate(() => {
 });
 
 await pg.addScriptTag({ content: script });
-await pg.evaluate(() => window.pfRenamer());
+
+// The launcher is what failed in the field: the navbar entry depends on markup
+// that was never verified, so the floating button must appear on its own.
+const fab = await pg.locator('#pf-renamer-fab');
+assert.equal(await fab.count(), 1, 'the floating launcher button was not added');
+assert.ok(await fab.isVisible(), 'the launcher button is not visible');
+console.log('launcher button   : visible, text =', JSON.stringify(await fab.textContent()));
+
+// Opening by clicking it, not by calling the function, is the real path.
+await fab.click();
 await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.includes('vehicles found'));
 
 console.log('status after load :', await pg.textContent('#pf-status'));

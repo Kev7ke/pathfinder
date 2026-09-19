@@ -1,18 +1,19 @@
 // ==UserScript==
 // @name         MissionChief Vehicle Renamer
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      1.1.0
+// @version      1.2.0
 // @description  Bulk-rename your vehicles from a pattern, with a preview before anything is written.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
 // @downloadURL  https://raw.githubusercontent.com/Kev7ke/pathfinder/claude/keen-hawking-g3z0ph/userscripts/vehicle-renamer.user.js
 // @updateURL    https://raw.githubusercontent.com/Kev7ke/pathfinder/claude/keen-hawking-g3z0ph/userscripts/vehicle-renamer.user.js
-// @match        https://www.missionchief.com/*
-// @match        https://police.missionchief.com/*
-// @match        https://www.missionchief.co.uk/*
-// @match        https://police.missionchief.co.uk/*
-// @match        https://www.missionchief-australia.com/*
-// @match        https://police.missionchief-australia.com/*
+// @match        *://*.missionchief.com/*
+// @match        *://missionchief.com/*
+// @match        *://*.missionchief.co.uk/*
+// @match        *://missionchief.co.uk/*
+// @match        *://*.missionchief-australia.com/*
+// @match        *://*.missionchief-japan.com/*
+// @match        *://*.missionchief-korea.com/*
 // @run-at       document-idle
 // @grant        GM_registerMenuCommand
 // ==/UserScript==
@@ -130,7 +131,10 @@
         const wrap = document.createElement('div');
         wrap.id = MODAL_ID;
         wrap.className = 'modal fade in';
-        wrap.style.display = 'block';
+        // Explicit, because the page's own CSS must not be able to hide this.
+        wrap.style.cssText =
+            'display:block;position:fixed;inset:0;z-index:2147483000;overflow:auto;'
+            + 'background:rgba(0,0,0,.4)';
         wrap.innerHTML = `
       <div class="modal-dialog" style="width:min(860px,94vw)">
         <div class="modal-content">
@@ -324,16 +328,28 @@
         });
     }
 
-    // Three ways in, because the navbar markup is the one thing here that was
-    // never verified against the live game.
-    //
-    // 1. The Tampermonkey menu. Always present, needs no DOM at all.
-    if (typeof GM_registerMenuCommand === 'function') {
-        GM_registerMenuCommand('Rename vehicles', openRenamer);
-        GM_registerMenuCommand('Undo last rename', () => openRenamer(true));
+    // ---- getting in ----
+    // The navbar markup was never verified against the live game, so the
+    // floating button is the one that must always work. It is deliberately
+    // impossible to miss: if you cannot see it, the script is not running.
+
+    function addFloatingButton() {
+        if (document.getElementById('pf-renamer-fab')) return;
+        if (!document.body) return;
+        const btn = document.createElement('button');
+        btn.id = 'pf-renamer-fab';
+        btn.type = 'button';
+        btn.textContent = 'Rename vehicles';
+        btn.title = 'MissionChief Vehicle Renamer';
+        btn.style.cssText =
+            'position:fixed;right:14px;bottom:14px;z-index:2147483000;'
+            + 'padding:9px 14px;border-radius:999px;border:0;cursor:pointer;'
+            + 'background:#2f4490;color:#fff;font:600 13px/1 system-ui,sans-serif;'
+            + 'box-shadow:0 2px 10px rgba(0,0,0,.35)';
+        btn.addEventListener('click', () => openRenamer());
+        document.body.append(btn);
     }
 
-    // 2. An entry in the profile menu, when that menu can be found.
     function addMenuEntry() {
         if (document.getElementById('pf-renamer-entry')) return;
         const menu = document.querySelector('#menu_profile + .dropdown-menu')
@@ -351,13 +367,60 @@
         li.append(a);
         menu.append(li);
     }
-    addMenuEntry();
-    setInterval(addMenuEntry, 5000);
 
-    // 3. The console, in case both of the above fail.
+    if (typeof GM_registerMenuCommand === 'function') {
+        GM_registerMenuCommand('Rename vehicles', () => openRenamer());
+        GM_registerMenuCommand('Undo last rename', () => openRenamer(true));
+    }
+
+    const mount = () => {
+        addFloatingButton();
+        addMenuEntry();
+    };
+    mount();
+    document.addEventListener('DOMContentLoaded', mount);
+    setInterval(mount, 5000);
+
+    /**
+     * Self-check. Run pfRenamerCheck() in the console when something is wrong:
+     * it says whether the script is loaded, what the page is, and whether the
+     * two endpoints it depends on actually answer on this game.
+     */
+    async function selfCheck() {
+        const out = {
+            script: 'MissionChief Vehicle Renamer 1.2.0 is running',
+            url: location.href,
+            buttonOnPage: !!document.getElementById('pf-renamer-fab'),
+            menuEntryOnPage: !!document.getElementById('pf-renamer-entry'),
+        };
+        for (const path of ['/api/vehicles', '/api/buildings']) {
+            try {
+                const res = await fetch(path, { credentials: 'include' });
+                const body = await res.text();
+                let count = 'not an array';
+                try {
+                    const json = JSON.parse(body);
+                    count = Array.isArray(json) ? `${json.length} entries`
+                        : `object with keys: ${Object.keys(json).slice(0, 6).join(', ')}`;
+                } catch (e) {
+                    count = `not JSON — starts with: ${body.slice(0, 60)}`;
+                }
+                out[path] = `HTTP ${res.status}, ${count}`;
+            } catch (err) {
+                out[path] = `request failed: ${err.message}`;
+            }
+        }
+        console.log('%c Vehicle Renamer self-check ', 'background:#2f4490;color:#fff', out);
+        return out;
+    }
+
     try {
-        (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window).pfRenamer = openRenamer;
+        const w = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
+        w.pfRenamer = openRenamer;
+        w.pfRenamerCheck = selfCheck;
     } catch (e) {
         window.pfRenamer = openRenamer;
+        window.pfRenamerCheck = selfCheck;
     }
+
 })();
