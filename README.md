@@ -77,9 +77,14 @@ actually answer on this game.
 - Filters by station and by vehicle type; the counter restarts per station.
 - **Vehicle type names.** `/api/vehicles` sends a numeric `vehicle_type` and
   fills `vehicle_type_caption` only for custom types, so standard vehicles have
-  no name in any data the script can see. The dialog lists every type in your
-  fleet with its id and vehicle count, and you name them once; the names persist
-  in the browser. A button can fill them from `api.lss-manager.de` in your
+  no name in any data the script can see. The script ships with the names for
+  nine types, read out of a real en_US fleet, so a fresh install is useful at
+  once. The dialog lists every type in your fleet with its id and vehicle count
+  and lets you name the rest; typed names win over the built-in list and persist
+  in the browser.
+
+  To extend the built-in list: name the missing types, press **Copy type map**,
+  and paste the result into `BUILTIN_TYPE_NAMES` in the script. A button can fill them from `api.lss-manager.de` in your
   game's language — third-party, opt-in, never called on its own. That lookup
   goes through `GM_xmlhttpRequest`, because a plain cross-origin fetch from the
   game page is not dependable: the game's own console shows requests to

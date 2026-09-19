@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief Vehicle Renamer
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      1.5.0
+// @version      1.6.0
 // @description  Bulk-rename your vehicles from a pattern, with a preview before anything is written.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -67,6 +67,30 @@
     // supplied by you or fetched on request, and persist in this browser.
     const TYPES_KEY = 'pf-vehicle-renamer-types';
 
+    /**
+     * Vehicle type names that ship with the script, so a fresh install is
+     * useful straight away and needs no third-party call.
+     *
+     * Read out of a real MissionChief (en_US) fleet, so these are confirmed
+     * against the game rather than taken from a catalogue. The list covers only
+     * the types that fleet owned — it is a starting point, not the full
+     * catalogue, and unknown ids still fall through to "Type <id>".
+     *
+     * To extend it: name the missing types in the dialog, press "Copy type map",
+     * and paste the result here. A name you type always wins over this list.
+     */
+    const BUILTIN_TYPE_NAMES = {
+        3: 'Battalion chief unit',
+        5: 'ALS Ambulance',
+        6: 'Mobile air',
+        7: 'Water Tanker',
+        10: 'Patrol Car',
+        13: 'Quint',
+        18: 'Rescue Engine',
+        27: 'BLS Ambulance',
+        33: 'Pumper Tanker',
+    };
+
     function readTypeNames() {
         try {
             return JSON.parse(localStorage.getItem(TYPES_KEY)) || {};
@@ -86,11 +110,13 @@
     function typeInfo(vehicle) {
         const id = String(vehicle.vehicle_type ?? '');
         if (vehicle.vehicle_type_caption) {
-            return { id, name: vehicle.vehicle_type_caption, named: true };
+            return { id, name: vehicle.vehicle_type_caption, named: true, source: 'custom' };
         }
         const given = typeNames[id];
-        if (given) return { id, name: given, named: true };
-        return { id, name: `Type ${id}`, named: false };
+        if (given) return { id, name: given, named: true, source: 'yours' };
+        const builtin = BUILTIN_TYPE_NAMES[id];
+        if (builtin) return { id, name: builtin, named: true, source: 'builtin' };
+        return { id, name: `Type ${id}`, named: false, source: 'none' };
     }
 
     const BACKUP_KEY = 'pf-vehicle-renamer-backups';
@@ -359,7 +385,11 @@
               <td>${fixed
                     ? `<span>${esc(info.name)}</span> <span class="text-muted">(custom type)</span>`
                     : `<input class="form-control input-sm" data-pf="type-name"
-                         value="${esc(typeNames[id] || '')}" placeholder="Type ${esc(id)}">`}</td>
+                         value="${esc(typeNames[id] || '')}"
+                         placeholder="${esc(BUILTIN_TYPE_NAMES[id] || `Type ${id}`)}">
+                       ${info.source === 'builtin'
+                        ? '<span class="text-muted" style="font-size:11px">built into the script</span>'
+                        : ''}`}</td>
             </tr>`;
             }).join('')}</tbody></table>`;
 
@@ -453,7 +483,7 @@
                 let filled = 0;
                 for (const id of typeIds) {
                     const caption = data[id]?.caption;
-                    if (caption && !typeNames[id]) {
+                    if (caption && !typeNames[id] && caption !== BUILTIN_TYPE_NAMES[id]) {
                         typeNames[id] = caption;
                         filled++;
                     }
