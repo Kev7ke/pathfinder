@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief Renamer
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      2.0.0
+// @version      2.1.0
 // @description  Bulk-rename vehicles and stations from a pattern, with a preview before anything is written and an undo afterwards.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -72,8 +72,26 @@
         33: 'Pumper Tanker',
     };
 
-    /** Building type names. Empty until confirmed from a real game, same rule. */
-    const BUILTIN_BUILDING_TYPES = {};
+    /**
+     * Building type names.
+     *
+     * UNCONFIRMED. These are read off one player's own station names — type 0
+     * was called FS101, type 5 PO 2, type 29 Prison1 — so they are inferences
+     * from how that player labels things, not names the game gave us. They are
+     * only ever shown as labels, never used in a calculation, so a wrong one is
+     * cosmetic. Replace any of them by typing over it; a typed name wins.
+     *
+     * Note that a small and a full station share a building_type and differ by
+     * the small_building flag, so type 0 covers both sizes of fire station.
+     */
+    const BUILTIN_BUILDING_TYPES = {
+        0: 'Fire Station',
+        1: 'Dispatch Center',
+        3: 'Ambulance Station',
+        4: 'Fire Academy',
+        5: 'Police Station',
+        29: 'Prison',
+    };
 
     /** What the player calls each kind, so the dialog never says "buildings". */
     const KIND_NOUN = { vehicle: 'vehicle', building: 'station' };
@@ -374,6 +392,7 @@
                 <button class="btn btn-default" data-pf="dump" data-what="building-types">Station types</button>
                 <button class="btn btn-default" data-pf="dump" data-what="dispatch">Dispatch centers and stations</button>
                 <button class="btn btn-default" data-pf="dump" data-what="missions">Mission list check</button>
+                <button class="btn btn-primary" data-pf="dump" data-what="missions-export">Download mission list</button>
                 <button class="btn btn-default" data-pf="dump" data-what="selfcheck">Self-check</button>
               </p>
               <textarea id="pf-dump" class="form-control" rows="12" readonly
@@ -675,6 +694,19 @@
             }
         });
 
+        function download(filename, text) {
+            // The mission list runs to a megabyte or so, which no one is going
+            // to paste into a chat. Hand it over as a file instead.
+            const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.append(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+        }
+
         function toClipboard(text, what) {
             $('pf-dump').value = text;
             navigator.clipboard.writeText(text)
@@ -722,6 +754,33 @@
                         firstEntry: Array.isArray(data) ? data[0] : Object.entries(data)[0],
                     };
                     toClipboard(JSON.stringify(summary, null, 1), 'the mission list check');
+                } catch (err) {
+                    toClipboard(JSON.stringify({ error: err.message }, null, 1), 'the error');
+                }
+            } else if (what === 'missions-export') {
+                status.textContent = 'Fetching the mission list…';
+                try {
+                    const data = await getJSON('/einsaetze.json');
+                    // Keep what a planner needs, drop what it never reads. Icons
+                    // alone are three paths per mission.
+                    const slim = (Array.isArray(data) ? data : Object.values(data)).map((m) => ({
+                        id: m.id,
+                        name: m.name,
+                        place: m.place_array ?? (m.place ? [m.place] : []),
+                        average_credits: m.average_credits,
+                        requirements: m.requirements,
+                        prerequisites: m.prerequisites,
+                        chances: m.chances,
+                        categories: m.mission_categories,
+                        base_mission_id: m.base_mission_id,
+                        filter_id: m.additional?.filter_id,
+                    }));
+                    const text = JSON.stringify(slim);
+                    download('einsaetze-slim.json', text);
+                    status.innerHTML = `Downloaded <b>einsaetze-slim.json</b> —`
+                        + ` ${slim.length} missions, ${Math.round(text.length / 1024)} KB.`
+                        + ' Attach that file in the chat.';
+                    $('pf-dump').value = JSON.stringify(slim.slice(0, 3), null, 1);
                 } catch (err) {
                     toClipboard(JSON.stringify({ error: err.message }, null, 1), 'the error');
                 }
@@ -945,7 +1004,7 @@
 
     async function selfCheck() {
         const out = {
-            script: 'MissionChief Renamer 2.0.0 is running',
+            script: 'MissionChief Renamer 2.1.0 is running',
             url: location.href,
             locale: gameLocale() || '(not readable)',
             buttonOnPage: !!$('pf-renamer-fab'),

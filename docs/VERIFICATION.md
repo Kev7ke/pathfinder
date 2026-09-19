@@ -109,29 +109,36 @@ Build menu or the dataset, or it stays flagged. Two independent sources, or your
 own screen. Nothing from a `leitstellenspiel.*` domain is evidence about
 MissionChief. See `CORRECTIONS.md` for what happens when that rule is relaxed.
 
-## Lead: the game's own JSON endpoints
+## Confirmed: the game serves the mission list as JSON
 
-`jxn-30/LSS-Scripts` (MIT) is a userscript collection that explicitly supports
-the MissionChief domains, not only Leitstellenspiel. Two things in it matter
-here, neither yet confirmed against this game:
+`/einsaetze.json` exists on missionchief.com and needs no PDF. Read from the
+player's own account, logged in:
 
-**`/einsaetze.json`.** Ten of its scripts fetch this endpoint and read a
-`prerequisites` object per mission. If MissionChief serves the same thing, the
-whole print-to-PDF pipeline (`src/parse_pdf.py`) could be replaced by one
-authenticated fetch, with structured requirements instead of a reconstructed
-table — and it would settle `REQ-3` (whether a count means two extensions or two
-stations) from the game's own data. **Check first:** open
-`https://www.missionchief.com/einsaetze.json` while logged in and see whether it
-returns JSON and how many rows.
+- **1,519 missions**, against **1,261** in `data/missions.json`. The print-to-PDF
+  parse is missing **258**.
+- `prerequisites` per mission, structured: `{main_building: 0, fire_stations: 1}`.
+  No reconstructed table, no name matching against a price list.
+- `requirements` per mission: `{firetrucks: 1}` — **the vehicles a mission needs**,
+  which the project has never had. This is `VEH-1`, answered from the game.
+- `average_credits`, `place_array` (the POI), `mission_categories`,
+  `base_mission_id` (which ties intensity variants of one mission together) and
+  `chances`.
 
-**The station price formula (`PRICE-1`).** Its building cost calculator uses
-`ceil(100000 + 200000 * log2(n - 23))` for fire and police stations, with small
-stations at `min(full / 2, 1000000)` — note the cap. This is the same formula
-`prices.json` records as "posted and then disputed", so it is a second
-independent source rather than a confirmation: the script's formula table is
-keyed by German building names, so it is written for Leitstellenspiel even
-though the script runs on MissionChief. Still build-menu-or-nothing, but the
-odds it is right went up, and the 1,000,000 small-station cap is new.
+This supersedes `src/parse_pdf.py` as the way to get the dataset, and it settles
+`REQ-3` from the game's own data rather than by experiment. The renamer's data
+tab has a **Download mission list** button that fetches it and writes a slimmed
+`einsaetze-slim.json` (icons and unused fields dropped) for handing over.
+
+Not yet done: reconciling the two. The 258 extra rows have to be examined before
+anything is replaced — they may be new missions, or variants the PDF parse
+collapsed. Until that is checked, `data/missions.json` stays as it is.
+
+## Corroborated: the dispatch centre rate
+
+A 24-building account, two of them dispatch centres: `1 + floor(22 / 15) = 2`,
+which is exactly what that player owns. Consistent with the build-menu figure of
+**1 + 1 per 15 buildings**, and inconsistent with the help centre's 1 per 25,
+which would allow only one.
 
 ## Source note: the Xyrality help centre
 

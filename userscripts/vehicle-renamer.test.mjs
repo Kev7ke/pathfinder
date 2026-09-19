@@ -67,6 +67,18 @@ await pg.evaluate(() => {
       return new Response(form(`/buildings/${bl.id}`, 'building[name]', bl.caption),
         { headers: { 'content-type': 'text/html' } });
     }
+    if (url === '/einsaetze.json') {
+      return new Response(JSON.stringify([{
+        id: '0', name: 'Bin fire', place: 'Bus stop', place_array: ['Bus stop'],
+        average_credits: 110, generated_by: '',
+        icons: ['/images/a.png', '/images/b.png', '/images/c.png'],
+        requirements: { firetrucks: 1 }, chances: {},
+        additional: { filter_id: 'firehouse_missions' },
+        prerequisites: { main_building: 0, fire_stations: 1 },
+        overlay_index: null, base_mission_id: 0, additive_overlays: '',
+        mission_categories: ['fire', 'urban'],
+      }]));
+    }
     if (opts.method && opts.method.toLowerCase() === 'post') {
       const entries = {};
       for (const [k, val] of opts.body.entries()) entries[k] = val;
@@ -166,6 +178,30 @@ console.log('dispatch dump     :', JSON.stringify(dump));
 assert.equal(dump.dispatchCenters.length, 1);
 assert.deepEqual(dump.withoutDispatchCenter, ['Lone Station'],
   'a station with no dispatch centre was not reported');
+
+// ---- the mission list export ----
+await pg.evaluate(() => {
+  window.__downloaded = null;
+  const realCreate = URL.createObjectURL;
+  URL.createObjectURL = (blob) => {
+    blob.text().then((t) => { window.__downloaded = t; });
+    return realCreate.call(URL, blob);
+  };
+  HTMLAnchorElement.prototype.click = function () { window.__downloadName = this.download; };
+});
+await pg.click('[data-pf="dump"][data-what="missions-export"]');
+await pg.waitForFunction(() => window.__downloaded !== null);
+const exported = JSON.parse(await pg.evaluate(() => window.__downloaded));
+console.log('export filename   :', await pg.evaluate(() => window.__downloadName));
+console.log('exported mission  :', JSON.stringify(exported[0]));
+assert.equal(exported.length, 1);
+assert.deepEqual(exported[0].prerequisites, { main_building: 0, fire_stations: 1 },
+  'the prerequisites were not carried through');
+assert.deepEqual(exported[0].requirements, { firetrucks: 1 },
+  'the vehicle requirements were not carried through');
+assert.equal(exported[0].place[0], 'Bus stop');
+assert.ok(!('icons' in exported[0]), 'icons should be dropped to keep the file small');
+assert.ok(!('generated_by' in exported[0]), 'unused fields should be dropped');
 
 console.log('page errors       :', errs.length ? errs : 'none');
 assert.equal(errs.length, 0);
