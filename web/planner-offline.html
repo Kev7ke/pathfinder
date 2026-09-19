@@ -82,6 +82,18 @@ input.num{font-family:var(--mono);text-align:right}
   border:1px solid var(--hair);background:var(--surface);color:var(--ink);border-radius:6px;padding:7px 12px}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 
+.eff{font-family:var(--mono);font-size:11px;color:var(--ok);min-height:14px}
+.extrow{display:grid;grid-template-columns:1fr auto auto auto auto;gap:8px;align-items:end;
+  padding:8px 0;border-bottom:1px solid var(--hair-soft)}
+.extrow:last-child{border-bottom:0}
+.extrow .nm{font-size:13px;font-weight:600;align-self:center;min-width:0;overflow-wrap:anywhere}
+.extrow label{display:flex;flex-direction:column;gap:3px;font-size:10.5px;color:var(--ink-2);
+  font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase}
+.extrow input{width:64px}
+.extrow select{padding:5px 6px;font-size:12px}
+.extrow .rm{appearance:none;border:0;background:none;cursor:pointer;color:var(--ink-2);font-size:17px;line-height:1;padding:0 2px;align-self:center}
+.extrow.spec{border-left:3px solid var(--chk);padding-left:8px;margin-left:-8px}
+@media (max-width:560px){.extrow{grid-template-columns:1fr auto auto;row-gap:6px}.extrow .nm{grid-column:1/-1}}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--hair-soft);
   border-radius:999px;padding:3px 6px 3px 10px;font-size:12.5px}
@@ -161,15 +173,17 @@ td.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:no
       <div class="card">
         <span class="eyebrow" id="l-yours">What you own</span>
         <div class="owned" style="margin-top:10px">
-          <label><span id="l-fire">Fire stations</span><input class="num" type="number" min="0" id="own-fire" value="0"></label>
-          <label><span id="l-ems">Ambulance stations</span><input class="num" type="number" min="0" id="own-ems" value="0"></label>
-          <label><span id="l-police">Police stations</span><input class="num" type="number" min="0" id="own-police" value="0"></label>
+          <label><span id="l-fire">Fire stations</span><input class="num" type="number" min="0" id="own-fire" value="0"><span class="eff" id="eff-fire"></span></label>
+          <label><span id="l-ems">Ambulance stations</span><input class="num" type="number" min="0" id="own-ems" value="0"><span class="eff" id="eff-ems"></span></label>
+          <label><span id="l-police">Police stations</span><input class="num" type="number" min="0" id="own-police" value="0"><span class="eff" id="eff-police"></span></label>
         </div>
+        <p class="warn" id="overdrawn" hidden></p>
         <div style="margin-top:14px">
           <span class="eyebrow" id="l-ext">Extensions you own</span>
           <input type="search" id="ext-add" style="width:100%;margin-top:6px" placeholder="Search an extension to add…" list="ext-list">
           <datalist id="ext-list"></datalist>
-          <div class="chips" id="ext-chips"></div>
+          <p class="hint" id="l-exthint"></p>
+          <div id="ext-rows"></div>
         </div>
         <div style="margin-top:14px">
           <span class="eyebrow" id="l-size">Price growth with</span><br>
@@ -303,6 +317,71 @@ function emptyState() {
   return { fire: 0, ems: 0, police: 0, ext: {} };
 }
 
+/**
+ * How an extension is owned. A plain number is the count of buildings carrying
+ * it; the object form adds how many of those are SPECIALISED.
+ * @typedef {number | {count: number, specialised?: number}} Owned
+ */
+function ownedCount(entry) {
+  if (entry == null) return { count: 0, specialised: 0, host: null };
+  if (typeof entry === 'number') return { count: Math.max(0, entry), specialised: 0, host: null };
+  const count = Math.max(0, entry.count || 0);
+  return {
+    count,
+    specialised: Math.min(count, Math.max(0, entry.specialised || 0)),
+    host: entry.host || null,
+  };
+}
+
+/**
+ * An extension sits ON a station, and it counts twice: the building still
+ * counts toward its own station type, and the extension counts toward its own
+ * requirement. Forestry on a fire station is a fire station AND a Forestry
+ * station.
+ *
+ * A SPECIALISED station is the exception. It can only spawn its specialty's
+ * calls, so it leaves its base station pool and counts only as the specialty.
+ * Ten fire stations with two specialised into Forestry are eight fire stations
+ * and two Forestry stations.
+ *
+ * Returns the flat state the rest of the algorithm works on, plus what was
+ * withdrawn, so the UI can show the player why their station count dropped.
+ */
+function effectiveState(owned, extHosts = {}) {
+  const out = {
+    fire: Math.max(0, owned.fire || 0),
+    ems: Math.max(0, owned.ems || 0),
+    police: Math.max(0, owned.police || 0),
+    ext: {},
+  };
+  const withdrawn = { fire: 0, ems: 0, police: 0 };
+  const overdrawn = [];
+
+  for (const [name, entry] of Object.entries(owned.ext || {})) {
+    const { count, specialised, host } = ownedCount(entry);
+    if (count > 0) out.ext[name] = count;
+    if (!specialised) continue;
+    // Which station the extension sits on is the player's to set: it is not the
+    // same question as which missions need it, so it is never derived silently.
+    const on = host || extHosts[name] || 'fire';
+    withdrawn[DEPTS.includes(on) ? on : 'fire'] += specialised;
+  }
+
+  for (const dept of DEPTS) {
+    if (withdrawn[dept] > out[dept]) {
+      overdrawn.push({ dept, have: out[dept], specialised: withdrawn[dept] });
+    }
+    out[dept] = Math.max(0, out[dept] - withdrawn[dept]);
+  }
+  return { state: out, withdrawn, overdrawn };
+}
+
+/** Resolve whatever shape the caller passed into the flat state. */
+function resolve(state, opts) {
+  if (opts && opts.alreadyEffective) return state;
+  return effectiveState(state, opts?.extensionHosts || opts?.extensionDepartments || {}).state;
+}
+
 /** Station and extension requirements this state does not meet yet. */
 function shortfall(mission, state) {
   const stations = {
@@ -322,6 +401,22 @@ function canSpawn(mission, state) {
   const s = shortfall(mission, state);
   return s.stations.fire === 0 && s.stations.ems === 0 && s.stations.police === 0
     && Object.keys(s.ext).length === 0;
+}
+
+/**
+ * Look a requirement up in the price table. Mission requirements name
+ * extensions, but a few of them are filed under buildings (Tow Truck Station,
+ * required by 43 missions). Falling back by normalised name keeps one price in
+ * one place instead of duplicating it into both groups, where a correction to
+ * one would silently leave the other stale.
+ */
+function priceEntry(prices, key) {
+  const direct = prices.extensions && prices.extensions[key];
+  if (direct && typeof direct.price === 'number') return direct;
+  const snake = key.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  const building = prices.buildings && prices.buildings[snake];
+  if (building && typeof building.price === 'number') return building;
+  return null;
 }
 
 function stationPrices(prices, useSmall) {
@@ -362,8 +457,8 @@ function priceShortfall(sf, prices, opts = {}) {
   }
 
   for (const [key, n] of Object.entries(sf.ext)) {
-    const entry = prices.extensions[key];
-    if (!entry || typeof entry.price !== 'number') {
+    const entry = priceEntry(prices, key);
+    if (!entry) {
       unknown.push(key);
       continue;
     }
@@ -381,15 +476,16 @@ function priceShortfall(sf, prices, opts = {}) {
  * current state. Costs are ABSOLUTE, not incremental: rung 4 already contains
  * everything rung 2 needed, so the rungs must never be summed.
  */
-function ladder(missions, path, state, prices, opts = {}) {
+function ladder(missions, path, owned, prices, opts = {}) {
   const extDept = opts.extensionDepartments || extensionDepartments(missions);
+  const state = resolve(owned, { ...opts, extensionDepartments: extDept });
   const candidates = [];
   // A rung that pays less than what the player can already spawn raises nothing.
   // Seeding the running maximum with the current ceiling keeps the frontier to
   // rungs that actually lift it, which is what ALGORITHM.md says it is for.
   // Pass fromCeiling:false for the unseeded walk.
   const floor = opts.fromCeiling === false ? -Infinity
-    : (ceiling(missions, path, state)?.credits ?? -Infinity);
+    : (ceiling(missions, path, state, { alreadyEffective: true })?.credits ?? -Infinity);
 
   for (const m of missions) {
     if (m.path !== path) continue;
@@ -397,10 +493,17 @@ function ladder(missions, path, state, prices, opts = {}) {
     if (canSpawn(m, state)) continue;
     const sf = shortfall(m, state);
     const priced = priceShortfall(sf, prices, { ...opts, extensionDepartments: extDept });
-    candidates.push({ mission: m, shortfall: sf, ...priced });
+    candidates.push({
+      mission: m, shortfall: sf, ...priced,
+      costIsLowerBound: priced.unknown.length > 0,
+    });
   }
 
-  candidates.sort((a, b) => a.cost - b.cost || b.mission.credits - a.mission.credits);
+  // A rung carrying an unknown price has a cost that is only a lower bound, so
+  // it must never outrank a fully priced rung that costs the same.
+  candidates.sort((a, b) => a.cost - b.cost
+    || (a.unknown.length ? 1 : 0) - (b.unknown.length ? 1 : 0)
+    || b.mission.credits - a.mission.credits);
 
   const rungs = [];
   let best = floor;
@@ -474,8 +577,9 @@ function milestones(annotated, opts = {}) {
  * its own: what unlocks the most additional missions first, cheapest to break a
  * tie. This is what the front page shows as "buy this next".
  */
-function nextPurchases(rung, state, missions, prices, opts = {}) {
+function nextPurchases(rung, owned, missions, prices, opts = {}) {
   const useSmall = opts.useSmall !== false;
+  const state = resolve(owned, opts);
   const st = stationPrices(prices, useSmall);
   const items = [];
 
@@ -485,7 +589,7 @@ function nextPurchases(rung, state, missions, prices, opts = {}) {
     }
   }
   for (const [key, n] of Object.entries(rung.shortfall.ext)) {
-    const entry = prices.extensions[key];
+    const entry = priceEntry(prices, key);
     for (let i = 0; i < n; i++) {
       items.push({
         kind: 'extension', key, label: key,
@@ -516,7 +620,8 @@ function nextPurchases(rung, state, missions, prices, opts = {}) {
   return scored;
 }
 
-function ceiling(missions, path, state) {
+function ceiling(missions, path, owned, opts = {}) {
+  const state = resolve(owned, opts);
   let best = null;
   for (const m of missions) {
     if (m.path !== path || m.credits == null) continue;
@@ -541,6 +646,11 @@ const STRINGS = {
     yours: 'What you own',
     fire: 'Fire stations', ems: 'Ambulance stations', police: 'Police stations',
     extensions: 'Extensions you own',
+    extTotal: 'Buildings', extSpec: 'Specialised', extHost: 'Sits on',
+    extHeadHint: 'An extension counts twice: the building still counts as its own station, and the extension counts as itself. A specialised station is the exception — it only spawns its specialty, so it leaves its base station count.',
+    effective: 'counts as', specialisedAway: 'specialised away',
+    hostGuess: 'Station type is a guess from the mission data — correct it if it is wrong.',
+    overdrawn: 'You have marked more stations specialised than you own:',
     addExtension: 'Search an extension to add…',
     noExtensions: 'None yet. Search above to add one.',
     stationSize: 'Price growth with',
@@ -592,6 +702,11 @@ const STRINGS = {
     yours: 'Was du besitzt',
     fire: 'Feuerwachen', ems: 'Rettungswachen', police: 'Polizeiwachen',
     extensions: 'Deine Erweiterungen',
+    extTotal: 'Geb\u00e4ude', extSpec: 'Spezialisiert', extHost: 'Sitzt auf',
+    extHeadHint: 'Eine Erweiterung z\u00e4hlt doppelt: das Geb\u00e4ude z\u00e4hlt weiter als seine eigene Wache, und die Erweiterung z\u00e4hlt als sie selbst. Ausnahme ist die Spezialisierung \u2014 sie spawnt nur noch ihre eigenen Eins\u00e4tze und f\u00e4llt damit aus der Basis-Wachenzahl heraus.',
+    effective: 'z\u00e4hlt als', specialisedAway: 'spezialisiert abgezogen',
+    hostGuess: 'Der Wachentyp ist aus den Einsatzdaten geraten \u2014 korrigiere ihn, wenn er falsch ist.',
+    overdrawn: 'Du hast mehr Wachen als spezialisiert markiert, als du besitzt:',
     addExtension: 'Erweiterung suchen und hinzufügen…',
     noExtensions: 'Noch keine. Oben suchen, um eine hinzuzufügen.',
     stationSize: 'Ausbau rechnen mit',
@@ -695,11 +810,13 @@ function load() {
 function view() {
   const p = prices();
   const opts = { useSmall: ui.useSmall, extensionDepartments: EXT_DEPT };
+  const eff = effectiveState(ui.own, EXT_DEPT);
   const rungs = annotate(ladder(MISSIONS, ui.path, ui.own, p, opts), ui.path);
   const spine = milestones(rungs);
   const target = spine[0] || rungs[0] || null;
   const queue = target ? nextPurchases(target, ui.own, MISSIONS, p, opts) : [];
-  return { prices: p, rungs, spine, target, queue, top: ceiling(MISSIONS, ui.path, ui.own) };
+  return { prices: p, rungs, spine, target, queue, eff,
+    top: ceiling(MISSIONS, ui.path, ui.own) };
 }
 
 function sourcePill(source) {
@@ -750,7 +867,7 @@ function renderPlan(v) {
       <div class="n">${i + 1}</div>
       <div><div class="t">${esc(r.mission.name)}${detour}</div>
         <div class="d">${esc(needsText(r))}</div>${warn}</div>
-      <div class="c"><div class="cr">${fmt(r.mission.credits)}</div><div class="co">${fmt(r.cost)}</div></div>
+      <div class="c"><div class="cr">${fmt(r.mission.credits)}</div><div class="co">${r.costIsLowerBound ? '\u2265 ' : ''}${fmt(r.cost)}</div></div>
     </div>`;
   }).join('') || `<p class="hint">—</p>`;
 }
@@ -765,7 +882,7 @@ function renderLadder(v) {
       ? `<div class="warn">${t().unknownPrice}: ${esc(r.unknown.join(', '))}</div>` : '';
     const gain = Number.isFinite(r.gainPer100k) ? fmt(Math.round(r.gainPer100k)) : '—';
     return `<tr class="${r.isTrap ? 'trap' : r.isDetour ? 'detour' : ''}">
-      <td class="mono">${fmt(r.cost)}</td>
+      <td class="mono">${r.costIsLowerBound ? '\u2265 ' : ''}${fmt(r.cost)}</td>
       <td class="mono">${fmt(r.mission.credits)}</td>
       <td class="mono">${gain}</td>
       <td class="mono">${Math.round(r.ownShare * 100)}%</td>
@@ -826,13 +943,50 @@ function renderPrices() {
   </tr>`).join('');
 }
 
-function renderExtChips() {
-  const entries = Object.entries(ui.own.ext).filter(([, n]) => n > 0);
-  $('ext-chips').innerHTML = entries.length
-    ? entries.map(([k, n]) => `<span class="chip" data-k="${esc(k)}">${esc(k)}
-        <input class="num" type="number" min="0" value="${n}" data-f="n" aria-label="${esc(k)}">
-        <button data-f="x" aria-label="remove">×</button></span>`).join('')
-    : `<p class="hint">${t().noExtensions}</p>`;
+const DEPT_LABEL = () => ({ fire: t().fire, ems: t().ems, police: t().police });
+
+function renderExtRows(v) {
+  const s = t();
+  const entries = Object.entries(ui.own.ext)
+    .map(([k, e]) => [k, ownedCount(e)])
+    .filter(([, o]) => o.count > 0)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+
+  $('ext-rows').innerHTML = entries.length ? entries.map(([k, o]) => {
+    const host = o.host || EXT_DEPT[k] || 'fire';
+    const guessed = !o.host;
+    const labels = DEPT_LABEL();
+    return `<div class="extrow${o.specialised ? ' spec' : ''}" data-k="${esc(k)}">
+      <div class="nm">${esc(k)}</div>
+      <label>${s.extTotal}<input class="num" type="number" min="0" data-f="count"
+        value="${o.count}" aria-label="${esc(k)} ${s.extTotal}"></label>
+      <label>${s.extSpec}<input class="num" type="number" min="0" max="${o.count}" data-f="spec"
+        value="${o.specialised}" aria-label="${esc(k)} ${s.extSpec}"></label>
+      <label>${s.extHost}<select data-f="host" aria-label="${esc(k)} ${s.extHost}"
+        title="${guessed ? esc(s.hostGuess) : ''}">
+        ${['fire', 'ems', 'police'].map((d) =>
+          `<option value="${d}"${d === host ? ' selected' : ''}>${esc(labels[d])}</option>`).join('')}
+      </select></label>
+      <button class="rm" data-f="x" aria-label="remove ${esc(k)}">×</button>
+    </div>`;
+  }).join('') : `<p class="hint">${s.noExtensions}</p>`;
+
+  renderEffective(v);
+}
+
+/** What specialisation did to the station counts. Shared by both edit paths. */
+function renderEffective(v) {
+  const s = t();
+  for (const d of ['fire', 'ems', 'police']) {
+    const away = v.eff.withdrawn[d];
+    $('eff-' + d).textContent = away
+      ? `${s.effective} ${v.eff.state[d]} (${away} ${s.specialisedAway})` : '';
+  }
+  const over = v.eff.overdrawn;
+  $('overdrawn').hidden = over.length === 0;
+  $('overdrawn').textContent = over.length
+    ? `${s.overdrawn} ${over.map((o) => `${DEPT_LABEL()[o.dept]} ${o.specialised}/${o.have}`).join(', ')}`
+    : '';
 }
 
 function applyLanguage() {
@@ -843,7 +997,7 @@ function applyLanguage() {
   [...$('tabs').children].forEach((b) => { b.textContent = s.tabs[b.dataset.t]; });
   const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
   set('l-yours', s.yours); set('l-fire', s.fire); set('l-ems', s.ems); set('l-police', s.police);
-  set('l-ext', s.extensions); set('l-size', s.stationSize); set('l-sizenote', s.smallNote);
+  set('l-ext', s.extensions); set('l-exthint', s.extHeadHint); set('l-size', s.stationSize); set('l-sizenote', s.smallNote);
   set('l-ceiling', s.ceiling); set('l-ceilhint', s.ceilingHint); set('l-buy', s.buyNext);
   set('l-spine', s.spine); set('l-spinehint', s.spineHint);
   set('l-ladder', s.ladderTitle); set('l-ladderhint', s.ladderHint);
@@ -872,7 +1026,7 @@ function render() {
   renderLadder(v);
   renderMissions();
   renderPrices();
-  renderExtChips();
+  renderExtRows(v);
 }
 
 // ---------- events ----------
@@ -912,23 +1066,45 @@ function wire() {
   $('ext-add').addEventListener('change', (e) => {
     const name = e.target.value.trim();
     if (EXT_NAMES.includes(name)) {
-      ui.own.ext[name] = (ui.own.ext[name] || 0) + 1;
+      const cur = ownedCount(ui.own.ext[name]);
+      ui.own.ext[name] = {
+        count: cur.count + 1,
+        specialised: cur.specialised,
+        host: cur.host || EXT_DEPT[name] || 'fire',
+      };
       e.target.value = ''; save(); render();
     }
   });
 
-  $('ext-chips').addEventListener('click', (e) => {
+  $('ext-rows').addEventListener('click', (e) => {
     if (e.target.dataset.f !== 'x') return;
-    delete ui.own.ext[e.target.closest('.chip').dataset.k];
+    delete ui.own.ext[e.target.closest('.extrow').dataset.k];
     save(); render();
   });
-  $('ext-chips').addEventListener('input', (e) => {
-    if (e.target.dataset.f !== 'n') return;
-    const key = e.target.closest('.chip').dataset.k;
-    const n = Math.max(0, parseInt(e.target.value, 10) || 0);
-    if (n === 0) delete ui.own.ext[key]; else ui.own.ext[key] = n;
-    save(); const v = view(); renderPlan(v); renderLadder(v); renderMissions();
-  });
+  $('ext-rows').addEventListener('input', onExtEdit);
+  $('ext-rows').addEventListener('change', onExtEdit);
+  function onExtEdit(e) {
+    const f = e.target.dataset.f;
+    if (!f || f === 'x') return;
+    const key = e.target.closest('.extrow').dataset.k;
+    const cur = ownedCount(ui.own.ext[key]);
+    const entry = { count: cur.count, specialised: cur.specialised, host: cur.host || EXT_DEPT[key] || 'fire' };
+    if (f === 'count') entry.count = Math.max(0, parseInt(e.target.value, 10) || 0);
+    if (f === 'spec') entry.specialised = Math.max(0, parseInt(e.target.value, 10) || 0);
+    if (f === 'host') entry.host = e.target.value;
+    entry.specialised = Math.min(entry.specialised, entry.count);
+    if (entry.count === 0) delete ui.own.ext[key]; else ui.own.ext[key] = entry;
+    save();
+    const v = view();
+    renderPlan(v); renderLadder(v); renderMissions();
+    // A structural change redraws the list; typing a number must not.
+    if (f === 'host' || entry.count === 0) {
+      renderExtRows(v);
+    } else {
+      renderEffective(v);
+      e.target.closest('.extrow').classList.toggle('spec', entry.specialised > 0);
+    }
+  }
 
   $('m-search').addEventListener('input', (e) => { ui.missionTerm = e.target.value.toLowerCase().trim(); renderMissions(); });
   $('pr-search').addEventListener('input', (e) => { ui.priceTerm = e.target.value.toLowerCase().trim(); renderPrices(); });

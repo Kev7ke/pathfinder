@@ -81,6 +81,18 @@ input.num{font-family:var(--mono);text-align:right}
   border:1px solid var(--hair);background:var(--surface);color:var(--ink);border-radius:6px;padding:7px 12px}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 
+.eff{font-family:var(--mono);font-size:11px;color:var(--ok);min-height:14px}
+.extrow{display:grid;grid-template-columns:1fr auto auto auto auto;gap:8px;align-items:end;
+  padding:8px 0;border-bottom:1px solid var(--hair-soft)}
+.extrow:last-child{border-bottom:0}
+.extrow .nm{font-size:13px;font-weight:600;align-self:center;min-width:0;overflow-wrap:anywhere}
+.extrow label{display:flex;flex-direction:column;gap:3px;font-size:10.5px;color:var(--ink-2);
+  font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase}
+.extrow input{width:64px}
+.extrow select{padding:5px 6px;font-size:12px}
+.extrow .rm{appearance:none;border:0;background:none;cursor:pointer;color:var(--ink-2);font-size:17px;line-height:1;padding:0 2px;align-self:center}
+.extrow.spec{border-left:3px solid var(--chk);padding-left:8px;margin-left:-8px}
+@media (max-width:560px){.extrow{grid-template-columns:1fr auto auto;row-gap:6px}.extrow .nm{grid-column:1/-1}}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--hair-soft);
   border-radius:999px;padding:3px 6px 3px 10px;font-size:12.5px}
@@ -160,15 +172,17 @@ td.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:no
       <div class="card">
         <span class="eyebrow" id="l-yours">What you own</span>
         <div class="owned" style="margin-top:10px">
-          <label><span id="l-fire">Fire stations</span><input class="num" type="number" min="0" id="own-fire" value="0"></label>
-          <label><span id="l-ems">Ambulance stations</span><input class="num" type="number" min="0" id="own-ems" value="0"></label>
-          <label><span id="l-police">Police stations</span><input class="num" type="number" min="0" id="own-police" value="0"></label>
+          <label><span id="l-fire">Fire stations</span><input class="num" type="number" min="0" id="own-fire" value="0"><span class="eff" id="eff-fire"></span></label>
+          <label><span id="l-ems">Ambulance stations</span><input class="num" type="number" min="0" id="own-ems" value="0"><span class="eff" id="eff-ems"></span></label>
+          <label><span id="l-police">Police stations</span><input class="num" type="number" min="0" id="own-police" value="0"><span class="eff" id="eff-police"></span></label>
         </div>
+        <p class="warn" id="overdrawn" hidden></p>
         <div style="margin-top:14px">
           <span class="eyebrow" id="l-ext">Extensions you own</span>
           <input type="search" id="ext-add" style="width:100%;margin-top:6px" placeholder="Search an extension to add…" list="ext-list">
           <datalist id="ext-list"></datalist>
-          <div class="chips" id="ext-chips"></div>
+          <p class="hint" id="l-exthint"></p>
+          <div id="ext-rows"></div>
         </div>
         <div style="margin-top:14px">
           <span class="eyebrow" id="l-size">Price growth with</span><br>

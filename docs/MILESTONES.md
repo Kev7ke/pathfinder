@@ -76,9 +76,22 @@ thing that answers "what is the biggest mission I can reach".
 5. **Path contract up front.** Say at rung 0 that the EMS ceiling eventually
    needs fire and police.
 
-The worked example still holds: on the EMS path, rung 5 costs 600,000 more than
-rung 4, spends 75% of it on fire stations, and raises the ceiling by 1,400
-credits — a tenth of the return of the rungs on either side.
+The worked example, recomputed in rev 3: on the EMS path, rung 5 costs 600,000
+more than rung 4, raises the ceiling by 1,000 credits and spends over a third of
+that outside the path — a fifteenth of the return of the rungs on either side.
+
+> **Correction.** Revisions 1 and 2 used *Massive Debris from Rockslide* as this
+> example, at 1,600,000 for 15,400 credits. That figure was wrong. The mission
+> needs **8× Tow Truck Station**, a requirement the price table filed under
+> `buildings` rather than `extensions`, so the planner resolved it to no price
+> and costed those eight buildings at zero. The real cost is **4,000,000**, and
+> at that price the rung is not on the frontier at all. The provenance system
+> did flag the gap — the rung carried an unknown price — but the cost was still
+> published as a plain number beside fully priced rungs. Since rev 3 an unknown
+> price makes the cost a lower bound: it sorts behind fully priced rungs of the
+> same cost and renders as `≥`. The example now falls to *Airplane Crash in
+> Urban Area* (1,600,000, 15,000, 167 per 100k, 63% on-path), which makes the
+> same point with a number that is actually true.
 
 ### Layer 3 — spawn mix (new, and the real answer to "maximize profit")
 
@@ -128,6 +141,34 @@ fans (4,500,000, 23,000).
 24,000, last cheap thing on the path) → Flood / Disaster Response (2,100,000,
 25,000, both prices estimates and both ladder-critical) → industrial tier
 (2,850,000 upward, to 56,500).
+
+## How extensions and specialisation are counted
+
+Added in rev 3, from the player's description of the mechanic.
+
+An extension sits **on** a station and counts twice: the building still counts
+toward its own station type, and the extension counts toward its own
+requirement. Forestry on a fire station is a fire station *and* a Forestry
+station.
+
+A **specialised** station is the exception. It can only spawn its specialty's
+calls, so it leaves its base station pool and counts only as the specialty. Ten
+fire stations with two specialised into Forestry are eight fire stations and two
+Forestry stations. `effectiveState()` in `src/planner.js` does this, and the app
+shows the withdrawal beside the station count so a dropping ceiling is never a
+mystery.
+
+Which station an extension sits on is **the player's to set**, defaulted from
+the dataset but never silently. The derived map answers "which missions need this
+extension", which is a different question from "which building does it sit on",
+and it gets several wrong: it files Water Police Extension and Federal Police
+Station under fire, because fire missions ask for them.
+
+Still open: does a specialised station stop **responding** to other missions, or
+only stop **spawning** them? The planner assumes it stops counting entirely, per
+the player's description. If it still responds, the withdrawal applies to
+spawning only and the ladder over-costs every state that has specialisations in
+it. That is `SPEC-3` in `VERIFICATION.md`.
 
 ## Open decision for the player
 

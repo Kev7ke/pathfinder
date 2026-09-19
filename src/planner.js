@@ -54,6 +54,71 @@ export function emptyState() {
   return { fire: 0, ems: 0, police: 0, ext: {} };
 }
 
+/**
+ * How an extension is owned. A plain number is the count of buildings carrying
+ * it; the object form adds how many of those are SPECIALISED.
+ * @typedef {number | {count: number, specialised?: number}} Owned
+ */
+export function ownedCount(entry) {
+  if (entry == null) return { count: 0, specialised: 0, host: null };
+  if (typeof entry === 'number') return { count: Math.max(0, entry), specialised: 0, host: null };
+  const count = Math.max(0, entry.count || 0);
+  return {
+    count,
+    specialised: Math.min(count, Math.max(0, entry.specialised || 0)),
+    host: entry.host || null,
+  };
+}
+
+/**
+ * An extension sits ON a station, and it counts twice: the building still
+ * counts toward its own station type, and the extension counts toward its own
+ * requirement. Forestry on a fire station is a fire station AND a Forestry
+ * station.
+ *
+ * A SPECIALISED station is the exception. It can only spawn its specialty's
+ * calls, so it leaves its base station pool and counts only as the specialty.
+ * Ten fire stations with two specialised into Forestry are eight fire stations
+ * and two Forestry stations.
+ *
+ * Returns the flat state the rest of the algorithm works on, plus what was
+ * withdrawn, so the UI can show the player why their station count dropped.
+ */
+export function effectiveState(owned, extHosts = {}) {
+  const out = {
+    fire: Math.max(0, owned.fire || 0),
+    ems: Math.max(0, owned.ems || 0),
+    police: Math.max(0, owned.police || 0),
+    ext: {},
+  };
+  const withdrawn = { fire: 0, ems: 0, police: 0 };
+  const overdrawn = [];
+
+  for (const [name, entry] of Object.entries(owned.ext || {})) {
+    const { count, specialised, host } = ownedCount(entry);
+    if (count > 0) out.ext[name] = count;
+    if (!specialised) continue;
+    // Which station the extension sits on is the player's to set: it is not the
+    // same question as which missions need it, so it is never derived silently.
+    const on = host || extHosts[name] || 'fire';
+    withdrawn[DEPTS.includes(on) ? on : 'fire'] += specialised;
+  }
+
+  for (const dept of DEPTS) {
+    if (withdrawn[dept] > out[dept]) {
+      overdrawn.push({ dept, have: out[dept], specialised: withdrawn[dept] });
+    }
+    out[dept] = Math.max(0, out[dept] - withdrawn[dept]);
+  }
+  return { state: out, withdrawn, overdrawn };
+}
+
+/** Resolve whatever shape the caller passed into the flat state. */
+function resolve(state, opts) {
+  if (opts && opts.alreadyEffective) return state;
+  return effectiveState(state, opts?.extensionHosts || opts?.extensionDepartments || {}).state;
+}
+
 /** Station and extension requirements this state does not meet yet. */
 export function shortfall(mission, state) {
   const stations = {
@@ -73,6 +138,22 @@ export function canSpawn(mission, state) {
   const s = shortfall(mission, state);
   return s.stations.fire === 0 && s.stations.ems === 0 && s.stations.police === 0
     && Object.keys(s.ext).length === 0;
+}
+
+/**
+ * Look a requirement up in the price table. Mission requirements name
+ * extensions, but a few of them are filed under buildings (Tow Truck Station,
+ * required by 43 missions). Falling back by normalised name keeps one price in
+ * one place instead of duplicating it into both groups, where a correction to
+ * one would silently leave the other stale.
+ */
+export function priceEntry(prices, key) {
+  const direct = prices.extensions && prices.extensions[key];
+  if (direct && typeof direct.price === 'number') return direct;
+  const snake = key.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  const building = prices.buildings && prices.buildings[snake];
+  if (building && typeof building.price === 'number') return building;
+  return null;
 }
 
 function stationPrices(prices, useSmall) {
@@ -113,8 +194,8 @@ export function priceShortfall(sf, prices, opts = {}) {
   }
 
   for (const [key, n] of Object.entries(sf.ext)) {
-    const entry = prices.extensions[key];
-    if (!entry || typeof entry.price !== 'number') {
+    const entry = priceEntry(prices, key);
+    if (!entry) {
       unknown.push(key);
       continue;
     }
@@ -132,15 +213,16 @@ export function priceShortfall(sf, prices, opts = {}) {
  * current state. Costs are ABSOLUTE, not incremental: rung 4 already contains
  * everything rung 2 needed, so the rungs must never be summed.
  */
-export function ladder(missions, path, state, prices, opts = {}) {
+export function ladder(missions, path, owned, prices, opts = {}) {
   const extDept = opts.extensionDepartments || extensionDepartments(missions);
+  const state = resolve(owned, { ...opts, extensionDepartments: extDept });
   const candidates = [];
   // A rung that pays less than what the player can already spawn raises nothing.
   // Seeding the running maximum with the current ceiling keeps the frontier to
   // rungs that actually lift it, which is what ALGORITHM.md says it is for.
   // Pass fromCeiling:false for the unseeded walk.
   const floor = opts.fromCeiling === false ? -Infinity
-    : (ceiling(missions, path, state)?.credits ?? -Infinity);
+    : (ceiling(missions, path, state, { alreadyEffective: true })?.credits ?? -Infinity);
 
   for (const m of missions) {
     if (m.path !== path) continue;
@@ -148,10 +230,17 @@ export function ladder(missions, path, state, prices, opts = {}) {
     if (canSpawn(m, state)) continue;
     const sf = shortfall(m, state);
     const priced = priceShortfall(sf, prices, { ...opts, extensionDepartments: extDept });
-    candidates.push({ mission: m, shortfall: sf, ...priced });
+    candidates.push({
+      mission: m, shortfall: sf, ...priced,
+      costIsLowerBound: priced.unknown.length > 0,
+    });
   }
 
-  candidates.sort((a, b) => a.cost - b.cost || b.mission.credits - a.mission.credits);
+  // A rung carrying an unknown price has a cost that is only a lower bound, so
+  // it must never outrank a fully priced rung that costs the same.
+  candidates.sort((a, b) => a.cost - b.cost
+    || (a.unknown.length ? 1 : 0) - (b.unknown.length ? 1 : 0)
+    || b.mission.credits - a.mission.credits);
 
   const rungs = [];
   let best = floor;
@@ -225,8 +314,9 @@ export function milestones(annotated, opts = {}) {
  * its own: what unlocks the most additional missions first, cheapest to break a
  * tie. This is what the front page shows as "buy this next".
  */
-export function nextPurchases(rung, state, missions, prices, opts = {}) {
+export function nextPurchases(rung, owned, missions, prices, opts = {}) {
   const useSmall = opts.useSmall !== false;
+  const state = resolve(owned, opts);
   const st = stationPrices(prices, useSmall);
   const items = [];
 
@@ -236,7 +326,7 @@ export function nextPurchases(rung, state, missions, prices, opts = {}) {
     }
   }
   for (const [key, n] of Object.entries(rung.shortfall.ext)) {
-    const entry = prices.extensions[key];
+    const entry = priceEntry(prices, key);
     for (let i = 0; i < n; i++) {
       items.push({
         kind: 'extension', key, label: key,
@@ -267,7 +357,8 @@ export function nextPurchases(rung, state, missions, prices, opts = {}) {
   return scored;
 }
 
-export function ceiling(missions, path, state) {
+export function ceiling(missions, path, owned, opts = {}) {
+  const state = resolve(owned, opts);
   let best = null;
   for (const m of missions) {
     if (m.path !== path || m.credits == null) continue;

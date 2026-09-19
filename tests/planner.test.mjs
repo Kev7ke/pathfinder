@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   parseMissions, extensionDepartments, ladder, annotate, milestones,
   nextPurchases, canSpawn, shortfall, ceiling, priceShortfall, TRUSTED_SOURCES,
+  effectiveState, ownedCount, priceEntry,
 } from '../src/planner.js';
 
 const data = JSON.parse(readFileSync(new URL('../data/missions.json', import.meta.url)));
@@ -157,12 +158,28 @@ test('the milestone spine is short, ordered, and free of trap rungs', () => {
   }
 });
 
-test('the known EMS trap rung is flagged', () => {
-  const rungs = annotate(build('E', FRESH), 'E');
-  const rockslide = rungs.find((r) => r.mission.name.startsWith('Massive Debris from Rockslide'));
-  assert.ok(rockslide, 'expected the rockslide rung');
-  assert.ok(rockslide.isTrap, 'the rockslide rung should be a trap');
-  assert.ok(rockslide.isDetour, 'the rockslide rung should be a detour');
+test('trap rungs are flagged on the paths that have them', () => {
+  const ems = annotate(build('E', FRESH), 'E');
+  const traps = ems.filter((r) => r.isTrap);
+  assert.ok(traps.length > 0, 'the EMS ladder should contain at least one trap rung');
+  for (const r of traps) assert.ok(r.gainPer100k < 400);
+
+  const avalanche = ems.find((r) => r.mission.name === 'Small avalanche');
+  assert.ok(avalanche?.isTrap, 'Small avalanche should be a trap: 400,000 more for 600 credits');
+});
+
+test('the rockslide rung is priced in full, not as if tow trucks were free', () => {
+  // Regression: this mission needs 8x Tow Truck Station. While that requirement
+  // resolved to no price it was costed at 1,600,000 instead of 4,000,000, which
+  // put it on the frontier as the cheapest way to reach 15,400 credits.
+  const m = missions.find((x) => x.name.startsWith('Massive Debris from Rockslide'));
+  assert.ok(m, 'expected the rockslide mission in the dataset');
+  assert.equal(m.extras['Tow Truck Station'], 8);
+  const priced = priceShortfall(shortfall(m, FRESH), prices, { extensionDepartments: extDept });
+  assert.deepEqual(priced.unknown, []);
+  assert.equal(priced.cost, 4000000);
+  assert.ok(!build('E', FRESH).some((r) => r.mission.index === m.index),
+    'at its real price the rockslide rung should not be on the frontier');
 });
 
 test('every single purchase in a queue is affordable on its own and priced', () => {
@@ -216,4 +233,148 @@ test('the unseeded walk is still available and is a superset', () => {
   assert.ok(unseeded.length >= seeded.length);
   const names = new Set(unseeded.map((r) => r.mission.index));
   for (const r of seeded) assert.ok(names.has(r.mission.index));
+});
+
+// ---- extensions: counted on the building, withdrawn when specialised ----
+
+const HOSTS = { 'Forestry Expansion': 'fire', 'Mountain Rescue Station': 'ems', 'Riot Police Extension': 'police' };
+
+test('an extension counts as itself and leaves the station count alone', () => {
+  const { state, withdrawn } = effectiveState(
+    { fire: 10, ems: 0, police: 0, ext: { 'Forestry Expansion': 3 } }, HOSTS);
+  assert.equal(state.fire, 10, 'a plain extension must not remove the building from its pool');
+  assert.equal(state.ext['Forestry Expansion'], 3);
+  assert.equal(withdrawn.fire, 0);
+});
+
+test('a specialised station leaves its base pool but keeps its extension', () => {
+  const { state, withdrawn } = effectiveState(
+    { fire: 10, ems: 0, police: 0, ext: { 'Forestry Expansion': { count: 3, specialised: 2 } } }, HOSTS);
+  assert.equal(state.fire, 8, 'two specialised fire stations should leave the fire pool');
+  assert.equal(state.ext['Forestry Expansion'], 3, 'all three still carry the extension');
+  assert.equal(withdrawn.fire, 2);
+});
+
+test('specialisation is withdrawn from the department the extension sits on', () => {
+  const owned = {
+    fire: 5, ems: 5, police: 5,
+    ext: {
+      'Forestry Expansion': { count: 2, specialised: 2 },
+      'Mountain Rescue Station': { count: 3, specialised: 1 },
+      'Riot Police Extension': { count: 1, specialised: 1 },
+    },
+  };
+  const { state } = effectiveState(owned, HOSTS);
+  assert.deepEqual([state.fire, state.ems, state.police], [3, 4, 4]);
+});
+
+test('more specialised than owned is clamped, not negative, and reported', () => {
+  assert.deepEqual(ownedCount({ count: 2, specialised: 9 }), { count: 2, specialised: 2, host: null });
+  const { state, overdrawn } = effectiveState(
+    { fire: 1, ems: 0, police: 0, ext: { 'Forestry Expansion': { count: 4, specialised: 4 } } }, HOSTS);
+  assert.equal(state.fire, 0, 'station count must not go negative');
+  assert.equal(overdrawn.length, 1);
+  assert.equal(overdrawn[0].dept, 'fire');
+});
+
+test('a plain number and the object form mean the same thing', () => {
+  const a = effectiveState({ fire: 4, ems: 0, police: 0, ext: { 'Forestry Expansion': 2 } }, HOSTS);
+  const b = effectiveState({ fire: 4, ems: 0, police: 0, ext: { 'Forestry Expansion': { count: 2 } } }, HOSTS);
+  assert.deepEqual(a.state, b.state);
+});
+
+test('specialising shrinks what the player can already spawn', () => {
+  const base = { fire: 12, ems: 6, police: 6, ext: { 'Forestry Expansion': { count: 4, specialised: 0 } } };
+  const spec = { fire: 12, ems: 6, police: 6, ext: { 'Forestry Expansion': { count: 4, specialised: 4 } } };
+  const opts = { extensionDepartments: extDept };
+  const before = ceiling(missions, 'F', base, opts);
+  const after = ceiling(missions, 'F', spec, opts);
+  assert.ok(before, 'expected a reachable fire mission');
+  assert.ok(!after || after.credits <= before.credits,
+    'withdrawing four fire stations should not raise the ceiling');
+});
+
+test('the ladder reprices when stations are specialised away', () => {
+  const opts = { extensionDepartments: extDept };
+  const base = { fire: 12, ems: 6, police: 6, ext: { 'Forestry Expansion': { count: 4 } } };
+  const spec = { fire: 12, ems: 6, police: 6, ext: { 'Forestry Expansion': { count: 4, specialised: 4 } } };
+  const a = new Map(ladder(missions, 'F', base, prices, opts).map((r) => [r.mission.index, r.cost]));
+  const b = ladder(missions, 'F', spec, prices, opts);
+  let dearer = 0;
+  for (const rung of b) {
+    if (!a.has(rung.mission.index)) continue;
+    assert.ok(rung.cost >= a.get(rung.mission.index),
+      `${rung.mission.name} got cheaper after losing four fire stations`);
+    if (rung.cost > a.get(rung.mission.index)) dearer++;
+  }
+  assert.ok(dearer > 0, 'specialising four fire stations changed no rung cost at all');
+});
+
+test('owning an extension removes it from the shortfall of a rung that needs it', () => {
+  const opts = { extensionDepartments: extDept };
+  const without = ladder(missions, 'F', { fire: 8, ems: 4, police: 4, ext: {} }, prices, opts);
+  const target = without.find((r) => 'Forestry Expansion' in r.shortfall.ext);
+  assert.ok(target, 'expected a fire rung needing Forestry');
+  const need = target.shortfall.ext['Forestry Expansion'];
+
+  const withExt = ladder(missions, 'F',
+    { fire: 8, ems: 4, police: 4, ext: { 'Forestry Expansion': need } }, prices, opts);
+  const same = withExt.find((r) => r.mission.index === target.mission.index);
+  if (same) {
+    assert.ok(!('Forestry Expansion' in same.shortfall.ext),
+      'the owned extension still showed up as missing');
+    assert.ok(same.cost < target.cost, 'owning the extension did not reduce the cost');
+  }
+});
+
+test('the host station is the player\'s to set and overrides the derived guess', () => {
+  // The derived map puts Water Police Extension on fire, because fire missions
+  // ask for it. The building it actually sits on is a different question.
+  assert.equal(extDept['Water Police Extension'], 'fire');
+  const owned = {
+    fire: 5, ems: 0, police: 5,
+    ext: { 'Water Police Extension': { count: 2, specialised: 2, host: 'police' } },
+  };
+  const { state, withdrawn } = effectiveState(owned, extDept);
+  assert.equal(state.fire, 5, 'the override was ignored and fire was charged');
+  assert.equal(state.police, 3);
+  assert.equal(withdrawn.police, 2);
+});
+
+test('an unknown host falls back rather than throwing', () => {
+  const { state } = effectiveState(
+    { fire: 3, ems: 0, police: 0, ext: { 'Forestry Expansion': { count: 1, specialised: 1, host: 'nonsense' } } },
+    { 'Forestry Expansion': 'fire' });
+  assert.equal(state.fire, 2);
+});
+
+test('a requirement filed under buildings is still priced', () => {
+  // Tow Truck Station is required by 43 missions but lives in prices.buildings.
+  const entry = priceEntry(prices, 'Tow Truck Station');
+  assert.ok(entry, 'Tow Truck Station resolved to no price');
+  assert.equal(entry.price, prices.buildings.tow_truck_station.price);
+  assert.equal(entry.source, prices.buildings.tow_truck_station.source);
+});
+
+test('every requirement in the dataset resolves to a price', () => {
+  const missing = new Set();
+  for (const m of missions) {
+    for (const key of Object.keys(m.extras)) {
+      if (!priceEntry(prices, key)) missing.add(key);
+    }
+  }
+  assert.deepEqual([...missing], [], 'requirements with no price entry');
+});
+
+test('an unknown price is a lower bound and never outranks a priced rung', () => {
+  const gapped = structuredClone(prices);
+  delete gapped.extensions['Forestry Expansion'];
+  const rungs = ladder(missions, 'F', FRESH, gapped, { extensionDepartments: extDept });
+  const gaps = rungs.filter((r) => r.costIsLowerBound);
+  assert.ok(gaps.length > 0, 'expected at least one rung with an unpriced requirement');
+  for (const r of gaps) assert.ok(r.unknown.length > 0);
+  for (let i = 1; i < rungs.length; i++) {
+    if (rungs[i].cost === rungs[i - 1].cost && !rungs[i - 1].costIsLowerBound) continue;
+    assert.ok(rungs[i].cost >= rungs[i - 1].cost);
+  }
 });
