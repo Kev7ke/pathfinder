@@ -202,6 +202,18 @@ A capture button takes **structure, not content**: element names, classes,
 request paths, which parts of the page changed. Never mission text, addresses,
 player names or response bodies.
 
+### Writing for the player
+
+**Say what is, not why it took three tries.** A panel that explains what used to
+be wrong with it is asking to be forgiven rather than telling anyone anything.
+"1 patient, as this window states" is the whole sentence; what the game leaves
+out of its requirement list belongs in the code, where the next person to touch
+it will look.
+
+Keep the hedges that change what somebody would do — "too few to rely on yet",
+"an unknown type", "it does not dispatch" — and cut the ones that only explain
+the work.
+
 ### Looking like the game
 
 **The game is dark.** Body and modals are `rgb(80,80,80)` with white text, the
@@ -218,7 +230,9 @@ comment — that is the only part of the palette not straight from the game.
 
 **A module never writes a colour of its own.** Use the role classes the shell
 provides: `.ymca-dim`, `.ymca-accent`, `.ymca-warn`, `.ymca-bad`, `.ymca-num`,
-and the `.ymca-card` / `.ymca-note` containers. The first dark build shipped
+and the `.ymca-card` / `.ymca-note` containers. An icon is `fill="none"
+stroke="currentColor"` at the height of the text beside it, so it takes the
+colour of wherever it lands. The first dark build shipped
 with light-era greys inlined in the Pathfinder and half its text was
 unreadable — the screenshot caught what the tests could not.
 

@@ -99,9 +99,7 @@ YMCA.register({
         <b>Since ${log.length ? new Date(log[0].at).toLocaleDateString() : 'you turned it on'}</b>
         <p style="font-size:26px;font-weight:700;margin:8px 0 2px">${log.length}
           <span class="ymca-dim" style="font-size:14px;font-weight:400">missions finished</span></p>
-        <p class="ymca-dim">Across ${rows.length} kinds of mission. The count is the solid part —
-          every ending the game announces is one here, and the same mission announced twice is
-          counted once.</p>
+        <p class="ymca-dim">Across ${rows.length} kinds of mission.</p>
         <label style="display:block;margin:10px 0 0"><input type="checkbox" data-cfg="recording"
           ${cfg.recording ? 'checked' : ''}> Keep recording</label>
       </div>
@@ -112,17 +110,13 @@ YMCA.register({
           <span class="ymca-dim" style="font-size:14px;font-weight:400">of what the game lists</span></p>
         <p class="ymca-dim">${ctx.fmt(share.paid)} received where ${ctx.fmt(share.listed)} was
           listed, over ${share.missions} missions measured one at a time.
-          ${share.missions < 10 ? '<b>Too few to rely on yet</b> — it wants a few dozen.'
-        : 'Steady enough to be worth something.'}</p>
+          ${share.missions < 10 ? '<b>Too few to rely on yet.</b>' : ''}</p>
       </div>` : ''}
 
       <div class="ymca-note"><b>The count is measured. The payout is inferred.</b> The game
-        announces that a mission ended and, separately, what your balance became. Putting the two
-        together is TrackOps' own doing: a rise is credited to the longest-waiting ending, and only
-        trusted when nothing else was waiting. ${trusted.length} of ${log.length} are trusted that
-        way. That is why the figure above is a measurement rather than the game's own number —
-        which is the point, because <b>96 of the 197 ambulance missions have no listed number at
-        all</b>.</div>
+        announces that a mission ended and, separately, what your balance became; pairing the two
+        is TrackOps' doing. A rise is credited to the longest-waiting ending, and trusted only when
+        nothing else was waiting &mdash; ${trusted.length} of ${log.length} here.</div>
 
       ${rows.length ? `
       <div class="ymca-card">
@@ -140,8 +134,7 @@ YMCA.register({
           </tbody>
         </table>
         <p class="ymca-sub" style="margin-top:8px">Rows where the game lists nothing are the ones
-          worth having — those are what the planner has been guessing at. StepOps does not use any
-          of this yet: changing what the ladder costs things at is not something to do quietly.</p>
+          worth having. StepOps does not use any of this yet.</p>
       </div>` : `
       <div class="ymca-card">
         <b>Nothing counted yet</b>

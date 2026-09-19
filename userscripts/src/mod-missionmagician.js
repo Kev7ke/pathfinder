@@ -60,14 +60,14 @@
  * but never auto-selected — an unmatched requirement is stated, not guessed at.
  */
 const MM_REQUIREMENTS = {
-    firetrucks: { flag: 'fire', label: 'Fire engines', source: 'the "Fire Truck" AAO selects on fire=1' },
+    firetrucks: { flag: 'fire', label: 'Fire engines', icon: 'drop', source: 'the "Fire Truck" AAO selects on fire=1' },
     battalion_chief_vehicles: { flag: 'elw', label: 'Battalion chief units', source: 'the "F-BCU" AAO selects on elw=1' },
-    police_cars: { flag: 'fustw_or_police_motorcycle', label: 'Patrol cars', source: 'the "Patrol Car" AAO' },
-    ambulances: { flag: 'any_rtw', label: 'Ambulances', source: 'the "Rescue Unit" AAO selects on any_rtw=1' },
-    heavy_rescue_vehicles: { flag: 'rw', label: 'Heavy rescue', source: 'the "F-HRV" AAO selects on rw=1' },
-    mobile_air_vehicles: { flag: 'gwa', label: 'Mobile air', source: 'the "F-MA" AAO selects on gwa=1' },
-    platform_trucks: { flag: 'dlk', label: 'Platform trucks', source: 'the "F-PlT" AAO selects on dlk=1' },
-    water_tankers: { flag: 'gwl2wasser_only', label: 'Water tankers', source: 'the "F-WaTa" AAO' },
+    police_cars: { flag: 'fustw_or_police_motorcycle', label: 'Patrol cars', icon: 'shield', source: 'the "Patrol Car" AAO' },
+    ambulances: { flag: 'any_rtw', label: 'Ambulances', icon: 'cross', source: 'the "Rescue Unit" AAO selects on any_rtw=1' },
+    heavy_rescue_vehicles: { flag: 'rw', label: 'Heavy rescue', icon: 'arm', source: 'the "F-HRV" AAO selects on rw=1' },
+    mobile_air_vehicles: { flag: 'gwa', label: 'Mobile air', icon: 'wind', source: 'the "F-MA" AAO selects on gwa=1' },
+    platform_trucks: { flag: 'dlk', label: 'Platform trucks', icon: 'ladder', source: 'the "F-PlT" AAO selects on dlk=1' },
+    water_tankers: { flag: 'gwl2wasser_only', label: 'Water tankers', icon: 'drop', source: 'the "F-WaTa" AAO' },
 
     /* The "one of these will do" family. The key spells out the alternatives, so
      * these are read rather than guessed: any vehicle carrying any one of the
@@ -76,26 +76,25 @@ const MM_REQUIREMENTS = {
      * alternative already has a flag above are listed; the rest stay unmatched
      * and say so. */
     oneof_fire_engine_or_rescue: {
-        anyOf: ['fire', 'rw'], label: 'An engine or a rescue',
+        anyOf: ['fire', 'rw'], label: 'An engine or a rescue', icon: 'arm',
         source: 'the key names its own alternatives',
     },
     oneof_fire_engine_or_ladder: {
-        anyOf: ['fire', 'dlk'], label: 'An engine or a ladder',
+        anyOf: ['fire', 'dlk'], label: 'An engine or a ladder', icon: 'ladder',
         source: 'the key names its own alternatives',
     },
     oneof_fire_engine_or_rescue_or_ladder: {
-        anyOf: ['fire', 'rw', 'dlk'], label: 'An engine, rescue or ladder',
+        anyOf: ['fire', 'rw', 'dlk'], label: 'An engine, rescue or ladder', icon: 'ladder',
         source: 'the key names its own alternatives',
     },
     oneof_fire_rescue_or_ladder: {
-        anyOf: ['rw', 'dlk'], label: 'A rescue or a ladder',
+        anyOf: ['rw', 'dlk'], label: 'A rescue or a ladder', icon: 'arm',
         source: 'the key names its own alternatives',
     },
 
-    /* Not a key in `requirements` at all — patients live under `additional`, and
-     * that is why a mission with three of them asked for no ambulance. See
-     * mmPatients(). */
-    patients: { flag: 'any_rtw', label: 'Patients needing an ambulance', source: 'additional.possible_patient' },
+    /* Patients live under `additional`, not in `requirements`. They are counted
+     * into the ambulance row rather than shown as a line of their own. */
+    patients: { flag: 'any_rtw', label: 'Ambulances', icon: 'cross', source: 'additional.possible_patient' },
 };
 
 /**
@@ -125,6 +124,29 @@ const MM_AMOUNTS = {
     water_needed: { attr: 'wasser_amount', label: 'Water', unit: 'gal.' },
     foam_needed: { attr: 'foam_amount_display', label: 'Foam', unit: 'gal.' },
 };
+
+/**
+ * A glyph per requirement, so a row is recognised before it is read.
+ *
+ * Stroke only and `currentColor`, at the height of the text beside it, so it
+ * takes the colour of whatever it sits in and follows the game into dark mode.
+ */
+const MM_ICONS = {
+    ladder: '<path d="M5 2v16M13 2v16M5 6h8M5 10h8M5 14h8"/>',
+    arm: '<path d="M2 13c3-1 5-4 8-4 3 0 4 2 4 4a3 3 0 0 1-3 3H6"/><path d="M11 9V5a2 2 0 1 1 4 0v3"/>',
+    cross: '<path d="M7 3h6v4h4v6h-4v4H7v-4H3V7h4z"/>',
+    wind: '<path d="M2 7h9a3 3 0 1 0-3-3"/><path d="M2 12h12a3 3 0 1 1-3 3"/>',
+    drop: '<path d="M10 2s6 6.5 6 10a6 6 0 0 1-12 0c0-3.5 6-10 6-10z"/>',
+    shield: '<path d="M10 2 3 5v5c0 4 3 7 7 8 4-1 7-4 7-8V5z"/>',
+};
+
+function mmIcon(name) {
+    const path = MM_ICONS[name];
+    if (!path) return '';
+    return `<svg viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="currentColor"
+    stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+    style="vertical-align:-1px;margin-left:5px;opacity:.75">${path}</svg>`;
+}
 
 /** Every flag any requirement can ask for, so only those are worth remembering. */
 const MM_FLAGS = [...new Set(Object.values(MM_REQUIREMENTS)
@@ -369,8 +391,16 @@ async function mmPlan(page, ctx, cfg) {
          * No setting and no special case for either: it falls out of filling
          * the hardest requirement first. */
         const wants = Object.entries(requirements).filter(([key]) => !MM_AMOUNTS[key]);
-        /* Patients are not a requirement key, so they are added as one. */
-        if (patients) wants.push(['patients', patients.count]);
+        /* Patients are not a requirement key. They want ambulances, so they are
+         * counted into the ambulance line rather than shown beside it — one each
+         * unless told otherwise. An `ambulances` requirement and the patients
+         * are the same ambulances, so the larger of the two stands. */
+        if (patients) {
+            const perPatient = cfg.ambulancePerPatient === false ? 1 : patients.count;
+            const existing = wants.find(([key]) => key === 'ambulances');
+            if (existing) existing[1] = Math.max(existing[1], perPatient);
+            else wants.push(['patients', perPatient]);
+        }
 
         const counted = wants
             .map(([key, wanted]) => {
@@ -395,7 +425,10 @@ async function mmPlan(page, ctx, cfg) {
                 picked.set(v.id, v);
                 have += 1;
             }
-            lines.push({ key, label: rule.label, wanted, onScene: already, found: have + already });
+            lines.push({
+                key, label: rule.label, icon: rule.icon, wanted,
+                onScene: already, found: have + already,
+            });
         }
 
         /* Water and foam are totals, so they are filled by adding vehicles until
@@ -506,7 +539,7 @@ function mmPlanHtml(plan, page, cfg, ctx) {
         const state = l.unmatched
             ? '<span class="ymca-warn">not matched yet</span>'
             : `<span class="${enough ? 'ymca-accent' : 'ymca-bad'}">${ctx.fmt(l.found)}${l.unit ? ` ${l.unit}` : ''}</span>`;
-        return `<tr><td>${ctx.esc(l.label)}</td>
+        return `<tr><td>${ctx.esc(l.label)}${mmIcon(l.icon)}</td>
       <td class="ymca-num">${ctx.fmt(l.wanted)}${l.unit ? ` ${l.unit}` : ''}</td>
       <td class="ymca-num">${state}</td></tr>`;
     }).join('');
@@ -515,18 +548,16 @@ function mmPlanHtml(plan, page, cfg, ctx) {
     const short = plan.lines.filter((l) => !l.unmatched && l.found < l.wanted);
 
     return `
-      <div class="ymca-note"><b>This is also in the mission window itself</b>, above the game's
-        own missing-vehicle line — that is where it is meant to be used, and it keeps itself up to
-        date as the game works out the travel times. This copy is here for when you want it.</div>
+      <div class="ymca-note"><b>This is also in the mission window itself</b>, at the top of its
+        right-hand column.</div>
 
-      <div class="ymca-note"><b>It picks. It does not dispatch.</b> MissionMagician ticks the
-        game's own checkboxes and stops there. An alarm cannot be undone, so nothing here writes
-        to your account — you look at what is selected and press the game's own Dispatch.</div>
+      <div class="ymca-note"><b>It picks. It does not dispatch.</b> It ticks the game's own
+        checkboxes and stops. You press Dispatch.</div>
 
       <div class="ymca-card">
         <b>${plan.name ? ctx.esc(plan.name) : `Mission type ${ctx.esc(String(page.missionType))}`}</b>
-        <p class="ymca-sub" style="margin:4px 0 8px">What the game's own mission list says this
-          needs, against the ${plan.available} vehicles this window is offering.</p>
+        <p class="ymca-sub" style="margin:4px 0 8px">What this needs, against the
+          ${plan.available} vehicles in range.</p>
         ${plan.requirements ? `<table style="margin-top:4px" id="mm-needs">
           <thead><tr><th>Needs</th><th class="ymca-num">Wanted</th><th class="ymca-num">Picked</th></tr></thead>
           <tbody>${rows}</tbody></table>`
@@ -549,8 +580,8 @@ function mmPlanHtml(plan, page, cfg, ctx) {
           ${cfg.fastestFirst !== false ? 'checked' : ''}> Fastest first, by travel time</label>
         <button class="ymca-btn primary" data-do="select">Tick ${plan.pick.length} vehicles</button>
         <button class="ymca-btn" data-do="clear">Untick everything</button>
-        <div class="ymca-note" id="mm-done" hidden style="margin-top:10px">Ticked. Check the list,
-          then press <b>Dispatch</b> in the game itself — MissionMagician will not press it.</div>
+        <div class="ymca-note" id="mm-done" hidden style="margin-top:10px">Ticked. Press
+          <b>Dispatch</b> in the game when it looks right.</div>
       </div>`;
 }
 
@@ -573,9 +604,9 @@ function mmOffMissionHtml() {
 
       <div class="ymca-card">
         <b>If it still says this while a mission is open</b>
-        <p class="ymca-sub" style="margin:4px 0 10px">Then that window is built differently from the
-          one this was written against. This copies its structure — element, class and field names
-          and the numbers in them, and no mission text, addresses or player names.</p>
+        <p class="ymca-sub" style="margin:4px 0 10px">This copies the window's structure —
+          element, class and field names and the numbers in them. No mission text, addresses or
+          player names.</p>
         <button class="ymca-btn" data-do="capture">Capture this mission window</button>
         <span class="ymca-status" id="mm-status"></span>
         <div class="ymca-note warn" id="mm-wrongpage" hidden style="margin-top:10px">
@@ -871,9 +902,10 @@ function mmMountPanel(ctx) {
     });
 
     panel.addEventListener('change', (e) => {
-        if (e.target.dataset.cfg !== 'fastestFirst') return;
-        const cfg = ctx.store.read('cfg', { fastestFirst: true });
-        cfg.fastestFirst = e.target.checked;
+        const key = e.target.dataset.cfg;
+        if (key !== 'fastestFirst' && key !== 'ambulancePerPatient') return;
+        const cfg = ctx.store.read('cfg', {});
+        cfg[key] = e.target.checked;
         ctx.store.write('cfg', cfg);
         draw();
     });
@@ -1005,7 +1037,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
             ? '<span class="label label-warning">not matched yet</span>'
             : `<span class="label label-${l.found >= l.wanted ? 'success' : 'danger'}">${
                 ctx.fmt(l.found)}${l.unit ? ` ${l.unit}` : ''}</span>`;
-        return `<tr><td>${ctx.esc(l.label)}</td>
+        return `<tr><td>${ctx.esc(l.label)}${mmIcon(l.icon)}</td>
       <td class="text-right">${ctx.fmt(l.wanted)}${l.unit ? ` ${l.unit}` : ''}</td>
       <td class="text-right">${l.onScene
         ? `<span class="label label-info">${l.onScene}</span>`
@@ -1029,12 +1061,6 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         <tbody>${rows}</tbody>
       </table>
 
-      ${plan.patients ? `<p class="text-muted" style="margin:0 0 8px">
-        ${plan.patients.count} patient${plan.patients.count > 1 ? 's' : ''}, ${
-        plan.patients.from === 'page' ? 'as this window states' : 'from the mission catalogue'} —
-        one ambulance each. The game keeps patients out of the requirement list entirely, which is
-        why they used to be missed.</p>` : ''}
-
       ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.scene.total} already at the mission or on the way, subtracted above${
         plan.scene.unknown ? ` — except ${plan.scene.unknown} whose type has not been seen in a
@@ -1045,10 +1071,9 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         Widen the distance with the game's own km buttons.</div>` : ''}
 
       ${unmatched.length ? `<div class="alert alert-warning" style="padding:6px 10px">
-        <b>Left alone:</b> ${unmatched.map((l) => ctx.esc(l.label)).join(', ')} — which vehicle
-        attribute means this has not been established, and a guess would tick the wrong one.
+        <b>Left alone:</b> ${unmatched.map((l) => ctx.esc(l.label)).join(', ')}.
         <button type="button" class="btn btn-xs btn-default" data-do="type">Copy this mission
-          type</button> and it can be added.</div>` : ''}
+          type</button> to have it added.</div>` : ''}
 
       <button type="button" class="btn btn-success btn-sm" data-do="select">
         Tick ${plan.pick.length} vehicles</button>
@@ -1057,7 +1082,11 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         data-do="cancel">Cancel ${plan.surplus.length} unused</button>` : ''}
       <label style="font-weight:normal;margin:0 0 0 10px">
         <input type="checkbox" data-cfg="fastestFirst" ${cfg.fastestFirst !== false ? 'checked' : ''}>
-        Fastest first, by travel time</label>
+        Fastest first</label>
+      <label style="font-weight:normal;margin:0 0 0 10px">
+        <input type="checkbox" data-cfg="ambulancePerPatient"
+          ${cfg.ambulancePerPatient !== false ? 'checked' : ''}>
+        Ambulance per patient</label>
       ${plan.untimed ? `<small class="text-muted"> · ${plan.untimed} of ${plan.available}
         have no travel time yet, ordered by distance until the game works them out</small>` : ''}
       <div class="alert alert-info" id="mm-panel-done" hidden style="padding:6px 10px;margin:8px 0 0">

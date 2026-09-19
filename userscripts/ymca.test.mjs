@@ -213,7 +213,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.11');
+assert.equal(report.ymca, '0.0.12');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -598,9 +598,27 @@ await mission.waitForTimeout(900);
 const withPatients = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('patients          :', JSON.stringify(withPatients));
-const amb = withPatients.find((r) => /Patients/.test(r[0]));
-assert.ok(amb, 'patients must appear as a requirement even though `requirements` omits them');
+const amb = withPatients.find((r) => /Ambulances/.test(r[0]));
+assert.ok(amb, 'patients must reach the plan even though `requirements` omits them');
 assert.equal(amb[1], '2', 'the window states two, and the window beats the catalogue maximum');
+// One glyph per requirement, sized to the text and taking its colour.
+const icons = await mission.$$eval('#ymca-mm-panel tbody tr td:first-child svg',
+  (els) => els.map((e) => ({ w: e.getAttribute('width'), stroke: e.getAttribute('stroke') })));
+console.log('row icons         :', JSON.stringify(icons));
+assert.equal(icons.length, withPatients.length, 'every requirement row should carry a glyph');
+assert.ok(icons.every((i) => i.w === '12' && i.stroke === 'currentColor'),
+  'the glyphs must be small and take the colour around them rather than choosing one');
+
+// "Ambulance per patient" off means one ambulance, however many patients there are.
+await mission.uncheck('#ymca-mm-panel [data-cfg="ambulancePerPatient"]');
+await mission.waitForTimeout(600);
+const oneAmb = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('one ambulance     :', JSON.stringify(oneAmb.find((r) => /Ambulances/.test(r[0]))));
+assert.equal(oneAmb.find((r) => /Ambulances/.test(r[0]))[1], '1',
+  'with the setting off, two patients still want one ambulance');
+await mission.check('#ymca-mm-panel [data-cfg="ambulancePerPatient"]');
+await mission.waitForTimeout(600);
 // oneof: the pumper answers "an engine, rescue or ladder" AND "firetrucks" at once.
 assert.ok(withPatients.some((r) => /engine, rescue or ladder/i.test(r[0])),
   'the oneof_ family must be matched, not left as an unmatched requirement');
