@@ -44,12 +44,24 @@ YMCA.register({
 
       <div class="ymca-card">
         <b>What is needed to build it</b>
-        <p class="ymca-sub" style="margin:4px 0 10px">Open any mission in the game, leave it open,
-          then come back here and press this. It copies the <i>structure</i> of that window —
+        <p class="ymca-sub" style="margin:4px 0 10px">The order matters, because YMCA is a
+          lightbox and clicking a mission navigates away from it:</p>
+        <ol class="ymca-sub" style="margin:0 0 10px;padding-left:20px">
+          <li>Close this window and click a mission in your list, so the mission itself is on
+            screen — the page with the vehicle table and the alarm button.</li>
+          <li>Open YMCA again from the navbar, <b>on that page</b>, and come back here.</li>
+          <li>Press the button.</li>
+        </ol>
+        <p class="ymca-sub" style="margin:0 0 10px">It copies the <i>structure</i> of that page —
           element names, classes and the shape of the vehicle list — and no mission text,
           addresses or player names.</p>
         <button class="ymca-btn primary" data-do="capture">Capture this mission window</button>
         <span class="ymca-status" id="mm-status"></span>
+        <div class="ymca-note warn" id="mm-wrongpage" hidden style="margin-top:10px">
+          <b>That was not a mission page.</b> Nothing was copied, because there was nothing on it
+          worth sending — the capture found none of the mission markup, only the mission list's
+          own category buttons. Do step 1 above first: click a mission so its page is open, and
+          only then open YMCA and press this.</div>
         <textarea id="mm-out" rows="12" readonly style="width:100%;margin-top:10px;
           font-family:ui-monospace,monospace;font-size:11.5px"></textarea>
       </div>`;
@@ -67,8 +79,19 @@ YMCA.register({
             const out = el.querySelector('#mm-out');
             const report = captureMissionWindow();
             out.value = JSON.stringify(report, null, 1);
-            ctx.clipboard(out.value, 'the mission window structure');
-            ctx.log.info('captured mission window', report.found ? 'found' : 'nothing found');
+            // A capture taken on the overview page finds nothing and looks like a failure of
+            // the game rather than of the moment it was taken. Say which it was.
+            const warn = el.querySelector('#mm-wrongpage');
+            warn.hidden = report.looksLikeMissionWindow;
+            if (report.looksLikeMissionWindow) {
+                ctx.clipboard(out.value, 'the mission window structure');
+            } else {
+                ctx.status('No mission window on this page — nothing worth sending.');
+            }
+            ctx.log.info('captured mission window',
+                report.looksLikeMissionWindow
+                    ? `${report.found.length} of ${report.found.length + report.missing.length} selectors found`
+                    : 'not on a mission page');
         });
     },
 });

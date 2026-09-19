@@ -21,7 +21,14 @@ await pg.setContent(`<html><head><style>
   </style></head><body>
   <nav class="navbar navbar-fixed-top"><div id="navbar-main-collapse">
     <ul class="nav navbar-nav"><li><a href="#">Buildings</a></li></ul>
-  </div></nav><p>game</p></body></html>`);
+  </div></nav><p>game</p>
+  <div class="credits_user_total">500.000</div>
+  <div id="mission_list">
+    <div id="mission_4711" data-mission-type-id="3" data-mission-id="4711" class="missionSideBarEntry">
+      <div id="mission_caption_4711"></div><div id="mission_overview_countdown_4711"></div>
+    </div>
+    <div id="mission_4712" data-mission-type-id="1" data-mission-id="4712"></div>
+  </div></body></html>`);
 
 await pg.evaluate(() => {
   window.__posts = [];
@@ -204,7 +211,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.3');
+assert.equal(report.ymca, '0.0.4');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -256,7 +263,56 @@ await pg.waitForFunction(() => document.querySelector('#mm-out')?.value.includes
 const cap = JSON.parse(await pg.inputValue('#mm-out'));
 assert.equal(cap.looksLikeMissionWindow, false, 'there is no mission window on this page');
 assert.ok(Array.isArray(cap.missing) && cap.missing.length, 'it should report what it did not find');
-console.log('capture           : reports', cap.missing.length, 'selectors not present');
+assert.equal(await pg.locator('#mm-wrongpage').isVisible(), true,
+  'a capture taken off a mission page must say so rather than copy an empty one');
+console.log('capture           : reports', cap.missing.length, 'selectors not present, warns about the page');
+
+// ---- TrackOps: the watcher names what left the list and what the credits did ----
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="trackops"]');
+await pg.waitForSelector('[data-do="watch"]');
+await pg.click('[data-do="watch"]');
+
+// The game re-sorts its list by removing a row and putting it straight back. That must not
+// read as a finished mission.
+await pg.evaluate(() => {
+  const list = document.getElementById('mission_list');
+  const row = document.getElementById('mission_4712');
+  list.removeChild(row);
+  list.appendChild(row);
+});
+await pg.waitForTimeout(100);
+
+// A mission ending: the row goes and stays gone, and the credit counter moves.
+await pg.evaluate(() => {
+  document.getElementById('mission_4711').remove();
+  document.querySelector('.credits_user_total').textContent = '502.340';
+});
+await pg.waitForTimeout(300);
+await pg.click('[data-do="stop"]');
+await pg.waitForFunction(() => document.querySelector('#to-out')?.value.includes('mission ids'));
+const watch = JSON.parse(await pg.inputValue('#to-out'));
+console.log('trackops found    :', JSON.stringify(watch.found));
+console.log('trackops counts   :', JSON.stringify(watch.counts));
+assert.equal(watch.found.missionList, true, 'the watcher did not find the mission list');
+assert.equal(watch.found.creditsSelector, '.credits_user_total',
+  'the watcher did not find the credit counter');
+assert.equal(watch.counts.departures, 2, 'both removals should be recorded');
+assert.equal(watch.counts.resorts, 1, 'the re-sorted row must be marked as having come back');
+assert.equal(watch.pairedWithCredits.length, 1,
+  'exactly one row left for good, so exactly one pairing');
+assert.equal(watch.pairedWithCredits[0].mission, 4711, 'the wrong mission was paired');
+assert.equal(watch.pairedWithCredits[0].creditChangesNearby[0].delta, 2340,
+  'the credit change was not read as a delta');
+assert.ok(!JSON.stringify(watch).includes('502340') && !JSON.stringify(watch).includes('500000'),
+  'the report must carry the change, never the balance');
+const row0 = watch.missionList.departures.find((d) => d.mission === 4711).row;
+console.log('departing row     :', JSON.stringify(row0));
+assert.equal(row0.numericAttrs['data-mission-type-id'], 3,
+  'the row anatomy must carry the numbers that match a mission back to einsaetze.json');
+assert.ok(row0.childIdShapes.includes('mission_caption_#'),
+  'child ids should be reported as shapes, with the numbers taken out');
+console.log('trackops          : re-sort told apart from a finished mission, credits paired');
 
 console.log('page errors       :', errs.length ? errs : 'none');
 assert.equal(errs.length, 0);

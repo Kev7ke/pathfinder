@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.3
+// @version      0.0.4
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.3',
+    version: '0.0.4',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1798,12 +1798,24 @@ YMCA.register({
 
       <div class="ymca-card">
         <b>What is needed to build it</b>
-        <p class="ymca-sub" style="margin:4px 0 10px">Open any mission in the game, leave it open,
-          then come back here and press this. It copies the <i>structure</i> of that window —
+        <p class="ymca-sub" style="margin:4px 0 10px">The order matters, because YMCA is a
+          lightbox and clicking a mission navigates away from it:</p>
+        <ol class="ymca-sub" style="margin:0 0 10px;padding-left:20px">
+          <li>Close this window and click a mission in your list, so the mission itself is on
+            screen — the page with the vehicle table and the alarm button.</li>
+          <li>Open YMCA again from the navbar, <b>on that page</b>, and come back here.</li>
+          <li>Press the button.</li>
+        </ol>
+        <p class="ymca-sub" style="margin:0 0 10px">It copies the <i>structure</i> of that page —
           element names, classes and the shape of the vehicle list — and no mission text,
           addresses or player names.</p>
         <button class="ymca-btn primary" data-do="capture">Capture this mission window</button>
         <span class="ymca-status" id="mm-status"></span>
+        <div class="ymca-note warn" id="mm-wrongpage" hidden style="margin-top:10px">
+          <b>That was not a mission page.</b> Nothing was copied, because there was nothing on it
+          worth sending — the capture found none of the mission markup, only the mission list's
+          own category buttons. Do step 1 above first: click a mission so its page is open, and
+          only then open YMCA and press this.</div>
         <textarea id="mm-out" rows="12" readonly style="width:100%;margin-top:10px;
           font-family:ui-monospace,monospace;font-size:11.5px"></textarea>
       </div>`;
@@ -1821,8 +1833,19 @@ YMCA.register({
             const out = el.querySelector('#mm-out');
             const report = captureMissionWindow();
             out.value = JSON.stringify(report, null, 1);
-            ctx.clipboard(out.value, 'the mission window structure');
-            ctx.log.info('captured mission window', report.found ? 'found' : 'nothing found');
+            // A capture taken on the overview page finds nothing and looks like a failure of
+            // the game rather than of the moment it was taken. Say which it was.
+            const warn = el.querySelector('#mm-wrongpage');
+            warn.hidden = report.looksLikeMissionWindow;
+            if (report.looksLikeMissionWindow) {
+                ctx.clipboard(out.value, 'the mission window structure');
+            } else {
+                ctx.status('No mission window on this page — nothing worth sending.');
+            }
+            ctx.log.info('captured mission window',
+                report.looksLikeMissionWindow
+                    ? `${report.found.length} of ${report.found.length + report.missing.length} selectors found`
+                    : 'not on a mission page');
         });
     },
 });
@@ -1893,15 +1916,41 @@ function captureMissionWindow() {
  * Only from the day it is installed, which is the honest limit: the game does
  * not hand out a history.
  *
- * NOT COUNTING YET. Counting means noticing the moment a mission completes, and
- * that moment has never been observed from the side this was written on. It
- * might be a page the game navigates to, a websocket frame, or a row leaving a
- * list. Guessing would produce a counter that is quietly wrong, which is worse
- * than one that says it is empty.
+ * NOT COUNTING YET, and here is what the first attempt learnt. That watcher
+ * wrapped fetch and XMLHttpRequest and came back with zero requests across
+ * half a minute in which the mission list never stopped moving. The game is
+ * not polled over HTTP; it is pushed to over a socket that is already open by
+ * the time a userscript set to document-idle runs. So the socket cannot be
+ * tapped after the fact, and the rendered page is what is left.
  *
- * So this ships as the store, the display, and a button that watches for the
- * event and reports what it saw.
+ * That is not a loss. The page is where the answer actually is — a mission
+ * leaving your list and the credit counter moving in the same second is the
+ * completion, whatever frame carried it. The first watcher did see the list
+ * change; it just counted the changes instead of naming them, so a row the
+ * game removed and re-added while re-sorting looked exactly like a mission
+ * that ended.
+ *
+ * This one names them: which mission id left, whether it came back, what the
+ * credit counter did around it, and what the row was built out of. It also
+ * survives a page load, so the watch can be armed and then simply played
+ * through.
  * -------------------------------------------------------------------------- */
+
+const TO_KEY = 'ymca-trackops-watch';
+const TO_MAX_EVENTS = 400;
+
+/* A row the game removes and re-adds while re-sorting is back within a frame
+ * or two. Four seconds is far beyond that and far below a real mission's life,
+ * so it separates the two without having to guess at either. */
+const TO_RESORT_GRACE_MS = 4000;
+
+/* Where the game keeps the running credit total. Read in order; the first one
+ * present wins, and which one it was is in the report. */
+const TO_CREDIT_SELECTORS = ['#credits_user_total', '.credits_user_total', '#credits', '.credits'];
+
+/* Ids the game is known to use around a mission ending, from reading
+ * jxn-30/LSS-Scripts. Present here only to be noticed, never to be clicked. */
+const TO_MARKER_IDS = ['mission_deleted', 'mission_general_info', 'mission_alarm_btn'];
 
 YMCA.register({
     id: 'trackops',
@@ -1914,11 +1963,13 @@ YMCA.register({
     async mount(el, ctx) {
         const log = ctx.store.read('missions', []);
         const total = log.reduce((n, m) => n + (m.credits || 0), 0);
+        const live = toSession();
 
         el.innerHTML = `
       <div class="ymca-note warn"><b>Not counting yet.</b> Nothing has been recorded, because
-        the moment a mission completes has not been identified yet. The watcher below is how
-        that gets found.</div>
+        the moment a mission completes has not been identified yet. The first watcher listened
+        on the wrong channel — the game pushes over a socket rather than polling — so this one
+        reads the page instead. One run of it is what turns the counter on.</div>
 
       <div class="ymca-card">
         <b>So far</b>
@@ -1930,114 +1981,370 @@ YMCA.register({
 
       <div class="ymca-card">
         <b>Teach it what a finished mission looks like</b>
-        <p class="ymca-sub" style="margin:4px 0 10px">Press start, then play normally and finish
-          a mission. The watcher records how the page changed around that moment — which
-          requests were made and which parts of the page appeared or vanished. Press stop and
-          send the result; that is what turns the counter on.</p>
-        <button class="ymca-btn primary" data-do="watch">Start watching</button>
-        <button class="ymca-btn" data-do="stop" disabled>Stop and copy</button>
-        <span class="ymca-status" id="to-status"></span>
+        <p class="ymca-sub" style="margin:4px 0 10px">Press start, then close this window and
+          play until at least one mission has finished — a handful is better. The watch keeps
+          running while you play and survives a page reload, so there is no hurry. Come back,
+          press stop, and send what it copied.</p>
+        <button class="ymca-btn primary" data-do="watch"${live ? ' disabled' : ''}>Start watching</button>
+        <button class="ymca-btn" data-do="stop"${live ? '' : ' disabled'}>Stop and copy</button>
+        <button class="ymca-btn" data-do="discard"${live ? '' : ' disabled'}>Discard</button>
+        <span class="ymca-status" id="to-status">${live ? toLiveLine(live) : ''}</span>
         <textarea id="to-out" rows="12" readonly style="width:100%;margin-top:10px;
           font-family:ui-monospace,monospace;font-size:11.5px"></textarea>
       </div>
 
       <div class="ymca-card">
-        <b>What is also needed</b>
+        <b>What it writes down</b>
+        <ul style="margin:6px 0 0;padding-left:20px" class="ymca-dim">
+          <li>Which mission id left your list, and whether it came straight back — that is how a
+            finished mission is told apart from the game re-sorting the list.</li>
+          <li>How much the credit counter moved around that moment. The <em>change</em>, never
+            your balance.</li>
+          <li>What a mission row is built out of: attribute and element names, and the numbers in
+            them. No mission text, no addresses, no names.</li>
+        </ul>
+      </div>
+
+      <div class="ymca-card">
+        <b>What is still needed after that</b>
         <ul style="margin:6px 0 0;padding-left:20px" class="ymca-dim">
           <li>The game's own mission icons, so the list can look like the game. They are served
             from <code>/images/</code> — the mission list already names them.</li>
           <li>Whether the credit figure on completion is the mission's listed average or the
-            exact amount paid. TrackOps should record what was paid, not what was expected.</li>
+            exact amount paid. TrackOps must record what was paid, not what was expected — and
+            that is the whole point, because 96 of the 197 ambulance missions carry no listed
+            figure at all.</li>
         </ul>
       </div>`;
 
-        let watcher = null;
+        const status = (text) => { el.querySelector('#to-status').textContent = text; };
+        const buttons = (watching) => {
+            el.querySelector('[data-do="watch"]').disabled = watching;
+            el.querySelector('[data-do="stop"]').disabled = !watching;
+            el.querySelector('[data-do="discard"]').disabled = !watching;
+        };
+
+        let ticker = null;
+        const tick = () => {
+            const s = toSession();
+            if (s) status(toLiveLine(s));
+        };
+        if (live) ticker = setInterval(tick, 2000);
+
         el.addEventListener('click', (e) => {
-            const start = e.target.closest('[data-do="watch"]');
-            const stop = e.target.closest('[data-do="stop"]');
-            if (start) {
-                watcher = startWatching();
-                el.querySelector('[data-do="watch"]').disabled = true;
-                el.querySelector('[data-do="stop"]').disabled = false;
-                ctx.status('Watching — go and finish a mission.');
-                ctx.log.info('mission watcher started');
-            } else if (stop && watcher) {
-                const report = watcher.stop();
-                el.querySelector('#to-out').value = JSON.stringify(report, null, 1);
-                ctx.clipboard(el.querySelector('#to-out').value, 'what the watcher saw');
-                el.querySelector('[data-do="watch"]').disabled = false;
-                el.querySelector('[data-do="stop"]').disabled = true;
-                watcher = null;
-                ctx.log.info('mission watcher stopped', `${report.requests.length} requests`);
+            if (e.target.closest('[data-do="watch"]')) {
+                toArm();
+                buttons(true);
+                ctx.status('Watching — close this and go and finish a mission.');
+                ctx.log.info('mission watcher armed');
+                clearInterval(ticker);
+                ticker = setInterval(tick, 2000);
+                tick();
+            } else if (e.target.closest('[data-do="stop"]')) {
+                const report = toDisarm();
+                clearInterval(ticker);
+                buttons(false);
+                if (!report) { status('Nothing was being watched.'); return; }
+                const text = JSON.stringify(report, null, 1);
+                el.querySelector('#to-out').value = text;
+                ctx.clipboard(text, 'what the watcher saw');
+                ctx.log.info('mission watcher stopped',
+                    `${report.missionList.departures.length} departures, `
+                    + `${report.credits.changes.length} credit changes`);
+            } else if (e.target.closest('[data-do="discard"]')) {
+                toDisarm();
+                clearInterval(ticker);
+                buttons(false);
+                status('Discarded.');
+                ctx.log.info('mission watcher discarded');
             }
         });
     },
 });
 
+/* ---------------------------------------------------------------- the watch */
+
+/** The armed session, or null. Kept in localStorage so a reload does not end it. */
+function toSession() {
+    try {
+        return JSON.parse(localStorage.getItem(TO_KEY)) || null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function toSave(session) {
+    try {
+        localStorage.setItem(TO_KEY, JSON.stringify(session));
+    } catch (e) { /* private window: the watch still runs, it just forgets on reload */ }
+}
+
+function toLiveLine(session) {
+    const mins = Math.round((Date.now() - session.started) / 60000);
+    const left = session.events.filter((ev) => ev.type === 'left' && !ev.cameBack).length;
+    return `Watching for ${mins} min · ${session.events.length} events · ${left} missions gone`;
+}
+
+function toArm() {
+    toSave({ started: Date.now(), events: [], page: location.pathname });
+    toAttach();
+}
+
+function toDisarm() {
+    const session = toSession();
+    toDetach();
+    try { localStorage.removeItem(TO_KEY); } catch (e) { /* nothing to remove */ }
+    return session ? toReport(session) : null;
+}
+
+/** Append an event. Capped, so a watch left running overnight cannot fill the store. */
+function toRecord(type, extra) {
+    const session = toSession();
+    if (!session) return null;
+    if (session.events.length >= TO_MAX_EVENTS) return session;
+    session.events.push(Object.assign({ at: Date.now() - session.started, type }, extra));
+    toSave(session);
+    return session;
+}
+
+/** Mark the departure this arrival cancels, if it is inside the re-sort grace. */
+function toCancelDeparture(missionId) {
+    const session = toSession();
+    if (!session) return false;
+    const now = Date.now() - session.started;
+    for (let i = session.events.length - 1; i >= 0; i -= 1) {
+        const ev = session.events[i];
+        if (ev.type !== 'left' || ev.mission !== missionId || ev.cameBack) continue;
+        if (now - ev.at > TO_RESORT_GRACE_MS) return false;
+        ev.cameBack = true;
+        ev.backAfterMs = now - ev.at;
+        toSave(session);
+        return true;
+    }
+    return false;
+}
+
+/* ------------------------------------------------------- reading the page */
+
+const TO_ROW_ID = /^mission_(\d+)$/;
+
+/** Digits out, so an id is reported as a shape rather than as a particular thing. */
+function toShape(id) {
+    return String(id || '').replace(/\d+/g, '#').slice(0, 48);
+}
+
 /**
- * Watch how the page behaves around a finished mission.
+ * What a mission row is made of — names and numbers, never text.
  *
- * Records request paths and coarse page changes, never response bodies or page
- * text, so nothing about the player or the missions themselves is carried.
+ * This is the piece that lets a completed mission be matched back to its entry
+ * in /einsaetze.json, which is where the credit figure and the mission's real
+ * name live. Reading the caption out of the page instead would carry the
+ * address the game prints next to it.
  */
-function startWatching() {
-    const started = Date.now();
-    const requests = [];
-    const mutations = [];
+function toRowAnatomy(row) {
+    if (!(row instanceof Element)) return null;
+    const numeric = {};
+    const names = [];
+    for (const attr of row.attributes) {
+        names.push(attr.name);
+        if (/^-?\d+$/.test(attr.value) && attr.value.length <= 12) numeric[attr.name] = Number(attr.value);
+    }
+    const childIds = [];
+    for (const child of row.querySelectorAll('[id]')) {
+        const shape = toShape(child.id);
+        if (shape && !childIds.includes(shape)) childIds.push(shape);
+        if (childIds.length >= 12) break;
+    }
+    return { tag: row.tagName.toLowerCase(), attrs: names, numericAttrs: numeric, childIdShapes: childIds };
+}
 
-    const realFetch = window.fetch;
-    window.fetch = async function (...args) {
-        const url = String(args[0]);
-        const at = Date.now() - started;
-        try {
-            const res = await realFetch.apply(this, args);
-            requests.push({ at, url: url.split('?')[0], status: res.status, method: args[1]?.method || 'GET' });
-            return res;
-        } catch (err) {
-            requests.push({ at, url: url.split('?')[0], error: true });
-            throw err;
-        }
-    };
+function toCreditsElement() {
+    for (const sel of TO_CREDIT_SELECTORS) {
+        const node = document.querySelector(sel);
+        if (node) return { node, selector: sel };
+    }
+    return null;
+}
 
-    const realOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-        requests.push({ at: Date.now() - started, url: String(url).split('?')[0], method, xhr: true });
-        return realOpen.call(this, method, url, ...rest);
-    };
+function toCreditsValue(node) {
+    const digits = (node.textContent || '').replace(/[^\d-]/g, '');
+    return digits ? Number(digits) : null;
+}
 
-    const observer = new MutationObserver((list) => {
-        for (const m of list) {
-            if (mutations.length > 120) return;
-            const target = m.target;
-            if (!(target instanceof Element)) continue;
-            const id = target.id || target.className;
-            if (!id || typeof id !== 'string') continue;
-            if (!/mission|credit|alarm|vehicle/i.test(id)) continue;
-            mutations.push({
-                at: Date.now() - started,
-                on: id.slice(0, 60),
-                added: m.addedNodes.length,
-                removed: m.removedNodes.length,
-            });
+let toObservers = [];
+let toCreditsLast = null;
+
+function toAttach() {
+    toDetach();
+    const session = toSession();
+    if (!session) return;
+
+    /* --- the mission list --- */
+    const list = document.getElementById('mission_list');
+    if (list) {
+        const listObserver = new MutationObserver((records) => {
+            for (const rec of records) {
+                for (const node of rec.removedNodes) {
+                    const m = node instanceof Element && TO_ROW_ID.exec(node.id || '');
+                    if (m) toRecord('left', { mission: Number(m[1]), row: toRowAnatomy(node) });
+                }
+                for (const node of rec.addedNodes) {
+                    const m = node instanceof Element && TO_ROW_ID.exec(node.id || '');
+                    if (!m) continue;
+                    if (!toCancelDeparture(Number(m[1]))) toRecord('joined', { mission: Number(m[1]) });
+                }
+            }
+        });
+        listObserver.observe(list, { childList: true });
+        toObservers.push(listObserver);
+        toRecord('listFound', { rows: list.querySelectorAll('[id^="mission_"]').length });
+    } else {
+        toRecord('listMissing', {});
+    }
+
+    /* --- the credit counter --- */
+    const credits = toCreditsElement();
+    if (credits) {
+        toCreditsLast = toCreditsValue(credits.node);
+        const creditObserver = new MutationObserver(() => {
+            const now = toCreditsValue(credits.node);
+            if (now === null || now === toCreditsLast) return;
+            /* The change, never the balance. */
+            toRecord('credits', { delta: toCreditsLast === null ? null : now - toCreditsLast });
+            toCreditsLast = now;
+        });
+        creditObserver.observe(credits.node, { childList: true, characterData: true, subtree: true });
+        toObservers.push(creditObserver);
+        toRecord('creditsFound', { selector: credits.selector });
+    } else {
+        toRecord('creditsMissing', { tried: TO_CREDIT_SELECTORS });
+    }
+
+    /* --- anything the game puts up around a mission ending --- */
+    const seen = new Set();
+    const bodyObserver = new MutationObserver((records) => {
+        for (const rec of records) {
+            for (const node of rec.addedNodes) {
+                if (!(node instanceof Element)) continue;
+                for (const id of TO_MARKER_IDS) {
+                    if ((node.id === id || node.querySelector?.(`#${id}`)) && !seen.has(id)) {
+                        seen.add(id);
+                        toRecord('marker', { id });
+                    }
+                }
+            }
         }
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    bodyObserver.observe(document.body, { childList: true, subtree: true });
+    toObservers.push(bodyObserver);
+
+    /* --- the socket, best effort ---
+     * Anything already open is out of reach at document-idle, so this only
+     * catches a connection made from now on, and records the shape of a frame
+     * rather than what is in it. If it stays empty that is the expected
+     * outcome, not a failure. */
+    if (!window.__ymcaSocketTap) {
+        const RealSocket = window.WebSocket;
+        const Tapped = function (url, protocols) {
+            const socket = protocols === undefined ? new RealSocket(url) : new RealSocket(url, protocols);
+            toRecord('socketOpen', { path: String(url).split('?')[0].replace(/\/\/[^/]+/, '//…') });
+            socket.addEventListener('message', (ev) => {
+                toRecord('frame', toFrameShape(ev.data));
+            });
+            return socket;
+        };
+        Tapped.prototype = RealSocket.prototype;
+        for (const k of ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED']) Tapped[k] = RealSocket[k];
+        window.WebSocket = Tapped;
+        window.__ymcaSocketTap = { real: RealSocket };
+    }
+
+    /* --- Rails' own push channel, if it is reachable ---
+     * A read, not a hook: which channels exist says what the game pushes about. */
+    try {
+        const subs = window.App?.cable?.subscriptions?.subscriptions;
+        if (Array.isArray(subs)) {
+            toRecord('actionCable', { channels: subs.map((s) => toShape(s.identifier)).slice(0, 12) });
+        }
+    } catch (e) { /* not an ActionCable page, or it is not exposed */ }
+}
+
+/** Keys and value types. Short discriminators are kept because they name the event. */
+function toFrameShape(data) {
+    if (typeof data !== 'string') return { kind: typeof data };
+    let parsed;
+    try {
+        parsed = JSON.parse(data);
+    } catch (e) {
+        return { kind: 'text', bytes: data.length, head: toShape(data.slice(0, 24)) };
+    }
+    if (parsed === null || typeof parsed !== 'object') return { kind: typeof parsed, bytes: data.length };
+    const shape = { kind: 'json', bytes: data.length, keys: Object.keys(parsed).slice(0, 12) };
+    for (const key of ['type', 'event', 'action', 'command', 'channel', 'identifier']) {
+        const v = parsed[key];
+        if (typeof v === 'string' && v.length <= 40) shape[key] = v;
+    }
+    return shape;
+}
+
+function toDetach() {
+    for (const o of toObservers) o.disconnect();
+    toObservers = [];
+    toCreditsLast = null;
+    if (window.__ymcaSocketTap) {
+        window.WebSocket = window.__ymcaSocketTap.real;
+        delete window.__ymcaSocketTap;
+    }
+}
+
+/* ------------------------------------------------------------- the report */
+
+function toReport(session) {
+    const ev = session.events;
+    const departures = ev.filter((e) => e.type === 'left')
+        .map((e) => ({ at: e.at, mission: e.mission, cameBack: !!e.cameBack, backAfterMs: e.backAfterMs, row: e.row }));
+    const changes = ev.filter((e) => e.type === 'credits').map((e) => ({ at: e.at, delta: e.delta }));
+
+    /* The pairing is the question this whole run exists to answer, so it is put
+     * in the report rather than worked out later: a departure that did not come
+     * back, next to whatever the credit counter did within five seconds of it. */
+    const paired = departures.filter((d) => !d.cameBack).map((d) => ({
+        mission: d.mission,
+        at: d.at,
+        creditChangesNearby: changes.filter((c) => Math.abs(c.at - d.at) <= 5000)
+            .map((c) => ({ offsetMs: c.at - d.at, delta: c.delta })),
+    }));
 
     return {
-        stop() {
-            window.fetch = realFetch;
-            XMLHttpRequest.prototype.open = realOpen;
-            observer.disconnect();
-            return {
-                note: 'request paths and coarse page changes only — no response bodies, no page text',
-                watchedForSeconds: Math.round((Date.now() - started) / 1000),
-                url: location.pathname,
-                requests: requests.slice(0, 120),
-                mutations,
-            };
+        note: 'mission ids, element and attribute names, and credit changes only — '
+            + 'no mission text, no addresses, no names, and never a balance',
+        watchedForSeconds: Math.round((Date.now() - session.started) / 1000),
+        page: session.page,
+        found: {
+            missionList: ev.some((e) => e.type === 'listFound'),
+            creditsSelector: ev.find((e) => e.type === 'creditsFound')?.selector || null,
+            rowsAtStart: ev.find((e) => e.type === 'listFound')?.rows ?? null,
+            actionCableChannels: ev.find((e) => e.type === 'actionCable')?.channels || null,
         },
+        counts: {
+            events: ev.length,
+            capped: ev.length >= TO_MAX_EVENTS,
+            departures: departures.length,
+            resorts: departures.filter((d) => d.cameBack).length,
+            arrivals: ev.filter((e) => e.type === 'joined').length,
+            creditChanges: changes.length,
+            socketFrames: ev.filter((e) => e.type === 'frame').length,
+        },
+        missionList: { departures },
+        credits: { changes },
+        pairedWithCredits: paired,
+        markers: ev.filter((e) => e.type === 'marker').map((e) => ({ at: e.at, id: e.id })),
+        socketFrames: ev.filter((e) => e.type === 'frame').slice(0, 40),
     };
 }
+
+/* If the watch was armed before a page load, pick it back up. */
+if (toSession()) toAttach();
 
 /* --------------------------------------------------------------------------
  * Diagnostics — the channel back to whoever is fixing this.

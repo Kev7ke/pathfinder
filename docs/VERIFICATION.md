@@ -48,7 +48,7 @@ Confirmed by the player at the build menu or in game. Details in
 
 | id | question | why |
 |---|---|---|
-| EMS-1 | **How many credits in total land in your account for one completed ambulance call?** | 54 of the 175 EMS-path missions carry no credit value and the mission list shows no number for them. Confirmed so far: transport is free and hospitals gate nothing — neither says what the call *pays*. Until this number exists the EMS ladder runs on 69% of its own path. |
+| EMS-1 | **How many credits in total land in your account for one completed ambulance call?** | 96 of the 197 EMS-path missions carry no credit value — counted from `data/missions.json`, which is the game's own `/einsaetze.json`, so the gap is the game's and not the parse's. Confirmed so far: transport is free and hospitals gate nothing — neither says what the call *pays*. Until this number exists the EMS ladder runs on 51% of its own path. **This is what TrackOps is being built to close**: record what each finished mission actually paid, rather than what it was listed at. |
 | SPEC-1 | What specialisations exist, what do they cost, can they be undone? | A specialised station generates only its specialised calls. This is the game's own path mechanism and it is absent from the dataset — more important to the planner than any single price. |
 | SPEC-2 | Does specialising cut total spawn volume, or only redirect it? | Decides whether a path costs income, and by how much. |
 | RANGE-1 | How large is a building's range, and does each area need its own copy of an extension? | The planner prices each extension once, globally. If you need one per area, **every extension rung is under-costed by a multiple** — the largest known cost error in the tool. |
