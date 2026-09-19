@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief Renamer
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      2.1.0
+// @version      2.2.0
 // @description  Bulk-rename vehicles and stations from a pattern, with a preview before anything is written and an undo afterwards.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -95,6 +95,43 @@
 
     /** What the player calls each kind, so the dialog never says "buildings". */
     const KIND_NOUN = { vehicle: 'vehicle', building: 'station' };
+
+    /**
+     * Everything the game will hand over without being asked twice.
+     *
+     * The point is to keep the planner's data honest: re-export after the game
+     * adds missions or buildings, rather than trusting a snapshot. An endpoint
+     * that is not served here is recorded as an error and does not stop the
+     * rest — the list is deliberately wider than what is known to exist, so a
+     * failure tells us something too.
+     */
+    const ENDPOINTS = [
+        { path: '/einsaetze.json', label: 'missions', slim: 'missions' },
+        { path: '/api/buildings', label: 'buildings' },
+        { path: '/api/vehicles', label: 'vehicles' },
+        { path: '/api/credits', label: 'credits' },
+        { path: '/api/allianceinfo', label: 'alliance' },
+        { path: '/api/v1/aaos', label: 'aaos' },
+        { path: '/alliance_event_types.json', label: 'allianceEventTypes' },
+        { path: '/api/schoolings', label: 'schoolings' },
+        { path: '/api/missions', label: 'activeMissions' },
+    ];
+
+    /** Drop what a planner never reads. Icons alone are three paths per mission. */
+    function slimMissions(data) {
+        return (Array.isArray(data) ? data : Object.values(data)).map((m) => ({
+            id: m.id,
+            name: m.name,
+            place: m.place_array ?? (m.place ? [m.place] : []),
+            average_credits: m.average_credits,
+            requirements: m.requirements,
+            prerequisites: m.prerequisites,
+            chances: m.chances,
+            categories: m.mission_categories,
+            base_mission_id: m.base_mission_id,
+            filter_id: m.additional?.filter_id,
+        }));
+    }
 
     const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -392,7 +429,8 @@
                 <button class="btn btn-default" data-pf="dump" data-what="building-types">Station types</button>
                 <button class="btn btn-default" data-pf="dump" data-what="dispatch">Dispatch centers and stations</button>
                 <button class="btn btn-default" data-pf="dump" data-what="missions">Mission list check</button>
-                <button class="btn btn-primary" data-pf="dump" data-what="missions-export">Download mission list</button>
+                <button class="btn btn-primary" data-pf="dump" data-what="export-all">Download everything</button>
+                <button class="btn btn-default" data-pf="dump" data-what="missions-export">Mission list only</button>
                 <button class="btn btn-default" data-pf="dump" data-what="selfcheck">Self-check</button>
               </p>
               <textarea id="pf-dump" class="form-control" rows="12" readonly
@@ -760,21 +798,7 @@
             } else if (what === 'missions-export') {
                 status.textContent = 'Fetching the mission list…';
                 try {
-                    const data = await getJSON('/einsaetze.json');
-                    // Keep what a planner needs, drop what it never reads. Icons
-                    // alone are three paths per mission.
-                    const slim = (Array.isArray(data) ? data : Object.values(data)).map((m) => ({
-                        id: m.id,
-                        name: m.name,
-                        place: m.place_array ?? (m.place ? [m.place] : []),
-                        average_credits: m.average_credits,
-                        requirements: m.requirements,
-                        prerequisites: m.prerequisites,
-                        chances: m.chances,
-                        categories: m.mission_categories,
-                        base_mission_id: m.base_mission_id,
-                        filter_id: m.additional?.filter_id,
-                    }));
+                    const slim = slimMissions(await getJSON('/einsaetze.json'));
                     const text = JSON.stringify(slim);
                     download('einsaetze-slim.json', text);
                     status.innerHTML = `Downloaded <b>einsaetze-slim.json</b> —`
@@ -784,6 +808,37 @@
                 } catch (err) {
                     toClipboard(JSON.stringify({ error: err.message }, null, 1), 'the error');
                 }
+            } else if (what === 'export-all') {
+                const out = {
+                    fetchedAt: new Date().toISOString(),
+                    game: location.origin,
+                    locale: gameLocale() || null,
+                    endpoints: {},
+                };
+                let ok = 0;
+                for (const ep of ENDPOINTS) {
+                    status.textContent = `Fetching ${ep.path}…`;
+                    try {
+                        const data = await getJSON(ep.path);
+                        out.endpoints[ep.label] = {
+                            path: ep.path,
+                            count: Array.isArray(data) ? data.length : Object.keys(data).length,
+                            data: ep.slim === 'missions' ? slimMissions(data) : data,
+                        };
+                        ok++;
+                    } catch (err) {
+                        out.endpoints[ep.label] = { path: ep.path, error: err.message };
+                    }
+                    await sleep(120);
+                }
+                const text = JSON.stringify(out);
+                download('missionchief-export.json', text);
+                const summary = Object.fromEntries(Object.entries(out.endpoints)
+                    .map(([k, v]) => [k, v.error ? `failed: ${v.error}` : `${v.count} entries`]));
+                $('pf-dump').value = JSON.stringify(summary, null, 1);
+                status.innerHTML = `Downloaded <b>missionchief-export.json</b> —`
+                    + ` ${ok} of ${ENDPOINTS.length} endpoints,`
+                    + ` ${Math.round(text.length / 1024)} KB. Attach that file in the chat.`;
             } else if (what === 'selfcheck') {
                 toClipboard(JSON.stringify(await selfCheck(), null, 1), 'the self-check');
             }
@@ -1004,7 +1059,7 @@
 
     async function selfCheck() {
         const out = {
-            script: 'MissionChief Renamer 2.1.0 is running',
+            script: 'MissionChief Renamer 2.2.0 is running',
             url: location.href,
             locale: gameLocale() || '(not readable)',
             buttonOnPage: !!$('pf-renamer-fab'),

@@ -163,8 +163,17 @@ with correctly trained personnel.
 
 ## Refreshing the dataset
 
-The source is the **Possible Missions** list at `missionchief.com/einsaetze`. Fetching
-it programmatically truncates around row 114, so the full list comes from printing the
-page to PDF. Run `src/parse_pdf.py` then `src/build_dataset.py`. Verify the parse by
-comparing the count of `(/einsaetze/` link anchors in the PDF against the number of
-parsed records — they must match exactly. They currently do, at 1,261.
+The game serves its own mission list as JSON, so no PDF is involved any more:
+
+1. In the game, open the renamer and press **Data for Claude → Download everything**.
+2. Run `node tools/build_from_game.mjs <the downloaded file>`.
+
+That rewrites `data/missions.json` from `/einsaetze.json`, with the requirements
+structured as the game sends them and the vehicles each mission needs. Run
+`npm test` afterwards — it checks the shape, that every requirement still
+resolves to a price, and the ladder invariants.
+
+`src/parse_pdf.py` and `src/build_dataset.py` are kept for reference, along with
+`data/missions.pdf-parse.json.bak`, the last dataset they produced. The two were
+compared before the switch: 778 mission names carried a credit value in both and
+not one disagreed. See `docs/VERIFICATION.md`.

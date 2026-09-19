@@ -203,6 +203,21 @@ assert.equal(exported[0].place[0], 'Bus stop');
 assert.ok(!('icons' in exported[0]), 'icons should be dropped to keep the file small');
 assert.ok(!('generated_by' in exported[0]), 'unused fields should be dropped');
 
+// ---- the full export: an endpoint that is not served must not stop the rest ----
+await pg.evaluate(() => { window.__downloaded = null; });
+await pg.click('[data-pf="dump"][data-what="export-all"]');
+await pg.waitForFunction(() => window.__downloaded !== null, null, { timeout: 15000 });
+const all = JSON.parse(await pg.evaluate(() => window.__downloaded));
+const got = Object.fromEntries(Object.entries(all.endpoints)
+  .map(([k, v]) => [k, v.error ? 'failed' : v.count]));
+console.log('export-all summary:', JSON.stringify(got));
+assert.equal(all.endpoints.missions.count, 1, 'the mission list did not come through');
+assert.ok(all.endpoints.missions.data[0].prerequisites, 'missions were not slimmed correctly');
+assert.equal(all.endpoints.buildings.count, 4);
+assert.ok(all.endpoints.credits.error, 'an unserved endpoint should be recorded as an error');
+assert.ok(all.fetchedAt && all.locale === 'en_US', 'the export is missing its stamp');
+console.log('unserved endpoint :', all.endpoints.credits.error);
+
 console.log('page errors       :', errs.length ? errs : 'none');
 assert.equal(errs.length, 0);
 console.log('\nALL ASSERTIONS PASSED');

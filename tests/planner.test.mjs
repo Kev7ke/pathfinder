@@ -19,9 +19,41 @@ const build = (path, state, p = prices) =>
   ladder(missions, path, state, p, { extensionDepartments: extDept });
 
 test('the dataset is the one the tool was built against', () => {
-  assert.equal(missions.length, 1261);
-  assert.equal(data.p.length, 1261);
+  // Built from the game's own /einsaetze.json by tools/build_from_game.mjs,
+  // not from the printed PDF. See docs/VERIFICATION.md.
+  assert.equal(missions.length, 1519);
+  assert.equal(data.p.length, 1519);
   assert.equal(data.ext.length, 37);
+});
+
+test('every mission carries the fields the game gives us', () => {
+  for (const row of data.m) {
+    assert.equal(row.length, 10, 'a row is missing the new columns');
+    assert.equal(typeof row[0], 'string');
+    assert.ok(row[1] === null || typeof row[1] === 'number');
+    assert.equal(typeof row[8], 'object', 'vehicle requirements missing');
+    assert.ok(row[9] === null || typeof row[9] === 'number', 'main_building missing');
+  }
+});
+
+test('the vehicle requirements came through and are usable', () => {
+  const withVehicles = data.m.filter((r) => Object.keys(r[8]).length > 0);
+  assert.ok(withVehicles.length > 1000,
+    `only ${withVehicles.length} missions list the vehicles they need`);
+  const keys = new Set(data.m.flatMap((r) => Object.keys(r[8])));
+  assert.ok(keys.has('firetrucks') && keys.has('police_cars'),
+    'the usual vehicle keys are not present');
+});
+
+test('every extension named in a mission is priced', () => {
+  const missing = new Set();
+  for (const m of missions) {
+    for (const key of Object.keys(m.extras)) {
+      if (!priceEntry(prices, key)) missing.add(key);
+    }
+  }
+  assert.deepEqual([...missing], [],
+    'the rebuild introduced requirements with no price');
 });
 
 test('the frontier rises in both cost and credits', () => {

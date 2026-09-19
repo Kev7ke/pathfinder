@@ -109,29 +109,54 @@ Build menu or the dataset, or it stays flagged. Two independent sources, or your
 own screen. Nothing from a `leitstellenspiel.*` domain is evidence about
 MissionChief. See `CORRECTIONS.md` for what happens when that rule is relaxed.
 
-## Confirmed: the game serves the mission list as JSON
+## Done: the dataset now comes from the game
 
-`/einsaetze.json` exists on missionchief.com and needs no PDF. Read from the
-player's own account, logged in:
+`data/missions.json` is built from the game's own `/einsaetze.json` by
+`tools/build_from_game.mjs`. `src/parse_pdf.py` is no longer the route; the old
+parse is kept as `data/missions.pdf-parse.json.bak` for comparison.
 
-- **1,519 missions**, against **1,261** in `data/missions.json`. The print-to-PDF
-  parse is missing **258**.
-- `prerequisites` per mission, structured: `{main_building: 0, fire_stations: 1}`.
-  No reconstructed table, no name matching against a price list.
-- `requirements` per mission: `{firetrucks: 1}` — **the vehicles a mission needs**,
-  which the project has never had. This is `VEH-1`, answered from the game.
-- `average_credits`, `place_array` (the POI), `mission_categories`,
-  `base_mission_id` (which ties intensity variants of one mission together) and
-  `chances`.
+**The two agreed before the switch.** Matching on distinct mission names:
+**778 names carried a credit value in both, and not one disagreed.** Two names
+existed only in the old parse, both mangled by PDF line wrapping
+("high- risk", "mountain- road"). 244 names existed only in the game, including
+seasonal events and real missions the parse never saw.
 
-This supersedes `src/parse_pdf.py` as the way to get the dataset, and it settles
-`REQ-3` from the game's own data rather than by experiment. The renamer's data
-tab has a **Download mission list** button that fetches it and writes a slimmed
-`einsaetze-slim.json` (icons and unused fields dropped) for handing over.
+| | old parse | from the game |
+|---|---|---|
+| missions | 1,261 | **1,519** |
+| vehicle requirements | none | **on 1,000+ missions** |
+| requirements as data | reconstructed from a printed table | structured, as the game sends them |
+| path assignment | guessed from which station count was highest | the game's own `filter_id` |
 
-Not yet done: reconciling the two. The 258 extra rows have to be examined before
-anything is replaced — they may be new missions, or variants the PDF parse
-collapsed. Until that is checked, `data/missions.json` stays as it is.
+**The prerequisite keys were mapped, not guessed.** The game names requirements
+`brush_extension`, `fire_investigation_count`, `wasserrettung`; `prices.json` is
+keyed by the mission-list names. Every one of the 37 mappings was derived by
+matching the two datasets on distinct mission names in **both directions** and
+accepted only where the required **counts were identical on every shared
+mission**. A one-way match was not enough — it paired `atf_count` with Federal
+Police, because all twelve ATF missions happen to need both. The six keys that
+did not map are the six that should not: `main_building`, the three station
+counts, `max_police_stations` (a cap) and `personnel_educations` (training).
+
+**What changed in the output.** Paths now come from the game's `filter_id`
+rather than from whichever station count was highest, which moves some missions
+between paths and with them the ceilings: fire still tops out at 56,500, police
+now at 24,000 (Collision with Jackknifed Semi-Trailer) rather than 23,000, and
+ambulance at 35,000 (Oil Rig Explosion) rather than 40,000.
+
+**EMS-1 got worse, not better.** With the full list, **96 of the 197 ambulance
+missions carry no credit value** — 49%, against 54 of 175 before. Half of that
+path is still invisible, and the number to fix it is still one completed
+ambulance call's payout.
+
+## Keeping it current
+
+The renamer's data tab has **Download everything**: it walks every endpoint the
+game serves — the mission list, buildings, vehicles, credits, alliance info,
+AAOs, schoolings — and writes one `missionchief-export.json`. An endpoint that
+is not served is recorded as an error rather than stopping the rest, so the file
+also documents what this game does and does not expose. Re-export after the game
+adds content and rebuild rather than trusting a snapshot.
 
 ## Corroborated: the dispatch centre rate
 
