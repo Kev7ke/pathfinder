@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief Renamer
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      2.2.0
+// @version      2.3.0
 // @description  Bulk-rename vehicles and stations from a pattern, with a preview before anything is written and an undo afterwards.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -75,14 +75,15 @@
     /**
      * Building type names.
      *
-     * UNCONFIRMED. These are read off one player's own station names — type 0
-     * was called FS101, type 5 PO 2, type 29 Prison1 — so they are inferences
-     * from how that player labels things, not names the game gave us. They are
-     * only ever shown as labels, never used in a calculation, so a wrong one is
-     * cosmetic. Replace any of them by typing over it; a typed name wins.
+     * Confirmed against the game, not inferred from a player's own labels: each
+     * building carries generates_mission_categories, and the types line up with
+     * what they generate — 0 makes fire calls, 3 ambulance, 5 police, while 1, 4
+     * and 29 generate nothing, which is what a dispatch centre, an academy and a
+     * prison should do.
      *
      * Note that a small and a full station share a building_type and differ by
-     * the small_building flag, so type 0 covers both sizes of fire station.
+     * the small_building flag, so type 0 covers both sizes of fire station. A
+     * name you type still wins over this list.
      */
     const BUILTIN_BUILDING_TYPES = {
         0: 'Fire Station',
@@ -1059,7 +1060,7 @@
 
     async function selfCheck() {
         const out = {
-            script: 'MissionChief Renamer 2.2.0 is running',
+            script: 'MissionChief Renamer 2.3.0 is running',
             url: location.href,
             locale: gameLocale() || '(not readable)',
             buttonOnPage: !!$('pf-renamer-fab'),

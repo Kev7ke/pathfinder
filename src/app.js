@@ -4,6 +4,7 @@ import {
   nextPurchases, ceiling, unpricedMissions, canSpawn, TRUSTED_SOURCES, ownedCount,
 } from './planner.js';
 import { STRINGS } from './i18n.js';
+import { stateFromExport, unpricedExtensions } from './import-game.js';
 
 const LS = 'pathfinder-v1';
 const $ = (id) => document.getElementById(id);
@@ -214,7 +215,8 @@ function applyLanguage() {
   [...$('pathbar').children].forEach((b) => { b.textContent = s.paths[b.dataset.p]; });
   [...$('tabs').children].forEach((b) => { b.textContent = s.tabs[b.dataset.t]; });
   const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
-  set('l-yours', s.yours); set('l-fire', s.fire); set('l-ems', s.ems); set('l-police', s.police);
+  set('l-yours', s.yours); set('l-import', s.importTitle);
+  set('l-importbtn', s.importBtn); set('l-importhint', s.importHint); set('l-fire', s.fire); set('l-ems', s.ems); set('l-police', s.police);
   set('l-ext', s.extensions); set('l-exthint', s.extHeadHint); set('l-size', s.stationSize); set('l-sizenote', s.smallNote);
   set('l-ceiling', s.ceiling); set('l-ceilhint', s.ceilingHint); set('l-buy', s.buyNext);
   set('l-spine', s.spine); set('l-spinehint', s.spineHint);
@@ -303,6 +305,46 @@ function wire() {
     const v = view();
     renderPlan(v); renderLadder(v); renderMissions();
     if (n === 0) renderExtRows();
+  });
+
+  $('import-file').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const s = t();
+    try {
+      // Read in the browser. The export carries the player's name, their
+      // alliance and the coordinates of every building, so it never leaves
+      // the machine.
+      const imported = stateFromExport(JSON.parse(await file.text()));
+      if (!imported.counts.buildings) throw new Error('no buildings');
+      ui.own = imported.state;
+      for (const d of ['fire', 'ems', 'police']) $('own-' + d).value = ui.own[d];
+      save();
+      render();
+
+      const notes = [];
+      notes.push(`<div class="imp"><b>${s.importDone}:</b> ${imported.counts.buildings} buildings,`
+        + ` ${imported.counts.vehicles} vehicles`
+        + (imported.credits != null
+            ? ` · <b>${fmt(imported.credits)}</b> ${s.importCredits}` : '')
+        + (imported.rank ? ` · ${esc(imported.rank)}` : '') + '</div>');
+      const pending = Object.entries(imported.pending);
+      if (pending.length) {
+        notes.push(`<div class="imp warn">${s.importPending} `
+          + pending.map(([k, n]) => `${esc(k)} ×${n}`).join(', ') + '</div>');
+      }
+      const unpriced = unpricedExtensions(imported, prices());
+      if (unpriced.length) {
+        notes.push(`<div class="imp bad">${s.importUnpriced} `
+          + unpriced.map(esc).join(', ') + '</div>');
+      }
+      $('import-notes').innerHTML = notes.join('');
+      $('import-status').textContent = '';
+    } catch (err) {
+      $('import-status').textContent = t().importFail;
+      $('import-notes').innerHTML = '';
+    }
+    e.target.value = '';
   });
 
   $('m-search').addEventListener('input', (e) => { ui.missionTerm = e.target.value.toLowerCase().trim(); renderMissions(); });

@@ -6,6 +6,16 @@ which has different buildings, prices and mechanics). It answers one question:
 > Given the stations and extensions I own, what is the cheapest thing I can buy
 > to unlock a better-paying mission, on the department I actually want to play?
 
+## Import your game
+
+Press **Choose export file…** at the top of the planner and pick the
+`missionchief-export.json` the renamer writes. It fills in your stations and
+extensions, shows your credits and rank, and says which extensions are still
+under construction and so do not count yet.
+
+The file is read in your browser and never uploaded — it carries your player
+name, your alliance and the coordinates of every building you own.
+
 ## Run it
 
 **The quickest way — no install, no server.** Download `web/planner-offline.html`
@@ -37,6 +47,7 @@ data/
   rules.json        confirmed game mechanics, same provenance system
 src/
   planner.js        the algorithm: frontier, milestones, purchase queue
+  import-game.js    turns a game export into the planner's owned state
   i18n.js           English and German UI strings
   app.js            the UI — rendering only, no computation
   parse_pdf.py      extracts missions from a print-to-PDF of the mission list
@@ -45,6 +56,7 @@ tests/
   planner.test.mjs  27 tests against the real dataset
   i18n.test.mjs     both languages load and stay in step
   pattern.test.mjs  the renamer's counter and token rules
+  import.test.mjs   reading a game export into a planner state
 web/
   index.html            the app
   planner-offline.html  generated single-file build

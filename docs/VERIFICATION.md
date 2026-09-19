@@ -149,6 +149,34 @@ missions carry no credit value** — 49%, against 54 of 175 before. Half of that
 path is still invisible, and the number to fix it is still one completed
 ambulance call's payout.
 
+## Answered from the full export
+
+A single **Download everything** export settled several open items at once. The
+file carries the player's name, alliance and building coordinates, so it is
+**not** committed; the importer reads it in the browser and nothing leaves the
+machine.
+
+| id | answer |
+|---|---|
+| **TIME-1** | Build times are real and readable. Every extension carries `available_at`. Five police stations each queued *Prison cell* then *Additional cell*, and every pair was **exactly 7.000 days** apart — a seven-day build, measured five times independently. A 100,000 extension that is live in a day really can beat a 250,000 one that is not. |
+| **Building types** | Confirmed, not inferred. Each building carries `generates_mission_categories`: type 0 makes `{:fire}`, 3 `{:ambulance}`, 5 `{:police}`, while 1, 4 and 29 generate nothing — a dispatch centre, an academy and a prison. The planner reads the department from that field rather than from a table of ids. |
+| **Spawn model** | `generates_mission_categories` is the spawn model in data. A building generates the categories it lists and nothing else, which is what the player described. |
+| **CAP-2** | Small and full stations share a `building_type` and differ only by `small_building`, so nothing distinguishes them in a count. |
+| **VEH-1 (vehicles)** | `/api/vehicles` gives every vehicle with its `vehicle_type` and `building_id`. Their cost is still open. |
+
+Also learned, and not previously in the project:
+
+- **An extension's `type_id` is scoped to its host building**, not global: `type_id: 3`
+  is Forestry on a fire station while `type_id: 0` is a Prison cell on a police
+  station. Never key an extension by that number alone.
+- **Three owned extensions gate no mission** — Prison cell, Additional cell and
+  Mass Casualty Trailer Extension. They are recorded in `prices.json` with no
+  price rather than left out, so the gap is visible instead of silent.
+- `credits` gives the account's current balance and rank, so a plan can say what
+  is affordable today rather than only what is cheapest.
+- `/api/missions` answers **404** on this game. The export records that, so the
+  next person does not go looking for it.
+
 ## Keeping it current
 
 The renamer's data tab has **Download everything**: it walks every endpoint the
