@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief Vehicle Renamer
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      1.4.0
+// @version      1.5.0
 // @description  Bulk-rename your vehicles from a pattern, with a preview before anything is written.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -16,6 +16,8 @@
 // @match        *://*.missionchief-korea.com/*
 // @run-at       document-idle
 // @grant        GM_registerMenuCommand
+// @grant        GM_xmlhttpRequest
+// @connect      api.lss-manager.de
 // ==/UserScript==
 
 /*
@@ -121,6 +123,46 @@
         return res.json();
     }
 
+    /**
+     * Fetch the vehicle type catalogue from the name service.
+     *
+     * This is a cross-origin request from the game's page, and the game's own
+     * console shows other requests to lss-manager.de being refused by CORS. A
+     * plain fetch is therefore not dependable here, so the userscript transport
+     * is used when it is available: it is made for exactly this and is subject
+     * to neither CORS nor the page's content policy. Plain fetch stays as the
+     * fallback for anything that does not grant it.
+     */
+    function getTypeCatalogue(locale) {
+        const url = `https://api.lss-manager.de/${locale}/vehicles`;
+        if (typeof GM_xmlhttpRequest === 'function') {
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url,
+                    timeout: 20000,
+                    onload: (res) => {
+                        if (res.status < 200 || res.status >= 300) {
+                            reject(new Error(`answered ${res.status}`));
+                            return;
+                        }
+                        try {
+                            resolve(JSON.parse(res.responseText));
+                        } catch (err) {
+                            reject(new Error('the answer was not JSON'));
+                        }
+                    },
+                    onerror: () => reject(new Error('the request was refused')),
+                    ontimeout: () => reject(new Error('the request timed out')),
+                });
+            });
+        }
+        return fetch(url).then((res) => {
+            if (!res.ok) throw new Error(`answered ${res.status}`);
+            return res.json();
+        });
+    }
+
     /** Replace only the caption on the vehicle's own edit form. */
     async function renameVehicle(id, caption) {
         const res = await fetch(`/vehicles/${id}/edit`, { credentials: 'include' });
@@ -222,6 +264,8 @@
     }
 
     async function openRenamer(undoMode = false) {
+        // Re-read on every open, so a map pasted in another tab is picked up.
+        typeNames = readTypeNames();
         document.getElementById(MODAL_ID)?.remove();
         const modal = buildModal();
         document.body.append(modal);
@@ -405,9 +449,7 @@
             }
             status.textContent = `Asking api.lss-manager.de for ${locale} names…`;
             try {
-                const res = await fetch(`https://api.lss-manager.de/${locale}/vehicles`);
-                if (!res.ok) throw new Error(`answered ${res.status}`);
-                const data = await res.json();
+                const data = await getTypeCatalogue(locale);
                 let filled = 0;
                 for (const id of typeIds) {
                     const caption = data[id]?.caption;

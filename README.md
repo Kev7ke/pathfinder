@@ -80,7 +80,10 @@ actually answer on this game.
   no name in any data the script can see. The dialog lists every type in your
   fleet with its id and vehicle count, and you name them once; the names persist
   in the browser. A button can fill them from `api.lss-manager.de` in your
-  game's language — third-party, opt-in, never called on its own. **Copy type
+  game's language — third-party, opt-in, never called on its own. That lookup
+  goes through `GM_xmlhttpRequest`, because a plain cross-origin fetch from the
+  game page is not dependable: the game's own console shows requests to
+  lss-manager.de being refused by CORS. **Copy type
   map** exports the result as JSON and **Paste type map** reads one back, so the
   list can be fetched once and then carried between browsers, or built into the
   script as defaults. A preview that would write a bare `Type <number>` says so

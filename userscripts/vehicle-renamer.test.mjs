@@ -58,6 +58,16 @@ await pg.evaluate(() => {
   };
   window.confirm = () => true;
   window.GM_registerMenuCommand = () => {};
+  // Stand-in for the userscript transport, so the CORS-proof path is covered.
+  window.__gmCalls = [];
+  window.GM_xmlhttpRequest = (opts) => {
+    window.__gmCalls.push(opts.url);
+    opts.onload({ status: 200, responseText: JSON.stringify({
+      '0': { caption: 'Fetched Engine' },
+      '28': { caption: 'Fetched Ambulance' },
+    }) });
+  };
+  window.I18n = { locale: 'en_US' };
 });
 
 await pg.addScriptTag({ content: script });
@@ -74,6 +84,26 @@ await fab.click();
 await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.includes('vehicles found'));
 
 console.log('status after load :', await pg.textContent('#pf-status'));
+// Fetching names must go through the userscript transport, not plain fetch:
+// the game's own console shows lss-manager.de requests refused by CORS.
+await pg.click('[data-pf="fetch-types"]');
+await pg.waitForTimeout(250);
+const gmCalls = await pg.evaluate(() => window.__gmCalls);
+console.log('name lookup via GM :', JSON.stringify(gmCalls));
+assert.deepEqual(gmCalls, ['https://api.lss-manager.de/en_US/vehicles'],
+  'the name lookup did not use the userscript transport');
+const fetchedNames = await pg.$$eval('#pf-type option', o => o.map(x => x.textContent));
+assert.ok(fetchedNames.includes('Fetched Engine (2)'), 'fetched names did not reach the dropdown');
+console.log('after fetch        :', JSON.stringify(fetchedNames));
+
+// Clear them again so the rest of the run exercises typing the names by hand.
+await pg.evaluate(() => {
+  localStorage.removeItem('pf-vehicle-renamer-types');
+  document.getElementById('pf-vehicle-renamer').remove();
+});
+await pg.locator('#pf-renamer-fab').click();
+await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.includes('vehicles found'));
+
 // Types start unnamed, and the panel must say so rather than quietly using numbers.
 const summary = await pg.textContent('#pf-types-summary');
 console.log('types summary     :', summary.trim());
