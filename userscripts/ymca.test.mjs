@@ -213,7 +213,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.12');
+assert.equal(report.ymca, '0.0.13');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -377,7 +377,7 @@ await pg.waitForSelector('#mm-needs');
 const needs = await pg.$$eval('#mm-needs tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('mission needs     :', JSON.stringify(needs));
-assert.ok(needs.some((r) => r[0] === 'Fire engines' && r[1] === '1'),
+assert.ok(needs.some((r) => r[3] === 'Fire engines' && r[0] === '1'),
   'the requirement should come from the game\'s own mission list, by data-mission-type');
 const tickLabel = await pg.textContent('[data-do="select"]');
 console.log('tick button       :', tickLabel.trim());
@@ -464,7 +464,7 @@ assert.equal(await mission.evaluate(() =>
 const panelRows = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('panel table       :', JSON.stringify(panelRows));
-assert.deepEqual(panelRows, [['Fire engines', '1', '\u2013', '1']]);
+assert.deepEqual(panelRows, [['1', '\u2013', '1', 'Fire engines']]);
 
 // Travel time, not map distance: vehicle 22 is further away but arrives in 90s, not 300s.
 await mission.click('#ymca-mm-panel [data-do="select"]');
@@ -526,8 +526,8 @@ await mission.waitForTimeout(900);
 const withScene = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('with one on scene :', JSON.stringify(withScene));
-const engines = withScene.find((r) => r[0] === 'Fire engines');
-assert.equal(engines[2], '1', 'the engine already at the mission must show in the There column');
+const engines = withScene.find((r) => r[3] === 'Fire engines');
+assert.equal(engines[1], '1', 'the engine already at the mission must show in the There column');
 const tickAfter = await mission.textContent('#ymca-mm-panel [data-do="select"]');
 console.log('tick after        :', tickAfter.trim());
 assert.ok(/Tick 2 vehicles/.test(tickAfter),
@@ -598,11 +598,11 @@ await mission.waitForTimeout(900);
 const withPatients = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('patients          :', JSON.stringify(withPatients));
-const amb = withPatients.find((r) => /Ambulances/.test(r[0]));
+const amb = withPatients.find((r) => /Ambulances/.test(r[3]));
 assert.ok(amb, 'patients must reach the plan even though `requirements` omits them');
-assert.equal(amb[1], '2', 'the window states two, and the window beats the catalogue maximum');
+assert.equal(amb[0], '2', 'the window states two, and the window beats the catalogue maximum');
 // One glyph per requirement, sized to the text and taking its colour.
-const icons = await mission.$$eval('#ymca-mm-panel tbody tr td:first-child svg',
+const icons = await mission.$$eval('#ymca-mm-panel tbody tr td:last-child svg',
   (els) => els.map((e) => ({ w: e.getAttribute('width'), stroke: e.getAttribute('stroke') })));
 console.log('row icons         :', JSON.stringify(icons));
 assert.equal(icons.length, withPatients.length, 'every requirement row should carry a glyph');
@@ -614,18 +614,76 @@ await mission.uncheck('#ymca-mm-panel [data-cfg="ambulancePerPatient"]');
 await mission.waitForTimeout(600);
 const oneAmb = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
-console.log('one ambulance     :', JSON.stringify(oneAmb.find((r) => /Ambulances/.test(r[0]))));
-assert.equal(oneAmb.find((r) => /Ambulances/.test(r[0]))[1], '1',
+console.log('one ambulance     :', JSON.stringify(oneAmb.find((r) => /Ambulances/.test(r[3]))));
+assert.equal(oneAmb.find((r) => /Ambulances/.test(r[3]))[0], '1',
   'with the setting off, two patients still want one ambulance');
 await mission.check('#ymca-mm-panel [data-cfg="ambulancePerPatient"]');
 await mission.waitForTimeout(600);
 // oneof: the pumper answers "an engine, rescue or ladder" AND "firetrucks" at once.
-assert.ok(withPatients.some((r) => /engine, rescue or ladder/i.test(r[0])),
+assert.ok(withPatients.some((r) => /engine, rescue or ladder/i.test(r[3])),
   'the oneof_ family must be matched, not left as an unmatched requirement');
 const tickPatients = await mission.textContent('#ymca-mm-panel [data-do="select"]');
 console.log('tick w/ patients  :', tickPatients.trim());
 assert.ok(/Tick 3 vehicles/.test(tickPatients),
   'one pumper covers both fire requirements, plus two ambulances for the patients');
+
+// ---- the versatile vehicles are kept back, and the two kinds take turns ----
+// 4 engines wanted, nothing else. Quints (fire+dlk) and Rescue Engines (fire+rw) would each do,
+// and both are closer than the pumpers — but spending them as plain engines empties the ladders
+// and the rescues. Pumpers go.
+await mission.evaluate(() => {
+  document.getElementById('mission_vehicle_at_mission')?.remove();
+  window.__catalogue = [{ id: '300', name: 'Engines only', requirements: { firetrucks: 4 } }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '300');
+  const row = (id, secs, attrs) => `
+    <tr class="vehicle_select_table_tr" vehicle_id="${id}" data-distance="1">
+      <td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_${id}"
+        value="${id}" name="vehicle_ids[]" ${attrs}></td>
+      <td id="vehicle_sort_${id}" timevalue="${secs}">x</td></tr>`;
+  document.getElementById('vehicle_show_table_body_all').innerHTML = [
+    row(71, 10, 'vehicle_type_id="13" fire="1" dlk="1"'),   // Quint, nearest
+    row(72, 20, 'vehicle_type_id="18" fire="1" rw="1"'),    // Rescue Engine
+    row(73, 60, 'vehicle_type_id="33" fire="1"'),           // pumpers, further away
+    row(74, 70, 'vehicle_type_id="33" fire="1"'),
+    row(75, 80, 'vehicle_type_id="33" fire="1"'),
+    row(76, 90, 'vehicle_type_id="33" fire="1"'),
+  ].join('');
+  for (const b of document.querySelectorAll('.vehicle_checkbox:checked')) b.checked = false;
+});
+await mission.waitForTimeout(900);
+await mission.click('#ymca-mm-panel [data-do="select"]');
+const plain = await mission.$$eval('.vehicle_checkbox:checked', (b) => b.map((x) => x.value));
+console.log('kept back         :', JSON.stringify(plain), '(71 Quint and 72 Rescue are nearer)');
+assert.deepEqual(plain, ['73', '74', '75', '76'],
+  'a Quint or a Rescue Engine must not be spent as a plain engine while pumpers exist');
+
+// Now only two pumpers, so two of the dual-purpose ones have to go — one of each, not two Quints.
+await mission.evaluate(() => {
+  document.querySelector('.aao[reset="true"]').click();
+  for (const b of document.querySelectorAll('.vehicle_checkbox:checked')) b.checked = false;
+  for (const id of ['75', '76']) document.getElementById(`vehicle_checkbox_${id}`).closest('tr').remove();
+  const row = (id, secs, attrs) => {
+    const tr = document.createElement('tr');
+    tr.className = 'vehicle_select_table_tr';
+    tr.setAttribute('vehicle_id', id);
+    tr.setAttribute('data-distance', '1');
+    tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox"
+      id="vehicle_checkbox_${id}" value="${id}" name="vehicle_ids[]" ${attrs}></td>
+      <td id="vehicle_sort_${id}" timevalue="${secs}">x</td>`;
+    document.getElementById('vehicle_show_table_body_all').append(tr);
+  };
+  row(77, 15, 'vehicle_type_id="13" fire="1" dlk="1"');     // a second Quint, still near
+});
+await mission.waitForTimeout(900);
+await mission.click('#ymca-mm-panel [data-do="select"]');
+const mixed = await mission.$$eval('.vehicle_checkbox:checked', (b) => b.map((x) => x.value).sort());
+console.log('balanced          :', JSON.stringify(mixed), '(71,77 Quints · 72 Rescue · 73,74 pumpers)');
+assert.equal(mixed.length, 4, 'four engines wanted, four sent');
+assert.ok(mixed.includes('73') && mixed.includes('74'), 'both pumpers go first');
+assert.ok(mixed.includes('72'), 'the Rescue Engine is taken before a second Quint');
+assert.ok(!(mixed.includes('71') && mixed.includes('77')),
+  'both Quints must not go while a Rescue Engine is standing there');
 
 // ---- Cancel unused: the overlap has to be re-checked, not assumed ----
 // A Quint on scene covers the ladder and an engine at once. Counting per requirement says the
@@ -688,7 +746,7 @@ const after = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('panel redrew      :', JSON.stringify(after));
 assert.ok(after.length >= 1, 'the panel should re-read itself when the vehicle table changes');
-assert.ok(after.every((r) => Number(r[3]) >= Number(r[1])),
+assert.ok(after.every((r) => Number(r[2]) >= Number(r[0])),
   'every requirement is still at least covered after the redraw');
 console.log('mission panel     :', missionErrs.length ? missionErrs : 'no page errors');
 assert.equal(missionErrs.length, 0);

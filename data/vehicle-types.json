@@ -1,0 +1,16 @@
+{
+  "note": "MissionChief vehicle types, by the id the game uses in vehicle_type_id. Names come from the game's own vehicle list; capabilities are the plain attributes the game puts on a vehicle's checkbox in a mission window. Anything not seen from inside the game is absent rather than guessed.",
+  "source": "the player's own /api/vehicles and mission windows, via Diagnostics -> Copy the report",
+  "updated": "2026-09-19",
+  "types": {
+    "3": { "name": "Battalion chief unit", "capabilities": ["elw"] },
+    "5": { "name": "ALS Ambulance", "capabilities": ["any_rtw"] },
+    "6": { "name": "Mobile air", "capabilities": ["gwa"] },
+    "7": { "name": "Water Tanker", "capabilities": ["gwl2wasser_only"] },
+    "10": { "name": "Patrol Car", "capabilities": ["fustw_or_police_motorcycle"] },
+    "13": { "name": "Quint", "capabilities": ["fire", "dlk"] },
+    "18": { "name": "Rescue Engine", "capabilities": ["fire", "rw"] },
+    "27": { "name": "BLS Ambulance", "capabilities": ["any_rtw"] },
+    "33": { "name": "Pumper Tanker", "capabilities": ["fire"] }
+  }
+}

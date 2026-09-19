@@ -183,12 +183,18 @@ Setting `checked` alone shows the player something different from what would
 be sent.
 
 **A vehicle can satisfy two requirements at once.** A Quint is flagged `fire`
-and `dlk`, a Rescue Engine `fire` and `rw`. Fill requirements in order of how
-few vehicles can meet them and this falls out on its own — fill the common one
-first and the shared vehicle is spent as an ordinary engine. No setting, no
-special case per vehicle. The same overlap is why "more than the requirement
-asks for" is not a safe test for sending one back: take the candidate away and
-check every requirement again.
+and `dlk`, a Rescue Engine `fire` and `rw`. So the choice is made **per vehicle,
+not per requirement**, and the order of the reasons is the design: what it still
+covers, then how little else it could have done, then how many of its kind are
+left and how often that kind has been drawn on, and only then how fast it is.
+
+**Versatility is judged on everything a vehicle can do, not on what this mission
+asks.** Scope it to the mission's own requirements and a Quint and a pumper look
+identical on an engines-only call — and then the nearer Quint goes and the
+ladders run dry. Speed is the last tie-break for the same reason.
+
+The same overlap is why "more than the requirement asks for" is not a safe test
+for sending one back: take the candidate away and check every requirement again.
 
 **Order vehicles by travel time, never by distance.** The row's `data-distance`
 is how far the dot is; the fourth cell's `timevalue`, in seconds, is when the
@@ -403,3 +409,28 @@ against both.
 `tools/build_from_game.mjs` — not from a printed PDF any more. Refresh it with
 Diagnostics → Download everything, then run that script. `docs/VERIFICATION.md`
 lists what is confirmed, what is still open, and how each answer was reached.
+
+`data/vehicle-types.json` is the vehicle type ids, their names and the
+capability flags the game puts on their checkboxes. It is what the tools fall
+back on before they have seen a type themselves.
+
+### Every report is a dataset update
+
+**When a report comes back carrying something the repo does not have, put it in
+the repo.** A tool that only knows what the player's own browser has learnt
+starts from nothing on every new machine, and an answer that arrives once and is
+not written down has to be asked for again.
+
+- A **vehicle type id** that is not in `data/vehicle-types.json` — from
+  `missionmagician.capabilitiesByType` in the report, or from the player's
+  `/api/vehicles` — goes in with its name and its flags.
+- A **requirement key** in `missionmagician.unmatchedRequirements` gets an entry
+  in `MM_REQUIREMENTS`, or stays listed as unmatched on purpose with a reason.
+- **Mission types** the catalogue does not carry mean `data/missions.json` is
+  behind; rebuild it from a fresh export.
+- **Endpoints** that started or stopped answering change the `ENDPOINTS` list in
+  Diagnostics.
+
+Each of those carries a `source`, and none of them is inferred from a name.
+A type seen only in the player's localStorage is not in the dataset yet — it is
+in the dataset when it is in `data/`.
