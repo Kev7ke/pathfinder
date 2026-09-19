@@ -75,6 +75,13 @@ whether the script is loaded and whether `/api/vehicles` and `/api/buildings`
 actually answer on this game.
 
 - Filters by station and by vehicle type; the counter restarts per station.
+- **Vehicle type names.** `/api/vehicles` sends a numeric `vehicle_type` and
+  fills `vehicle_type_caption` only for custom types, so standard vehicles have
+  no name in any data the script can see. The dialog lists every type in your
+  fleet with its id and vehicle count, and you name them once; the names persist
+  in the browser. A button can fill them from `api.lss-manager.de` in your
+  game's language — third-party, opt-in, never called on its own. A preview that
+  would write a bare `Type <number>` says so instead of doing it.
 - **Preview is mandatory** — nothing is written until you have seen the list and
   confirmed a second time.
 - **Undo.** Every run records what each name was before it changed, in this

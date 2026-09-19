@@ -23,10 +23,12 @@ await pg.setContent(`<html><body>
 // A stand-in for the game: the API, the edit form, and the save endpoint.
 await pg.evaluate(() => {
   window.__posts = [];
+  // As the real game sends it: a numeric vehicle_type, and vehicle_type_caption
+  // only on custom types. This is what made {type} render as a bare number.
   const vehicles = [
-    { id: 11, caption: 'Old A', building_id: 1, vehicle_type_caption: 'Type 1 Engine' },
-    { id: 12, caption: 'Old B', building_id: 1, vehicle_type_caption: 'Type 1 Engine' },
-    { id: 13, caption: 'Old C', building_id: 2, vehicle_type_caption: 'Ambulance' },
+    { id: 11, caption: 'Old A', building_id: 1, vehicle_type: 0 },
+    { id: 12, caption: 'Old B', building_id: 1, vehicle_type: 0 },
+    { id: 13, caption: 'Old C', building_id: 2, vehicle_type: 28 },
   ];
   const buildings = [
     { id: 1, caption: 'Downtown Fire' },
@@ -72,7 +74,26 @@ await fab.click();
 await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.includes('vehicles found'));
 
 console.log('status after load :', await pg.textContent('#pf-status'));
+// Types start unnamed, and the panel must say so rather than quietly using numbers.
+const summary = await pg.textContent('#pf-types-summary');
+console.log('types summary     :', summary.trim());
+assert.ok(summary.includes('2 of 2 still unnamed'), 'the unnamed types were not flagged');
+
 await pg.fill('#pf-pattern', '{building} {type} {nn}');
+await pg.click('[data-pf="preview"]');
+await pg.waitForTimeout(150);
+const warned = await pg.locator('#pf-preview .alert-warning').count();
+console.log('unnamed warning   :', warned === 1 ? 'shown' : 'MISSING');
+assert.equal(warned, 1, 'renaming to a bare type number was not warned about');
+
+// Now name them, the way the user would.
+await pg.fill('[data-type="0"] [data-pf="type-name"]', 'Type 1 Engine');
+await pg.fill('[data-type="28"] [data-pf="type-name"]', 'Ambulance');
+await pg.waitForTimeout(150);
+const typeOptions = await pg.$$eval('#pf-type option', o => o.map(x => x.textContent));
+console.log('type dropdown     :', JSON.stringify(typeOptions));
+assert.ok(typeOptions.includes('Type 1 Engine (2)'), 'the dropdown still shows numbers');
+
 await pg.click('[data-pf="preview"]');
 await pg.waitForTimeout(200);
 console.log('preview status    :', await pg.textContent('#pf-status'));
@@ -106,9 +127,9 @@ await pg.evaluate(() => {
   window.fetch = async (url, opts = {}) => {
     if (String(url) === '/api/vehicles') {
       return new Response(JSON.stringify([
-        { id:11, caption: renamed[11], building_id:1, vehicle_type_caption:'Type 1 Engine' },
-        { id:12, caption: renamed[12], building_id:1, vehicle_type_caption:'Type 1 Engine' },
-        { id:13, caption: renamed[13], building_id:2, vehicle_type_caption:'Ambulance' },
+        { id:11, caption: renamed[11], building_id:1, vehicle_type: 0 },
+        { id:12, caption: renamed[12], building_id:1, vehicle_type: 0 },
+        { id:13, caption: renamed[13], building_id:2, vehicle_type: 28 },
       ]), {status:200});
     }
     return inner(url, opts);

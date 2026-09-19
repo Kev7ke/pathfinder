@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief Vehicle Renamer
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      1.2.0
+// @version      1.3.0
 // @description  Bulk-rename your vehicles from a pattern, with a preview before anything is written.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -44,7 +44,8 @@
     const PLACEHOLDERS = [
         ['{n}', 'counter, 1 2 3 …'],
         ['{nn}', 'counter, zero-padded: 01 02 03'],
-        ['{type}', 'vehicle type, e.g. Type 1 Engine'],
+        ['{type}', 'vehicle type name — see the Vehicle types panel'],
+        ['{typeid}', 'the numeric vehicle type id'],
         ['{building}', 'name of the station it is in'],
         ['{id}', 'the vehicle id'],
         ['{name}', 'the current name'],
@@ -58,6 +59,38 @@
 
     // Renaming writes to the account and the game offers no undo, so every run
     // records what each name was before it changed. Kept in this browser only.
+    // The game's own /api/vehicles gives a numeric vehicle_type and only fills
+    // vehicle_type_caption for custom types, so standard vehicles have no name
+    // anywhere in the data this script can see. The names therefore live here,
+    // supplied by you or fetched on request, and persist in this browser.
+    const TYPES_KEY = 'pf-vehicle-renamer-types';
+
+    function readTypeNames() {
+        try {
+            return JSON.parse(localStorage.getItem(TYPES_KEY)) || {};
+        } catch (e) {
+            return {};
+        }
+    }
+    function writeTypeNames(map) {
+        try {
+            localStorage.setItem(TYPES_KEY, JSON.stringify(map));
+        } catch (e) { /* nothing to do; the names just will not persist */ }
+    }
+
+    let typeNames = readTypeNames();
+
+    /** The name to use for a vehicle's type, and whether it is a real name. */
+    function typeInfo(vehicle) {
+        const id = String(vehicle.vehicle_type ?? '');
+        if (vehicle.vehicle_type_caption) {
+            return { id, name: vehicle.vehicle_type_caption, named: true };
+        }
+        const given = typeNames[id];
+        if (given) return { id, name: given, named: true };
+        return { id, name: `Type ${id}`, named: false };
+    }
+
     const BACKUP_KEY = 'pf-vehicle-renamer-backups';
     const BACKUP_KEEP = 10;
 
@@ -119,7 +152,8 @@
         return pattern
             .replaceAll('{nn}', String(n).padStart(2, '0'))
             .replaceAll('{n}', String(n))
-            .replaceAll('{type}', vehicle.vehicle_type_caption || vehicle.vehicle_type || '')
+            .replaceAll('{type}', typeInfo(vehicle).name)
+            .replaceAll('{typeid}', String(vehicle.vehicle_type ?? ''))
             .replaceAll('{building}', building ? building.caption : '')
             .replaceAll('{id}', String(vehicle.id))
             .replaceAll('{name}', vehicle.caption || '')
@@ -153,6 +187,18 @@
                 <select id="pf-type" class="form-control"></select>
               </div>
             </div>
+            <details id="pf-types-panel" style="margin-bottom:12px">
+              <summary style="cursor:pointer"><b>Vehicle types</b>
+                <span id="pf-types-summary" class="text-muted"></span></summary>
+              <p class="help-block" style="margin:6px 0">
+                The game only sends a number for standard vehicle types, so the names
+                are yours to set. They are remembered in this browser.
+                <button class="btn btn-xs btn-default" data-pf="fetch-types">Fetch names</button>
+                <span class="text-muted">— asks api.lss-manager.de, a third-party service, for the
+                names in your game's language. Optional; you can just type them.</span>
+              </p>
+              <div id="pf-types-list"></div>
+            </details>
             <label for="pf-pattern">Pattern</label>
             <input id="pf-pattern" class="form-control" value="{building} {type} {nn}">
             <p class="help-block" style="margin-top:6px">
@@ -240,17 +286,102 @@
         buildingSel.innerHTML = `<option value="">All stations</option>` +
             used.map((b) => `<option value="${b.id}">${esc(b.caption)}</option>`).join('');
 
-        const types = [...new Set(vehicles.map(
-            (v) => v.vehicle_type_caption || v.vehicle_type))].sort();
-        typeSel.innerHTML = `<option value="">All types</option>` +
-            types.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+        // One row per distinct type in the fleet, so nothing is guessed by number.
+        const typeCounts = new Map();
+        for (const v of vehicles) {
+            const { id } = typeInfo(v);
+            typeCounts.set(id, (typeCounts.get(id) || 0) + 1);
+        }
+        const typeIds = [...typeCounts.keys()].sort((a, b) => Number(a) - Number(b));
+        const sample = (id) => vehicles.find((v) => String(v.vehicle_type ?? '') === id);
+
+        function renderTypes() {
+            const unnamed = typeIds.filter((id) => !typeInfo(sample(id)).named).length;
+            $('pf-types-summary').textContent = unnamed
+                ? ` — ${unnamed} of ${typeIds.length} still unnamed`
+                : ` — all ${typeIds.length} named`;
+            if (unnamed) $('pf-types-panel').open = true;
+
+            $('pf-types-list').innerHTML = `<table class="table table-condensed">
+          <thead><tr><th style="width:70px">Id</th><th style="width:90px">Vehicles</th><th>Name</th></tr></thead>
+          <tbody>${typeIds.map((id) => {
+                const info = typeInfo(sample(id));
+                const fixed = !!sample(id).vehicle_type_caption;
+                return `<tr data-type="${esc(id)}">
+              <td class="text-muted">${esc(id)}</td>
+              <td>${typeCounts.get(id)}</td>
+              <td>${fixed
+                    ? `<span>${esc(info.name)}</span> <span class="text-muted">(custom type)</span>`
+                    : `<input class="form-control input-sm" data-pf="type-name"
+                         value="${esc(typeNames[id] || '')}" placeholder="Type ${esc(id)}">`}</td>
+            </tr>`;
+            }).join('')}</tbody></table>`;
+
+            typeSel.innerHTML = `<option value="">All types</option>` + typeIds.map((id) =>
+                `<option value="${esc(id)}">${esc(typeInfo(sample(id)).name)} (${typeCounts.get(id)})</option>`
+            ).join('');
+        }
+        renderTypes();
+
+        $('pf-types-list').addEventListener('input', (e) => {
+            if (e.target.dataset.pf !== 'type-name') return;
+            const id = e.target.closest('tr').dataset.type;
+            const name = e.target.value.trim();
+            if (name) typeNames[id] = name; else delete typeNames[id];
+            writeTypeNames(typeNames);
+            const keep = typeSel.value;
+            $('pf-types-summary').textContent = '';
+            typeSel.innerHTML = `<option value="">All types</option>` + typeIds.map((tid) =>
+                `<option value="${esc(tid)}">${esc(typeInfo(sample(tid)).name)} (${typeCounts.get(tid)})</option>`
+            ).join('');
+            typeSel.value = keep;
+        });
+
+        modal.querySelector('[data-pf="fetch-types"]').addEventListener('click', async (e) => {
+            e.preventDefault();
+            const locale = (() => {
+                try {
+                    const w = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
+                    return w.I18n?.locale || '';
+                } catch (err) {
+                    return '';
+                }
+            })();
+            if (!locale) {
+                status.innerHTML = '<span class="text-danger">Could not read the game language,'
+                    + ' so the right names cannot be requested. Type them instead.</span>';
+                return;
+            }
+            status.textContent = `Asking api.lss-manager.de for ${locale} names…`;
+            try {
+                const res = await fetch(`https://api.lss-manager.de/${locale}/vehicles`);
+                if (!res.ok) throw new Error(`answered ${res.status}`);
+                const data = await res.json();
+                let filled = 0;
+                for (const id of typeIds) {
+                    const caption = data[id]?.caption;
+                    if (caption && !typeNames[id]) {
+                        typeNames[id] = caption;
+                        filled++;
+                    }
+                }
+                writeTypeNames(typeNames);
+                renderTypes();
+                status.textContent = filled
+                    ? `Filled in ${filled} name${filled === 1 ? '' : 's'}. Check them before renaming.`
+                    : 'That service knew none of your type ids — type the names instead.';
+            } catch (err) {
+                status.innerHTML = `<span class="text-danger">Could not reach the name service`
+                    + ` (${esc(err.message)}). Type the names instead.</span>`;
+            }
+        });
 
         const selected = () => {
             const bId = buildingSel.value;
             const type = typeSel.value;
             return vehicles.filter((v) =>
                 (!bId || String(v.building_id) === bId) &&
-                (!type || String(v.vehicle_type_caption || v.vehicle_type) === type));
+                (!type || String(v.vehicle_type ?? '') === type));
         };
 
         modal.querySelector('[data-pf="preview"]').addEventListener('click', () => {
@@ -264,7 +395,14 @@
                 return { vehicle: v, to: applyPattern(pattern, v, i, buildings) };
             }).filter((r) => r.to && r.to !== r.vehicle.caption);
 
+            const usesType = /\{type\}/.test(pattern);
+            const unnamedHit = usesType && planned.some((r) => !typeInfo(r.vehicle).named);
             showPlan(rows.length, 'Apply');
+            if (unnamedHit) {
+                previewBox.insertAdjacentHTML('afterbegin',
+                    '<div class="alert alert-warning">Some of these use a type that has no name yet,'
+                    + ' so they would be called <b>Type &lt;number&gt;</b>. Fill the names in above first.</div>');
+            }
         });
 
         function showPlan(considered, verb) {
