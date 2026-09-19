@@ -61,6 +61,22 @@ docs/
   CORRECTIONS.md    mistakes already made — do not repeat them
 ```
 
+## Tampermonkey script: bulk vehicle renaming
+
+`userscripts/vehicle-renamer.user.js` renames your vehicles from a pattern such
+as `{building} {type} {nn}`, with a **mandatory preview** before anything is
+written. Install it by opening the raw file with Tampermonkey active.
+
+It never posts a hand-built request. For each vehicle it fetches
+`/vehicles/<id>/edit`, takes the real form out of the response and builds a
+`FormData` from it, so the CSRF token and every other setting travel along
+untouched; only `vehicle[caption]` is replaced. `vehicle-renamer.test.mjs`
+drives it against a stand-in game server and asserts exactly that.
+
+The request pattern and the 150-character caption limit come from
+[jxn-30/LSS-Scripts](https://github.com/jxn-30/LSS-Scripts) (MIT), which
+supports these same MissionChief domains.
+
 ## The one thing to get right
 
 **Prices are the weak link, not the mission data.** `data/prices.json` marks every

@@ -109,6 +109,30 @@ Build menu or the dataset, or it stays flagged. Two independent sources, or your
 own screen. Nothing from a `leitstellenspiel.*` domain is evidence about
 MissionChief. See `CORRECTIONS.md` for what happens when that rule is relaxed.
 
+## Lead: the game's own JSON endpoints
+
+`jxn-30/LSS-Scripts` (MIT) is a userscript collection that explicitly supports
+the MissionChief domains, not only Leitstellenspiel. Two things in it matter
+here, neither yet confirmed against this game:
+
+**`/einsaetze.json`.** Ten of its scripts fetch this endpoint and read a
+`prerequisites` object per mission. If MissionChief serves the same thing, the
+whole print-to-PDF pipeline (`src/parse_pdf.py`) could be replaced by one
+authenticated fetch, with structured requirements instead of a reconstructed
+table — and it would settle `REQ-3` (whether a count means two extensions or two
+stations) from the game's own data. **Check first:** open
+`https://www.missionchief.com/einsaetze.json` while logged in and see whether it
+returns JSON and how many rows.
+
+**The station price formula (`PRICE-1`).** Its building cost calculator uses
+`ceil(100000 + 200000 * log2(n - 23))` for fire and police stations, with small
+stations at `min(full / 2, 1000000)` — note the cap. This is the same formula
+`prices.json` records as "posted and then disputed", so it is a second
+independent source rather than a confirmation: the script's formula table is
+keyed by German building names, so it is written for Leitstellenspiel even
+though the script runs on MissionChief. Still build-menu-or-nothing, but the
+odds it is right went up, and the 1,000,000 small-station cap is new.
+
 ## Source note: the Xyrality help centre
 
 Xyrality's own help centre (`xyrality.helpshift.com/hc/en/23-mission-chief/`) is
