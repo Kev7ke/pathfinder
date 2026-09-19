@@ -211,7 +211,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.6');
+assert.equal(report.ymca, '0.0.7');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -252,8 +252,8 @@ await pg.click('.ymca-tile[data-mod="missionmagician"]');
 await pg.waitForSelector('[data-do="capture"]');
 {
   const warn = await pg.textContent('.ymca-note.warn');
-  assert.ok(/not working yet/i.test(warn), 'missionmagician does not admit it is unfinished');
-  console.log(`missionmagician   : opens, says "${warn.trim().split('.')[0]}"`);
+  assert.ok(/no mission open/i.test(warn), 'missionmagician should say why it has nothing to plan');
+  console.log(`missionmagician   : off a mission, says "${warn.trim().split('.')[0]}"`);
 }
 // MissionMagician's capture must work even with no mission window open.
 await pg.click('#ymca-back');
@@ -274,24 +274,33 @@ console.log('capture           : reports', cap.missing.length, 'selectors not pr
 await pg.evaluate(() => {
   const page = document.createElement('div');
   page.innerHTML = `
-    <div id="mission_general_info" class="col-md-6"><div></div><h3>x</h3><small>y</small></div>
-    <div id="missing_text" class="alert alert-danger alert-missing-vehicles">x</div>
-    <form id="vehicle_select_form" action="/missions/505949001/alarm" method="post">
+    <div id="mission_general_info" class="col-md-6" data-mission-type="209"
+      data-generating-building-id="5680582"><div></div><h3>x</h3><small>y</small></div>
+    <div id="missing_text" class="alert alert-danger alert-missing-vehicles"></div>
+    <form id="mission-form" action="/missions/505949001/alarm" method="post">
+      <input name="utf8" type="hidden" value="x">
       <input type="hidden" name="authenticity_token" value="CSRF-XYZ">
-      <a id="vehicle_show_table_all" class="btn btn-success">50 km</a>
-      <table id="vehicle_show_table"><tbody>
-        <tr class="vehicle_row vehicle_type_13" data-vehicle-type-id="13" data-vehicle-id="11">
-          <td class="vehicle_select_td">
-            <input type="checkbox" name="vehicle_ids[]" class="vehicle_checkbox"
-              id="vehicle_checkbox_11" vehicle_type_id="13"
-              data-direct="1" data-distance="3.2" data-equipment-types="[]">
-          </td>
-          <td class="building_name"><a href="#">FS01</a></td>
-        </tr>
-      </tbody></table>
-      <a class="aao btn btn-xs" data-aao-id="7">AAO</a>
-      <input type="submit" name="commit" class="btn btn-success" value="Dispatch">
-    </form>`;
+      <a class="aao btn btn-xs" aao_id="2886058" fire="1">Fire Truck</a>
+      <div id="vehicle_list_step"><div class="tab-content">
+        <div class="tab-pane active" id="all">
+        <table id="vehicle_show_table_all" class="table table-striped">
+          <tbody id="vehicle_show_table_body_all">
+            <tr id="vehicle_element_content_11" class="vehicle_select_table_tr distance_calculation"
+              vehicle_id="11" vehicle_caption="F-Q1" vehicle_type="Quint" building="FS01"
+              data-distance="3.2" data-direct="0" feuerwehr_lf="1">
+              <td class="text-center">
+                <input type="checkbox" value="11" class="vehicle_checkbox" id="vehicle_checkbox_11"
+                  name="vehicle_ids[]" data-direct="0" data-distance="3.2" fms="2"
+                  fire="1" vehicle_type_id="13" data-equipment-types="">
+              </td>
+              <td><a href="#">FS01</a></td>
+            </tr>
+          </tbody>
+        </table></div>
+      </div></div>
+      <input type="submit" name="commit" class="btn btn-success" value="Dispatch" id="alert_btn">
+    </form>
+    <a id="mission_alarm_btn" class="btn btn-success">Dispatch</a>`;
   document.body.append(page);
   history.replaceState({}, '', '/missions/505949001');
 });
@@ -304,6 +313,7 @@ assert.equal(await pg.locator('#mm-wrongpage').isVisible(), false,
 console.log('capture url       :', cap2.url);
 assert.equal(cap2.url, '/missions/#', 'the mission id must be shaped out of the url');
 console.log('dispatch form     :', JSON.stringify(cap2.dispatchForm));
+assert.equal(cap2.dispatchForm.id, 'mission-form');
 assert.equal(cap2.dispatchForm.action, '/missions/#/alarm', 'the form action was not shaped');
 assert.ok(cap2.dispatchForm.fieldNames.includes('authenticity_token'),
   'the capture must show that a CSRF token is among the fields');
@@ -312,11 +322,11 @@ assert.deepEqual(cap2.dispatchForm.submitNames, ['commit']);
 // Walking up rather than guessing is the point: the container is named by the page, not by us.
 const chain = cap2.vehicleContainerChain.map((c) => c.tag + (c.id ? '#' + c.id : ''));
 console.log('container chain   :', JSON.stringify(chain));
-assert.ok(chain.includes('table#vehicle_show_table'),
-  'the walk up from a checkbox should name the table the game actually uses');
-assert.equal(cap2.vehicleRow.numericAttrs['data-vehicle-type-id'], 13,
-  'the row must give up the vehicle type id, which is how it matches a requirement');
-assert.ok(cap2.vehicleRow.class.includes('vehicle_type_13'));
+assert.ok(chain.includes('tbody#vehicle_show_table_body_all'),
+  'the walk up from a checkbox should name the table body the game actually uses');
+assert.equal(cap2.vehicleRow.numericAttrs.vehicle_id, 11,
+  'the row must give up its plain attributes, not only the data- ones');
+assert.ok(cap2.vehicleRow.class.includes('vehicle_select_table_tr'));
 assert.ok(cap2.checkbox.attributes.includes('data-distance:number'),
   'checkbox attributes should be reported by name and type, never by value');
 assert.ok(!JSON.stringify(cap2.checkbox).includes('3.2'),
@@ -327,8 +337,52 @@ assert.equal(cap2.checkbox.vehicleTypeId, 13,
 assert.equal(cap2.aao.count, 1);
 assert.ok(cap2.requirementBlocks.some((b) => b.id === 'missing_text' && !b.hasElementChildren),
   'the missing-vehicle block should be reported as text-only');
-assert.ok(!JSON.stringify(cap2).includes('FS01'), 'no building name may leave in a capture');
+assert.ok(!JSON.stringify(cap2).includes('F-Q1'), 'no vehicle name may leave in a capture');
 console.log('capture on mission: form, container chain and vehicle type id all named');
+
+// ---- MissionMagician plans against the markup the real capture reported ----
+// Mission type 3 wants 6 fire stations and brush_extension; its requirements say firetrucks.
+// The rows below carry the attributes the game actually puts on its own checkboxes.
+await pg.evaluate(() => {
+  document.querySelector('#mission_general_info').setAttribute('data-mission-type', '3');
+  document.querySelectorAll('#ymca-window').forEach((w) => {});
+  const tbody = document.getElementById('vehicle_show_table_body_all');
+  const row = (id, dist, attrs) => `
+    <tr class="vehicle_select_table_tr" vehicle_id="${id}" data-distance="${dist}">
+      <td><input type="checkbox" name="vehicle_ids[]" class="vehicle_checkbox"
+        id="vehicle_checkbox_${id}" value="${id}" ${attrs}></td></tr>`;
+  tbody.innerHTML = [
+    row(1, 9.0, 'vehicle_type_id="33" fire="1" wasser_amount="2500" foam_amount_display="25"'),
+    row(2, 1.2, 'vehicle_type_id="33" fire="1" wasser_amount="2500" foam_amount_display="25"'),
+    row(3, 3.4, 'vehicle_type_id="3" elw="1"'),
+    row(4, 2.0, 'vehicle_type_id="10" fustw="1" fustw_or_police_motorcycle="1"'),
+  ].join('');
+  window.__changes = 0;
+  document.body.addEventListener('change', (e) => {
+    if (e.target.classList.contains('vehicle_checkbox')) window.__changes += 1;
+  });
+});
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="missionmagician"]');
+await pg.waitForSelector('#mm-needs');
+const needs = await pg.$$eval('#mm-needs tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('mission needs     :', JSON.stringify(needs));
+assert.ok(needs.some((r) => r[0] === 'Fire engines' && r[1] === '1'),
+  'the requirement should come from the game\'s own mission list, by data-mission-type');
+const tickLabel = await pg.textContent('[data-do="select"]');
+console.log('tick button       :', tickLabel.trim());
+await pg.click('[data-do="select"]');
+await pg.waitForSelector('#mm-done:not([hidden])');
+const ticked = await pg.$$eval('.vehicle_checkbox:checked', (b) => b.map((x) => x.value));
+console.log('ticked            :', JSON.stringify(ticked));
+assert.deepEqual(ticked, ['2'], 'nearest first: the 1.2 km engine, not the 9.0 km one');
+assert.equal(await pg.evaluate(() => window.__changes), 1,
+  'the game listens for a change event, so one must be dispatched per box');
+// The one thing it must never do.
+assert.equal(await pg.evaluate(() => window.__posts.filter((p) => /alarm/.test(p.url)).length), 0,
+  'MissionMagician must never submit the dispatch form');
+console.log('missionmagician   : picks nearest, fires change, never dispatches');
 
 // ---- TrackOps: hook the game's own missionDelete, the way the game really announces it ----
 // A finished mission does not leave #mission_list — the game adds .mission_deleted to its panel
@@ -336,7 +390,10 @@ console.log('capture on mission: form, container chain and vehicle type id all n
 await pg.evaluate(() => {
   window.__creditsBalance = 500000;
   window.__missionDeleteCalls = [];
+  window.__creditsUpdateCalls = [];
   window.missionDelete = (id) => { window.__missionDeleteCalls.push(id); };
+  // The game's own balance push — a mission frame sends tellParent('creditsUpdate(2283098);').
+  window.creditsUpdate = (n) => { window.__creditsUpdateCalls.push(n); };
   const realFetch = window.fetch;
   window.fetch = async (url, opts) => {
     if (String(url) === '/api/credits') {
@@ -356,18 +413,22 @@ await pg.waitForFunction(() => document.querySelector('#to-out')?.value.includes
 const hooks = JSON.parse(await pg.inputValue('#to-out'));
 console.log('trackops hooks    :', JSON.stringify(hooks.globals), 'hooked:', hooks.hooked);
 assert.equal(hooks.globals.missionDelete, 'function', 'the game\'s own hook was not seen');
+assert.equal(hooks.globals.creditsUpdate, 'function',
+  'the balance is announced by the game, not polled for');
 assert.equal(hooks.hooked, true, 'TrackOps did not wrap missionDelete');
 
 // A mission ends. The game calls its own function; the wrapper must pass it straight through.
-await pg.evaluate(async () => {
-  window.__creditsBalance = 502340;
+await pg.evaluate(() => {
   window.missionDelete(4711);
+  window.creditsUpdate(502340);
 });
 await pg.waitForFunction(
   () => JSON.parse(localStorage.getItem('ymca-trackops-log') || '[]').length > 0,
   null, { timeout: 8000 });
 assert.deepEqual(await pg.evaluate(() => window.__missionDeleteCalls), [4711],
   'the game\'s own missionDelete must still run, exactly once');
+assert.deepEqual(await pg.evaluate(() => window.__creditsUpdateCalls), [502340],
+  'the game\'s own creditsUpdate must still run, exactly once');
 const recorded = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-trackops-log')));
 console.log('trackops recorded :', JSON.stringify(recorded));
 assert.equal(recorded[0].type, 3, 'the mission type id must be read off the panel before it goes');

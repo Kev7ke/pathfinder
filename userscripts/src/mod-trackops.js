@@ -23,12 +23,23 @@
  * same socket, so hooking them is hooking the socket without needing to reach
  * it. That is what this does now.
  *
+ * THE CREDITS COME FROM THE GAME TOO. Reading /api/credits after the fact was
+ * wrong twice over: it races the payout, and it drifts the moment the player
+ * buys anything. A mission page's own source settled it —
+ *
+ *     tellParent('creditsUpdate(2283098);');
+ *
+ * — the game pushes the new balance to a global `creditsUpdate` and the whole
+ * thing runs over Faye, which eval()s what it is sent. So both halves of the
+ * question are announced: `missionDelete` says a mission ended, `creditsUpdate`
+ * says what the balance became. /api/credits is now only the opening reading.
+ *
  * WHAT IS STILL INFERRED, and is labelled as such everywhere it shows:
- * `missionDelete` says a mission ended, not that *you* finished it and not
- * what it paid. So the payout is measured rather than assumed — the balance
- * from /api/credits before and after — and an observation is only trusted when
- * no second mission ended alongside it. Anything else is recorded and shown,
- * but kept out of the averages.
+ * `missionDelete` says a mission ended, not that *you* finished it, and the
+ * balance moving right afterwards is not proof it moved *because* of it. So a
+ * payout is only trusted when one mission ended alone and the balance rose
+ * once within a few seconds. Anything else is recorded and shown, but kept out
+ * of the averages.
  * -------------------------------------------------------------------------- */
 
 /* The page the mission list lives on. Inside a mission's own iframe there is no
@@ -39,9 +50,9 @@ const TO_LOG_KEY = 'ymca-trackops-log';
 const TO_CFG_KEY = 'ymca-trackops-cfg';
 const TO_LOG_MAX = 2000;
 
-/* How long to give the balance to catch up with a mission ending. The payout
- * arrives over the same socket, so it is not instant and it is not slow. */
-const TO_SETTLE_MS = 2500;
+/* How long a mission's ending stays open for a balance change to be attributed
+ * to it. The payout is pushed over the same channel, a beat behind. */
+const TO_SETTLE_MS = 5000;
 
 /* Two missions ending inside this window cannot be told apart by a balance
  * that moved once, so neither is trusted. */
@@ -250,8 +261,10 @@ function toProbe() {
         onMainPage: TO_MAIN_PAGE.test(location.pathname),
         recording: toCfg().recording,
         hooked: toHooked,
+        balanceKnown: toBalance !== null,
         globals: {
             missionDelete: named(w.missionDelete),
+            creditsUpdate: named(w.creditsUpdate),
             missionMarkerAdd: named(w.missionMarkerAdd),
             missionInvolved: named(w.missionInvolved),
             mission_markers: Array.isArray(w.mission_markers) ? `array(${w.mission_markers.length})` : typeof w.mission_markers,
@@ -283,7 +296,7 @@ async function toReadBalance() {
 }
 
 /**
- * A mission ended. Work out what it paid.
+ * A mission ended. Hold it open for the balance to say what it paid.
  *
  * The type id is read off the panel before the game takes it away — it is the
  * key into /einsaetze.json, where the name and the listed figure live, so
@@ -292,28 +305,39 @@ async function toReadBalance() {
 function toMissionEnded(missionId) {
     const panel = document.getElementById(`mission_${missionId}`);
     const type = panel?.getAttribute('mission_type_id') || null;
-    const at = Date.now();
     if (type === null) return; // not one of ours, or already gone
 
-    const before = toBalance;
-    toPending.push(at);
-    setTimeout(async () => {
-        const after = await toReadBalance();
-        toBalance = after ?? toBalance;
-        /* Two endings inside the same window share one balance move, so neither
-         * can be attributed. Recorded, but kept out of the averages. */
-        const alone = toPending.filter((t) => Math.abs(t - at) <= TO_CONCURRENT_MS).length === 1;
-        toPending = toPending.filter((t) => at - t < TO_CONCURRENT_MS * 2);
+    const at = Date.now();
+    /* Anything else ending in the same window makes both unattributable: one
+     * balance change cannot be split between two missions. */
+    for (const other of toPending) other.alone = false;
+    const entry = { at, type: Number(type) || type, delta: null, alone: toPending.length === 0 };
+    toPending.push(entry);
 
+    setTimeout(() => {
+        toPending = toPending.filter((e) => e !== entry);
         const log = toRead(TO_LOG_KEY, []);
-        log.push({
-            at,
-            type: Number(type) || type,
-            delta: before !== null && after !== null ? after - before : null,
-            alone,
-        });
+        log.push({ at: entry.at, type: entry.type, delta: entry.delta, alone: entry.alone });
         toWrite(TO_LOG_KEY, log.slice(-TO_LOG_MAX));
     }, TO_SETTLE_MS);
+}
+
+/**
+ * The balance changed. Give it to whatever ended just before it.
+ *
+ * A rise while nothing ended is the player selling or being paid for something
+ * else, and is simply the new baseline. A fall is never a payout.
+ */
+function toCreditsChanged(next) {
+    if (typeof next !== 'number' || !isFinite(next)) return;
+    const previous = toBalance;
+    toBalance = next;
+    if (previous === null) return;
+    const delta = next - previous;
+    if (delta <= 0) return;
+    for (const entry of toPending) {
+        entry.delta = (entry.delta || 0) + delta;
+    }
 }
 
 /**
@@ -329,19 +353,35 @@ function toAttach() {
     const w = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
     if (typeof w.missionDelete !== 'function') return;
 
-    toOriginals = { missionDelete: w.missionDelete, target: w };
+    toOriginals = { target: w, missionDelete: w.missionDelete, creditsUpdate: w.creditsUpdate };
+
     w.missionDelete = function (...args) {
         const result = toOriginals.missionDelete.apply(this, args);
         try { toMissionEnded(args[0]); } catch (e) { /* never break the game's own call */ }
         return result;
     };
+
+    /* creditsUpdate is what a mission window tells the page it is inside —
+     * tellParent('creditsUpdate(2283098);') — so it carries the balance the
+     * moment it changes, which no amount of polling can. */
+    if (typeof w.creditsUpdate === 'function') {
+        w.creditsUpdate = function (...args) {
+            const result = toOriginals.creditsUpdate.apply(this, args);
+            try { toCreditsChanged(Number(args[0])); } catch (e) { /* as above */ }
+            return result;
+        };
+    }
+
     toHooked = true;
-    toReadBalance().then((v) => { toBalance = v; });
+    toReadBalance().then((v) => { if (toBalance === null) toBalance = v; });
 }
 
 function toDetach() {
     if (!toHooked || !toOriginals) return;
     toOriginals.target.missionDelete = toOriginals.missionDelete;
+    if (typeof toOriginals.creditsUpdate === 'function') {
+        toOriginals.target.creditsUpdate = toOriginals.creditsUpdate;
+    }
     toOriginals = null;
     toHooked = false;
 }

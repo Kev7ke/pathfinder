@@ -120,12 +120,23 @@ Three things, learnt the hard way, that anything live has to be built on.
 userscript set to `document-idle` runs. Wrapping `fetch` or `XMLHttpRequest`
 sees nothing at all.
 
-**It announces through its own global functions**, and those are reachable:
-`missionDelete(missionId)` when a mission ends, `missionMarkerAdd(mission)`
-when one appears. **Wrap them, never replace them** — call the original first
-and hand its return value back, so the game behaves exactly as it would
-without YMCA. That is how jxn-30/LSS-Scripts has done it for years, and it is
-how TrackOps counts.
+**The socket is Faye, and it sends JavaScript.** A mission page does
+`new Faye.Client('/faye')`, subscribes to `/private-mission<id><locale>` and
+runs `eval(data)` on what arrives. So the game's live updates *are* calls to
+its own global functions.
+
+**Those functions are reachable, so hook them**: `missionDelete(missionId)`
+when a mission ends, `missionMarkerAdd(mission)` when one appears,
+`creditsUpdate(balance)` when the balance changes. **Wrap them, never replace
+them** — call the original first and hand its return value back, so the game
+behaves exactly as it would without YMCA. That is how jxn-30/LSS-Scripts has
+done it for years, and it is how TrackOps counts.
+
+**Prefer a hook to a poll.** TrackOps read `/api/credits` before and after a
+mission ended, which races the payout and drifts the moment the player buys
+anything. The mission window itself shows the right answer:
+`tellParent('creditsUpdate(2283098);')`. If a number is being polled for,
+the game is probably already announcing it.
 
 **A finished mission does not leave the mission list.** The game adds the class
 `mission_deleted` to its panel and leaves it there. A panel carries
@@ -137,6 +148,20 @@ how TrackOps counts.
 time inside the mission and a module that belongs there simply runs there. No
 reaching across from the parent, ever. Inside the frame there is no navbar, so
 it is the floating button that opens it.
+
+**Inside a mission**, `#mission-form` posts to `/missions/<id>/alarm`,
+`#vehicle_show_table_body_all` holds the rows, a row is
+`.vehicle_select_table_tr`, and the checkbox `.vehicle_checkbox` carries
+everything useful as **plain attributes**: `vehicle_type_id`, `fms`, and
+capability flags like `fire`, `elw`, `rw`, `dlk`, `gwa`, `fustw`, `any_rtw`.
+`#mission_general_info[data-mission-type]` gives the type id, so what a mission
+*needs* comes from `/einsaetze.json` and the window is only asked what is
+available.
+
+**Ticking a checkbox means dispatching a `change` event.** The game keeps its
+counter, water bar and AAO state from `$("body").on("change", ".vehicle_checkbox", …)`.
+Setting `checked` alone shows the player something different from what would
+be sent.
 
 A capture button takes **structure, not content**: element names, classes,
 request paths, which parts of the page changed. Never mission text, addresses,
@@ -252,6 +277,10 @@ the log without a module having to remember to log it.
 - Anything that writes to the player's account needs a **mandatory preview**, a
   confirmation, and a **backup that makes it undoable** — and must say so
   plainly when the backup could not be written.
+- **Where there can be no undo, do not write at all.** An alarm cannot be taken
+  back, so MissionMagician ticks the game's own checkboxes and stops; the player
+  presses Dispatch. The preview is the whole product, and that is not a
+  limitation to be lifted later.
 - Never post a hand-built form to the game. Fetch the object's own edit page,
   build `FormData` from the real form, replace one field. That is what keeps the
   CSRF token and every unrelated setting intact.

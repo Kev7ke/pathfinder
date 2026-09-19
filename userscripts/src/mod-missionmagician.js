@@ -1,17 +1,14 @@
 /* --------------------------------------------------------------------------
  * MissionMagician — read a mission window, say which vehicles it wants, and
- * alarm them in one go.
+ * pick them.
  *
- * NOT BUILT YET, and deliberately so. Doing this properly means writing into
- * the game's own mission window: reading the requirement block, matching it
- * against the vehicles in range, ticking them and pressing alarm. None of that
- * markup has ever been seen from the side this was written on, and guessing at
- * a selector that ticks checkboxes and submits a form is exactly the way to
- * alarm the wrong vehicles.
- *
- * So this module ships as its settings plus one button: open a mission, press
- * "Capture this mission window", and it takes the structure — not the content —
- * of the window back. That is the missing piece.
+ * IT PICKS. IT DOES NOT DISPATCH. That is the whole safety design, and it is
+ * not a limitation to be lifted later. An alarm cannot be taken back, so the
+ * rule about a mandatory preview and an undoable backup cannot be met by any
+ * amount of care — there is no undo to write. So the preview *is* the product:
+ * MissionMagician ticks the game's own checkboxes and stops. The player looks
+ * at what is selected and presses the game's own Dispatch button. Nothing is
+ * ever written to the account by this module.
  *
  * What the first real capture settled. A mission is its own page at
  * /missions/<id>. The dispatch is a plain form: `input[name="vehicle_ids[]"]`
@@ -36,101 +33,327 @@
  * the mission first, then open YMCA — on the big map that means the floating
  * button, because the frame has no navbar of its own.
  *
- * WHAT THE VEHICLE LIST IS CALLED, read out of jxn-30/LSS-Scripts rather than
- * guessed: `#vehicle_show_table_body_all` holds the rows, a row is
- * `.vehicle_select_table_tr`, the checkbox is `.vehicle_checkbox` with the id
- * `vehicle_checkbox_<vehicleId>`, and it carries a plain `vehicle_type_id`
- * attribute — not a data attribute, which is why the first capture missed it.
- * The alarm button is `#mission_alarm_btn`. All of that still has to be seen
- * on a real page before anything ticks a box, which is what the capture below
- * is for.
+ * WHAT THE VEHICLE LIST IS, now seen on a real page. `#mission-form` posts to
+ * /missions/<id>/alarm. `#vehicle_show_table_body_all` holds the rows; a row is
+ * `.vehicle_select_table_tr` and carries `vehicle_id`, `data-distance` and a
+ * category flag matching the tab it belongs to (`polizei`, `feuerwehr_lf`,
+ * `rettungsdienst`, …). The checkbox inside it is `.vehicle_checkbox`, id
+ * `vehicle_checkbox_<vehicleId>`, and it is where the useful attributes live:
+ * `vehicle_type_id`, `fms` for status, and a set of plain capability flags —
+ * `fire`, `elw`, `rw`, `dlk`, `gwa`, `fustw`, `any_rtw`, `gwl2wasser_only` —
+ * plus `wasser_amount` and `foam_amount_display`. Those flags are not guessed:
+ * they are the same ones the player's own AAO buttons select on, which is how
+ * each entry in REQUIREMENTS below is sourced.
+ *
+ * The mission's type is on `#mission_general_info` as `data-mission-type`, so
+ * what a mission *needs* comes from /einsaetze.json rather than from reading
+ * the window's text. The window is only asked which vehicles are available.
  * -------------------------------------------------------------------------- */
+
+/**
+ * What a requirement in /einsaetze.json is called on a vehicle checkbox.
+ *
+ * Every entry carries where it came from, and the AAO ones are strong: an AAO
+ * is a filter the player built in the game's own editor, so a button labelled
+ * "F-HRV" selecting on `rw="1"` is the game itself saying which flag means a
+ * heavy rescue vehicle. Requirements with no entry here are shown and counted
+ * but never auto-selected — an unmatched requirement is stated, not guessed at.
+ */
+const MM_REQUIREMENTS = {
+    firetrucks: { flag: 'fire', label: 'Fire engines', source: 'the "Fire Truck" AAO selects on fire=1' },
+    battalion_chief_vehicles: { flag: 'elw', label: 'Battalion chief units', source: 'the "F-BCU" AAO selects on elw=1' },
+    police_cars: { flag: 'fustw_or_police_motorcycle', label: 'Patrol cars', source: 'the "Patrol Car" AAO' },
+    ambulances: { flag: 'any_rtw', label: 'Ambulances', source: 'the "Rescue Unit" AAO selects on any_rtw=1' },
+    heavy_rescue_vehicles: { flag: 'rw', label: 'Heavy rescue', source: 'the "F-HRV" AAO selects on rw=1' },
+    mobile_air_vehicles: { flag: 'gwa', label: 'Mobile air', source: 'the "F-MA" AAO selects on gwa=1' },
+    platform_trucks: { flag: 'dlk', label: 'Platform trucks', source: 'the "F-PlT" AAO selects on dlk=1' },
+    water_tankers: { flag: 'gwl2wasser_only', label: 'Water tankers', source: 'the "F-WaTa" AAO' },
+};
+
+/** Requirements that are an amount to reach, not a count of vehicles. */
+const MM_AMOUNTS = {
+    water_needed: { attr: 'wasser_amount', label: 'Water', unit: 'gal.' },
+    foam_needed: { attr: 'foam_amount_display', label: 'Foam', unit: 'gal.' },
+};
 
 YMCA.register({
     id: 'missionmagician',
     title: 'MissionMagician',
-    tagline: 'Alarm the right vehicles',
+    tagline: 'Pick the right vehicles',
 
-    description: 'Reads a mission window, works out what it needs, and alarms it. '
-        + 'Not working yet — it needs the shape of your mission window first.',
+    description: 'Reads what a mission needs and ticks the vehicles that match. '
+        + 'It never dispatches — you press the game\'s own button.',
 
     async mount(el, ctx) {
-        const cfg = ctx.store.read('cfg', { enabled: false, showTable: true, confirmBeforeAlarm: true });
+        const cfg = ctx.store.read('cfg', { nearestFirst: true });
+        const page = mmReadMissionPage();
 
-        el.innerHTML = `
-      <div class="ymca-note warn"><b>Not working yet</b>, but the hard parts are known. The
-        dispatch is a normal form — the game's own checkboxes and its own Dispatch button — so
-        nothing will ever have to be hand-built. And the mission window on the big map is an
-        iframe, which YMCA runs inside rather than reaching into. What is left is to see the
-        vehicle list once on your page. One capture, below.</div>
+        if (!page.onMissionPage) {
+            el.innerHTML = mmOffMissionHtml();
+            mmWireCapture(el, ctx);
+            return;
+        }
 
-      <div class="ymca-card">
-        <b>Settings</b>
-        <p class="ymca-sub" style="margin:4px 0 10px">These are remembered now so they are ready
-          when the tool is.</p>
-        <label style="display:block;margin:4px 0"><input type="checkbox" data-cfg="enabled"
-          ${cfg.enabled ? 'checked' : ''}> Add the helper to mission windows</label>
-        <label style="display:block;margin:4px 0"><input type="checkbox" data-cfg="showTable"
-          ${cfg.showTable ? 'checked' : ''}> Show required against selected as a table</label>
-        <label style="display:block;margin:4px 0"><input type="checkbox" data-cfg="confirmBeforeAlarm"
-          ${cfg.confirmBeforeAlarm ? 'checked' : ''}> Show what is selected before alarming</label>
-      </div>
-
-      <div class="ymca-card">
-        <b>The one capture still needed</b>
-        <p class="ymca-sub" style="margin:4px 0 10px">On the big map the mission opens in a frame
-          of its own, and YMCA runs inside that frame as well as outside it. So:</p>
-        <ol class="ymca-sub" style="margin:0 0 10px;padding-left:20px">
-          <li>Close this window and open a mission — ideally one where <b>vehicles are still
-            missing</b>, so there is a full vehicle list to describe.</li>
-          <li>With the mission on screen, open YMCA again. Inside the mission frame there is no
-            navbar, so it is the <b>floating YMCA button</b> you want, not the menu entry.</li>
-          <li>Come back here and press the button. If it says the page was wrong, YMCA was opened
-            from the map rather than from inside the mission.</li>
-        </ol>
-        <p class="ymca-sub" style="margin:0 0 10px">It copies the <i>structure</i> of that page —
-          element names, classes and the shape of the vehicle list — and no mission text,
-          addresses or player names.</p>
-        <button class="ymca-btn primary" data-do="capture">Capture this mission window</button>
-        <span class="ymca-status" id="mm-status"></span>
-        <div class="ymca-note warn" id="mm-wrongpage" hidden style="margin-top:10px">
-          <b>That was not the mission frame.</b> Nothing was copied, because there was nothing on
-          this page worth sending — no mission markup, only the mission list's own category
-          buttons. This is YMCA running on the map. Open the mission, then open YMCA with the
-          floating button <i>inside</i> the mission frame, and press this there.</div>
-        <textarea id="mm-out" rows="12" readonly style="width:100%;margin-top:10px;
-          font-family:ui-monospace,monospace;font-size:11.5px"></textarea>
-      </div>`;
+        const plan = await mmPlan(page, ctx, cfg);
+        el.innerHTML = mmPlanHtml(plan, page, cfg, ctx);
 
         el.addEventListener('change', (e) => {
             const key = e.target.dataset.cfg;
             if (!key) return;
             cfg[key] = e.target.checked;
             ctx.store.write('cfg', cfg);
-            ctx.status('Saved.');
+            ctx.open('missionmagician');
         });
 
         el.addEventListener('click', (e) => {
-            if (!e.target.closest('[data-do="capture"]')) return;
-            const out = el.querySelector('#mm-out');
-            const report = captureMissionWindow();
-            out.value = JSON.stringify(report, null, 1);
-            // A capture taken on the overview page finds nothing and looks like a failure of
-            // the game rather than of the moment it was taken. Say which it was.
-            const warn = el.querySelector('#mm-wrongpage');
-            warn.hidden = report.looksLikeMissionWindow;
-            if (report.looksLikeMissionWindow) {
-                ctx.clipboard(out.value, 'the mission window structure');
-            } else {
-                ctx.status('No mission window on this page — nothing worth sending.');
+            if (e.target.closest('[data-do="select"]')) {
+                const n = mmSelect(plan.pick);
+                ctx.status(`Ticked ${n} vehicles — now press the game's own Dispatch.`);
+                ctx.log.info('ticked vehicles', `${n} for mission type ${page.missionType}`);
+                el.querySelector('#mm-done').hidden = false;
+            } else if (e.target.closest('[data-do="clear"]')) {
+                const n = mmClear();
+                ctx.status(`Unticked ${n}.`);
+                el.querySelector('#mm-done').hidden = true;
             }
-            ctx.log.info('captured mission window',
-                report.looksLikeMissionWindow
-                    ? `${report.found.length} of ${report.found.length + report.missing.length} selectors found`
-                    : 'not on a mission page');
         });
     },
 });
+
+/* ---------------------------------------------------------- reading the page */
+
+/** What this page is and what it offers, without reading a word of its text. */
+function mmReadMissionPage() {
+    const info = document.getElementById('mission_general_info');
+    const form = document.getElementById('mission-form');
+    const body = document.getElementById('vehicle_show_table_body_all');
+    return {
+        onMissionPage: !!(info && form && body),
+        inFrame: window.top !== window.self,
+        // The type id, which is the key into /einsaetze.json. Not the title.
+        missionType: info?.getAttribute('data-mission-type') || null,
+        rows: body ? [...body.querySelectorAll('.vehicle_select_table_tr')] : [],
+    };
+}
+
+/** A vehicle, described by the attributes the game put on its own checkbox. */
+function mmVehicle(row) {
+    const box = row.querySelector('.vehicle_checkbox');
+    if (!box) return null;
+    const num = (name) => {
+        const v = box.getAttribute(name);
+        return v === null || v === '' ? 0 : Number(v) || 0;
+    };
+    return {
+        box,
+        id: box.value,
+        typeId: num('vehicle_type_id'),
+        distance: Number(row.getAttribute('data-distance')) || 0,
+        water: num('wasser_amount'),
+        foam: num('foam_amount_display'),
+        has: (flag) => box.getAttribute(flag) === '1',
+    };
+}
+
+/* -------------------------------------------------------------- the planning */
+
+/**
+ * What this mission needs, and which of the vehicles on screen meet it.
+ *
+ * The need comes from /einsaetze.json — the game's own list — so the window
+ * only has to answer "what is available", which is the one thing the list
+ * cannot know.
+ */
+async function mmPlan(page, ctx, cfg) {
+    let requirements = null;
+    let name = null;
+    try {
+        const missions = await ctx.game('/einsaetze.json');
+        const list = Array.isArray(missions) ? missions : Object.values(missions);
+        const mission = list.find((m) => String(m.id) === String(page.missionType));
+        if (mission) {
+            requirements = mission.requirements || {};
+            name = mission.name;
+        }
+    } catch (err) {
+        ctx.log.warn('could not read the mission list', err.message);
+    }
+
+    const vehicles = page.rows.map(mmVehicle).filter(Boolean);
+    if (cfg.nearestFirst) vehicles.sort((a, b) => a.distance - b.distance);
+
+    const taken = new Set();
+    const lines = [];
+    const pick = [];
+
+    if (requirements) {
+        for (const [key, wanted] of Object.entries(requirements)) {
+            if (MM_AMOUNTS[key]) continue; // totals, not counts — handled below
+            const rule = MM_REQUIREMENTS[key];
+            if (!rule) {
+                lines.push({ key, label: mmPretty(key), wanted, found: null, unmatched: true });
+                continue;
+            }
+            const chosen = vehicles.filter((v) => !taken.has(v.id) && v.has(rule.flag)).slice(0, wanted);
+            for (const v of chosen) { taken.add(v.id); pick.push(v); }
+            lines.push({ key, label: rule.label, wanted, found: chosen.length });
+        }
+
+        /* Water and foam are totals, so they are met by adding vehicles until the
+         * figure is reached — and the ones already picked may carry some. */
+        for (const [key, rule] of Object.entries(MM_AMOUNTS)) {
+            const wanted = requirements[key];
+            if (!wanted) continue;
+            const carried = (v) => (key === 'water_needed' ? v.water : v.foam);
+            let have = pick.reduce((n, v) => n + carried(v), 0);
+            for (const v of vehicles) {
+                if (have >= wanted) break;
+                if (taken.has(v.id) || !carried(v)) continue;
+                taken.add(v.id); pick.push(v); have += carried(v);
+            }
+            lines.push({ key, label: rule.label, wanted, found: have, unit: rule.unit });
+        }
+    }
+
+    return { name, requirements, lines, pick, available: vehicles.length };
+}
+
+/** firetrucks -> Firetrucks, for a requirement with no entry in the map. */
+function mmPretty(key) {
+    return key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+}
+
+/* ------------------------------------------------------------- the selecting */
+
+/**
+ * Tick the game's own checkboxes.
+ *
+ * A native change event is dispatched because the game listens for one —
+ * `$("body").on("change", ".vehicle_checkbox", …)` keeps its counter, its water
+ * bar and its AAO state up to date from it. Setting `checked` alone would leave
+ * the page showing the player something different from what it would send.
+ */
+function mmSelect(pick) {
+    let n = 0;
+    for (const v of pick) {
+        if (v.box.checked) continue;
+        v.box.checked = true;
+        v.box.dispatchEvent(new Event('change', { bubbles: true }));
+        n += 1;
+    }
+    return n;
+}
+
+function mmClear() {
+    let n = 0;
+    for (const box of document.querySelectorAll('.vehicle_checkbox:checked')) {
+        box.checked = false;
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+        n += 1;
+    }
+    return n;
+}
+
+/* ---------------------------------------------------------------- the panels */
+
+function mmPlanHtml(plan, page, cfg, ctx) {
+    const rows = plan.lines.map((l) => {
+        const enough = l.found !== null && l.found >= l.wanted;
+        const state = l.unmatched
+            ? '<span class="ymca-warn">not matched yet</span>'
+            : `<span class="${enough ? 'ymca-accent' : 'ymca-bad'}">${ctx.fmt(l.found)}${l.unit ? ` ${l.unit}` : ''}</span>`;
+        return `<tr><td>${ctx.esc(l.label)}</td>
+      <td class="ymca-num">${ctx.fmt(l.wanted)}${l.unit ? ` ${l.unit}` : ''}</td>
+      <td class="ymca-num">${state}</td></tr>`;
+    }).join('');
+
+    const unmatched = plan.lines.filter((l) => l.unmatched);
+    const short = plan.lines.filter((l) => !l.unmatched && l.found < l.wanted);
+
+    return `
+      <div class="ymca-note"><b>It picks. It does not dispatch.</b> MissionMagician ticks the
+        game's own checkboxes and stops there. An alarm cannot be undone, so nothing here writes
+        to your account — you look at what is selected and press the game's own Dispatch.</div>
+
+      <div class="ymca-card">
+        <b>${plan.name ? ctx.esc(plan.name) : `Mission type ${ctx.esc(String(page.missionType))}`}</b>
+        <p class="ymca-sub" style="margin:4px 0 8px">What the game's own mission list says this
+          needs, against the ${plan.available} vehicles this window is offering.</p>
+        ${plan.requirements ? `<table style="margin-top:4px" id="mm-needs">
+          <thead><tr><th>Needs</th><th class="ymca-num">Wanted</th><th class="ymca-num">Picked</th></tr></thead>
+          <tbody>${rows}</tbody></table>`
+        : '<p class="ymca-bad">This mission type is not in the game\'s list, so nothing can be planned.</p>'}
+      </div>
+
+      ${short.length ? `<div class="ymca-note warn"><b>Not enough on screen.</b>
+        ${short.map((l) => ctx.esc(l.label)).join(', ')} — this window is not offering enough of
+        them. Widen the range with the game's own km buttons and reopen this.</div>` : ''}
+
+      ${unmatched.length ? `<div class="ymca-note warn"><b>${unmatched.length} requirement${
+        unmatched.length > 1 ? 's are' : ' is'} not matched yet:</b>
+        ${unmatched.map((l) => ctx.esc(l.label)).join(', ')}. Which checkbox attribute means these
+        has not been established, and a guess would tick the wrong vehicle — so they are named here
+        and left alone. Send a problem report from a mission needing one and it can be added.</div>` : ''}
+
+      <div class="ymca-card">
+        <b>Pick them</b>
+        <label style="display:block;margin:4px 0"><input type="checkbox" data-cfg="nearestFirst"
+          ${cfg.nearestFirst ? 'checked' : ''}> Nearest first</label>
+        <button class="ymca-btn primary" data-do="select">Tick ${plan.pick.length} vehicles</button>
+        <button class="ymca-btn" data-do="clear">Untick everything</button>
+        <div class="ymca-note" id="mm-done" hidden style="margin-top:10px">Ticked. Check the list,
+          then press <b>Dispatch</b> in the game itself — MissionMagician will not press it.</div>
+      </div>`;
+}
+
+function mmOffMissionHtml() {
+    return `
+      <div class="ymca-note warn"><b>No mission open.</b> MissionMagician works inside a mission
+        window, which on the big map is a frame of its own.</div>
+
+      <div class="ymca-card">
+        <b>How to get here</b>
+        <ol class="ymca-sub" style="margin:6px 0 0;padding-left:20px">
+          <li>Close this and open a mission.</li>
+          <li>With the mission on screen, open YMCA again — inside the mission frame there is no
+            navbar, so it is the <b>floating YMCA button</b> you want.</li>
+          <li>Open MissionMagician there. It will have read the mission.</li>
+        </ol>
+      </div>
+
+      <div class="ymca-card">
+        <b>If it still says this while a mission is open</b>
+        <p class="ymca-sub" style="margin:4px 0 10px">Then that window is built differently from the
+          one this was written against. This copies its structure — element, class and field names
+          and the numbers in them, and no mission text, addresses or player names.</p>
+        <button class="ymca-btn" data-do="capture">Capture this mission window</button>
+        <span class="ymca-status" id="mm-status"></span>
+        <div class="ymca-note warn" id="mm-wrongpage" hidden style="margin-top:10px">
+          <b>That was not the mission frame.</b> Nothing was copied, because there was nothing on
+          this page worth sending. Open the mission, then open YMCA with the floating button
+          <i>inside</i> it, and press this there.</div>
+        <textarea id="mm-out" rows="10" readonly style="width:100%;margin-top:10px;
+          font-family:ui-monospace,monospace;font-size:11.5px"></textarea>
+      </div>`;
+}
+
+function mmWireCapture(el, ctx) {
+    el.addEventListener('click', (e) => {
+        if (!e.target.closest('[data-do="capture"]')) return;
+        const out = el.querySelector('#mm-out');
+        const report = captureMissionWindow();
+        out.value = JSON.stringify(report, null, 1);
+        const warn = el.querySelector('#mm-wrongpage');
+        warn.hidden = report.looksLikeMissionWindow;
+        if (report.looksLikeMissionWindow) {
+            ctx.clipboard(out.value, 'the mission window structure');
+        } else {
+            ctx.status('No mission window on this page — nothing worth sending.');
+        }
+        ctx.log.info('captured mission window',
+            report.looksLikeMissionWindow ? `${report.found.length} selectors found` : 'not on a mission page');
+    });
+}
 
 /**
  * Describe the mission window without reading its content.
