@@ -151,72 +151,102 @@ async function gameData(path) {
 // ---------- the window ----------
 const WINDOW_ID = 'ymca-window';
 
+/**
+ * The palette is the game's own, read out of it with Diagnostics -> Copy
+ * interface probe rather than guessed:
+ *
+ *   body and modal   rgb(80,80,80) with white text   -> the game is DARK
+ *   navbar           rgb(0,73,151)
+ *   panel borders    black
+ *   radii            modal 6px, panel 4px, button 3px
+ *   type             "Helvetica Neue", Helvetica, Arial, 14px; buttons 12px
+ *
+ * Two readings from that probe were NOT copied, because they cannot be what
+ * they appear to be: .btn-default came back as white on white, and
+ * .panel-heading as #ddd on #f5f5f5. Both would be invisible, so they were
+ * measured on an element with something else overriding it. Where a reading
+ * was implausible the Bootstrap 3 default was used instead, and that is the
+ * only place in here that is not straight from the game.
+ */
 function styles() {
     return `
-#${WINDOW_ID}{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;
-  background:rgba(12,17,23,.55);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+#${WINDOW_ID}{--g-ground:#505050;--g-raise:#5a5a5a;--g-navy:#004997;--g-ink:#fff;
+  --g-dim:rgba(255,255,255,.62);--g-line:rgba(0,0,0,.45);--g-soft:rgba(255,255,255,.14);
+  --g-red:#c9302c;--g-font:"Helvetica Neue",Helvetica,Arial,sans-serif;
+  position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;
+  background:rgba(0,0,0,.5);font:14px/1.42857 var(--g-font);color:var(--g-ink)}
 #${WINDOW_ID} *{box-sizing:border-box}
 #${WINDOW_ID} .ymca-sheet{margin:auto;width:min(1100px,94vw);max-height:92vh;display:flex;
-  flex-direction:column;background:#fff;border-radius:6px;box-shadow:0 12px 50px rgba(0,0,0,.5);
-  overflow:hidden}
-#${WINDOW_ID} .ymca-bar{display:flex;align-items:center;gap:12px;padding:12px 16px;flex:none;
-  background:#2b3a4a;color:#fff}
+  flex-direction:column;background:var(--g-ground);border:1px solid rgba(0,0,0,.2);
+  border-radius:6px;box-shadow:0 5px 15px rgba(0,0,0,.5);overflow:hidden}
+#${WINDOW_ID} .ymca-bar{display:flex;align-items:center;gap:12px;padding:11px 15px;flex:none;
+  background:var(--g-navy);color:#fff;border-bottom:1px solid rgba(0,0,0,.35)}
 #${WINDOW_ID} .ymca-logo{font-weight:700;letter-spacing:.06em}
-#${WINDOW_ID} .ymca-logo small{font-weight:400;opacity:.7;margin-left:8px;letter-spacing:0}
+#${WINDOW_ID} .ymca-logo small{font-weight:400;opacity:.75;margin-left:8px;letter-spacing:0}
 #${WINDOW_ID} .ymca-spacer{flex:1}
-#${WINDOW_ID} .ymca-back{background:rgba(255,255,255,.14);border:0;color:#fff;border-radius:4px;
-  padding:5px 11px;cursor:pointer;font:600 13px/1.2 inherit}
-#${WINDOW_ID} .ymca-back:hover{background:rgba(255,255,255,.24)}
-#${WINDOW_ID} .ymca-close{background:none;border:0;color:#fff;font-size:26px;line-height:1;
-  cursor:pointer;padding:0 4px;opacity:.85}
+#${WINDOW_ID} .ymca-back{background:rgba(255,255,255,.16);border:0;color:#fff;border-radius:3px;
+  padding:5px 11px;cursor:pointer;font:600 12px/1.2 var(--g-font)}
+#${WINDOW_ID} .ymca-back:hover{background:rgba(255,255,255,.28)}
+#${WINDOW_ID} .ymca-close{background:none;border:0;color:#fff;font-size:24px;line-height:1;
+  cursor:pointer;padding:0 4px;opacity:.8}
 #${WINDOW_ID} .ymca-close:hover{opacity:1}
-#${WINDOW_ID} .ymca-main{flex:1;overflow:auto;padding:18px 20px;background:#f4f6f9;color:#141a21}
+#${WINDOW_ID} .ymca-main{flex:1;overflow:auto;padding:16px 18px;background:var(--g-ground)}
 
 /* the launcher */
-#${WINDOW_ID} .ymca-tiles{display:grid;gap:14px;
-  grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
-#${WINDOW_ID} .ymca-tile{display:flex;flex-direction:column;gap:6px;text-align:left;
-  background:#fff;border:1px solid #d5dce5;border-radius:7px;padding:16px;cursor:pointer;
-  font:inherit;color:#141a21;transition:border-color .12s,box-shadow .12s}
-#${WINDOW_ID} .ymca-tile:hover{border-color:#2f4490;box-shadow:0 3px 14px rgba(47,68,144,.18)}
-#${WINDOW_ID} .ymca-tile .ymca-ico{width:34px;height:34px;color:#2f4490}
-#${WINDOW_ID} .ymca-tile b{font-size:15.5px}
-#${WINDOW_ID} .ymca-tile span{color:#5a6673;font-size:12.5px}
-#${WINDOW_ID} .ymca-tile.soon{opacity:.55;cursor:default}
-#${WINDOW_ID} .ymca-tile.soon:hover{border-color:#d5dce5;box-shadow:none}
-#${WINDOW_ID} .ymca-lead{margin:0 0 16px;color:#5a6673}
+#${WINDOW_ID} .ymca-tiles{display:grid;gap:12px;
+  grid-template-columns:repeat(auto-fill,minmax(228px,1fr))}
+#${WINDOW_ID} .ymca-tile{display:flex;flex-direction:column;gap:5px;text-align:left;
+  background:var(--g-raise);border:1px solid var(--g-line);border-radius:4px;padding:15px;
+  cursor:pointer;font:inherit;color:var(--g-ink);transition:border-color .12s,background .12s}
+#${WINDOW_ID} .ymca-tile:hover{border-color:var(--g-navy);background:#636363}
+#${WINDOW_ID} .ymca-tile .ymca-ico{width:32px;height:32px;color:#8ab4f8}
+#${WINDOW_ID} .ymca-tile b{font-size:15px}
+#${WINDOW_ID} .ymca-tile span{color:var(--g-dim);font-size:12.5px}
+#${WINDOW_ID} .ymca-tile.soon{opacity:.5;cursor:default}
+#${WINDOW_ID} .ymca-tile.soon:hover{border-color:var(--g-line);background:var(--g-raise)}
+#${WINDOW_ID} .ymca-lead{margin:0 0 14px;color:var(--g-dim)}
 
-#${WINDOW_ID} h2.ymca-h{margin:0 0 4px;font-size:19px}
-#${WINDOW_ID} p.ymca-sub{margin:0 0 16px;color:#5a6673;font-size:13px}
-#${WINDOW_ID} .ymca-btn{border:1px solid #c3ccd8;background:#fff;border-radius:4px;padding:7px 12px;
-  cursor:pointer;font:600 13px/1.2 inherit;color:#141a21}
-#${WINDOW_ID} .ymca-btn:hover{background:#f0f3f7}
-#${WINDOW_ID} .ymca-btn.primary{background:#2f4490;border-color:#2f4490;color:#fff}
-#${WINDOW_ID} .ymca-btn.danger{background:#9e2b22;border-color:#9e2b22;color:#fff}
-#${WINDOW_ID} .ymca-btn:disabled{opacity:.5;cursor:default}
-#${WINDOW_ID} input,#${WINDOW_ID} select,#${WINDOW_ID} textarea{font:inherit;color:#141a21;
-  background:#fff;border:1px solid #c3ccd8;border-radius:4px;padding:6px 9px}
+#${WINDOW_ID} h2.ymca-h{margin:0 0 4px;font-size:19px;color:#fff}
+#${WINDOW_ID} p.ymca-sub{margin:0 0 14px;color:var(--g-dim);font-size:13px}
+#${WINDOW_ID} .ymca-btn{border:1px solid #252525;background:#fff;border-radius:3px;
+  padding:6px 12px;cursor:pointer;font:600 12px/1.42857 var(--g-font);color:#252525}
+#${WINDOW_ID} .ymca-btn:hover{background:#e6e6e6}
+#${WINDOW_ID} .ymca-btn.primary{background:var(--g-navy);border-color:#003a78;color:#fff}
+#${WINDOW_ID} .ymca-btn.primary:hover{background:#005cbf}
+#${WINDOW_ID} .ymca-btn.danger{background:var(--g-red);border-color:#a02622;color:#fff}
+#${WINDOW_ID} .ymca-btn:disabled{opacity:.45;cursor:default}
+#${WINDOW_ID} input,#${WINDOW_ID} select,#${WINDOW_ID} textarea{font:14px/1.42857 var(--g-font);
+  color:#252525;background:#fff;border:1px solid #252525;border-radius:3px;padding:5px 9px}
 #${WINDOW_ID} table{border-collapse:collapse;width:100%}
 #${WINDOW_ID} th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
-  color:#69737f;border-bottom:1px solid #cfd7e1;padding:7px 9px;font-weight:600}
-#${WINDOW_ID} td{padding:7px 9px;border-bottom:1px solid #e6eaf0;vertical-align:top}
-#${WINDOW_ID} .ymca-card{background:#fff;border:1px solid #dde3ea;border-radius:7px;padding:14px;
-  margin-bottom:12px}
-#${WINDOW_ID} .ymca-note{border-left:3px solid #2f4490;background:#fff;border-radius:0 5px 5px 0;
-  padding:9px 12px;margin:8px 0;font-size:13px}
-#${WINDOW_ID} .ymca-note.warn{border-left-color:#8c6104;background:#fdf6e6}
-#${WINDOW_ID} .ymca-note.bad{border-left-color:#9e2b22;background:#fbeceb}
-#${WINDOW_ID} .ymca-status{font-size:12.5px;opacity:.85;margin-left:6px}
+  color:var(--g-dim);border-bottom:1px solid var(--g-soft);padding:7px 9px;font-weight:600}
+#${WINDOW_ID} td{padding:7px 9px;border-bottom:1px solid var(--g-soft);vertical-align:top}
+#${WINDOW_ID} .ymca-card{background:var(--g-raise);border:1px solid var(--g-line);
+  border-radius:4px;padding:13px;margin-bottom:11px}
+#${WINDOW_ID} .ymca-note{border-left:3px solid var(--g-navy);background:rgba(0,0,0,.18);
+  border-radius:0 3px 3px 0;padding:9px 12px;margin:8px 0;font-size:13px}
+#${WINDOW_ID} .ymca-note.warn{border-left-color:#ec971f;background:rgba(236,151,31,.14)}
+#${WINDOW_ID} .ymca-note.bad{border-left-color:var(--g-red);background:rgba(201,48,44,.16)}
+#${WINDOW_ID} .ymca-status{font-size:12px;opacity:.9;margin-left:6px}
 #${WINDOW_ID} .ymca-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
-#${WINDOW_ID} .ymca-pick{max-height:190px;overflow:auto;border:1px solid #cfd7e1;border-radius:4px;
-  padding:6px;background:#fff}
+#${WINDOW_ID} .ymca-pick{max-height:190px;overflow:auto;border:1px solid var(--g-line);
+  border-radius:3px;padding:6px;background:rgba(0,0,0,.18)}
 #${WINDOW_ID} .ymca-pick label{display:block;font-weight:400;margin-bottom:3px;cursor:pointer}
-#${WINDOW_ID} code{background:#eef1f5;border-radius:3px;padding:1px 5px;font-size:12.5px}
-#ymca-fab{position:fixed;right:14px;bottom:14px;z-index:2147482000;padding:10px 16px;
-  border-radius:999px;border:0;cursor:pointer;background:#2f4490;color:#fff;
-  font:700 13px/1 system-ui,sans-serif;letter-spacing:.06em;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+#${WINDOW_ID} code{background:rgba(0,0,0,.3);border-radius:3px;padding:1px 5px;font-size:12.5px}
+#${WINDOW_ID} small{color:var(--g-dim)}
+/* Named roles, so a module never writes a colour of its own. A hardcoded grey
+   from the light era is exactly what made the first dark build unreadable. */
+#${WINDOW_ID} .ymca-dim{color:var(--g-dim)}
+#${WINDOW_ID} .ymca-accent{color:#8ab4f8}
+#${WINDOW_ID} .ymca-warn{color:#f0ad4e}
+#${WINDOW_ID} .ymca-bad{color:#e88a86}
+#${WINDOW_ID} .ymca-num{font-variant-numeric:tabular-nums}
+#ymca-fab{position:fixed;right:14px;bottom:14px;z-index:2147482000;padding:9px 15px;
+  border-radius:3px;border:1px solid #003a78;cursor:pointer;background:#004997;color:#fff;
+  font:700 12px/1 "Helvetica Neue",Helvetica,Arial,sans-serif;letter-spacing:.06em;
+  box-shadow:0 2px 8px rgba(0,0,0,.5)}
 @media (max-width:620px){
-  #${WINDOW_ID} .ymca-sheet{width:100vw;max-height:100vh;height:100%;border-radius:0}
+  #${WINDOW_ID} .ymca-sheet{width:100vw;max-height:100vh;height:100%;border-radius:0;border:0}
   #${WINDOW_ID} .ymca-tiles{grid-template-columns:1fr}
 }`;
 }

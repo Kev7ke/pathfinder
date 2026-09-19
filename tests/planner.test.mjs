@@ -366,3 +366,36 @@ test('an unknown price is a lower bound and never outranks a priced rung', () =>
     assert.ok(rungs[i].cost >= rungs[i - 1].cost);
   }
 });
+
+// ---- the dataset build accepts both shapes the game data comes in ----
+
+test('a mission list is built from raw game data and from a slimmed export alike', async () => {
+  const { build } = await import('../tools/build_from_game.mjs');
+  // Raw, as /einsaetze.json sends it: place is a string, place_array the list.
+  const raw = [{
+    id: '0', name: 'Bin fire', place: 'Bus stop', place_array: ['Bus stop'],
+    average_credits: 110, requirements: { firetrucks: 1 },
+    prerequisites: { main_building: 0, fire_stations: 1 },
+    additional: { filter_id: 'firehouse_missions' }, mission_categories: ['fire'],
+  }];
+  // Slimmed, as the export writes it: place is already the list.
+  const slim = [{
+    id: '0', name: 'Bin fire', place: ['Bus stop'],
+    average_credits: 110, requirements: { firetrucks: 1 },
+    prerequisites: { main_building: 0, fire_stations: 1 },
+    filter_id: 'firehouse_missions', categories: ['fire'],
+  }];
+  const a = build(raw);
+  const b = build(slim);
+  assert.equal(a.m[0][6], 'Bus stop', 'the POI was lost from raw game data');
+  assert.equal(b.m[0][6], 'Bus stop', 'the POI was lost from the slimmed export');
+  assert.equal(a.m[0][1], 110);
+  assert.equal(a.p, 'F');
+});
+
+test('a mission with no place at all does not break the build', async () => {
+  const { build } = await import('../tools/build_from_game.mjs');
+  const out = build([{ id: '1', name: 'Nowhere', average_credits: 100,
+    prerequisites: { main_building: 0 }, additional: { filter_id: 'firehouse_missions' } }]);
+  assert.equal(out.m[0][6], '');
+});

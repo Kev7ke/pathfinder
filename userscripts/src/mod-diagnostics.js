@@ -129,9 +129,10 @@ async function run(what, ctx, put) {
     }
 
     if (what === 'ui') {
-        // Whoever styles YMCA cannot open the game. This reports what the game's
-        // own chrome actually looks like, so the window can match it instead of
-        // being guessed at.
+        // Whoever styles YMCA cannot open the game, so this has to do the
+        // looking. Computed styles give the resting state; the stylesheet scan
+        // below is the only way to see hover and active, which nothing renders
+        // until a mouse is over it.
         const pick = (sel, props) => {
             const el = document.querySelector(sel);
             if (!el) return 'not on this page';
@@ -140,8 +141,32 @@ async function run(what, ctx, put) {
         };
         const box = ['background-color', 'color', 'border-color', 'border-radius',
             'font-family', 'font-size'];
+
+        /** Rules the game itself declares for the selectors that matter. */
+        const INTERESTING =
+            /(^|[\s,])(\.btn|\.navbar|\.modal|\.panel|\.nav\b|\.alert|\.well|\.table|\.label|\.badge|\.dropdown-menu|body|a)/;
+        const rules = [];
+        let unreadableSheets = 0;
+        for (const sheet of document.styleSheets) {
+            let list;
+            try {
+                list = sheet.cssRules;
+            } catch (err) {
+                unreadableSheets++;    // cross-origin, and not readable by design
+                continue;
+            }
+            for (const rule of list || []) {
+                if (!rule.selectorText || !rule.cssText) continue;
+                if (!/:hover|:focus|:active|\.active|\.disabled/.test(rule.selectorText)) continue;
+                if (!INTERESTING.test(rule.selectorText)) continue;
+                rules.push(rule.cssText.slice(0, 220));
+                if (rules.length >= 60) break;
+            }
+            if (rules.length >= 60) break;
+        }
+
         put({
-            note: 'computed styles of the game\u2019s own chrome, for matching YMCA to it',
+            note: 'the game\u2019s own chrome, so YMCA can be matched to it rather than guessed at',
             navbarSelectorsPresent: [
                 '#navbar-main-collapse > ul', '#navbar-main-collapse ul.navbar-nav',
                 '.navbar-fixed-top .navbar-nav', '.navbar-nav', '#navbar-mobile-footer',
@@ -149,18 +174,36 @@ async function run(what, ctx, put) {
             navbarEntryPlaced: !!document.getElementById('ymca-nav'),
             usingFloatingButton: !!document.getElementById('ymca-fab'),
             bootstrapPresent: !!document.querySelector('.navbar, .panel, .btn-default'),
-            body: pick('body', box),
-            navbar: pick('.navbar', box),
-            navbarLink: pick('.navbar-nav a', ['color', 'font-size', 'padding', 'font-weight']),
-            modal: pick('.modal-content', box),
-            modalHeader: pick('.modal-header', box),
-            panel: pick('.panel', box),
-            panelHeading: pick('.panel-heading', box),
-            buttonDefault: pick('.btn-default', box),
-            buttonPrimary: pick('.btn-primary', box),
-            table: pick('table.table', ['background-color', 'font-size']),
+            resting: {
+                body: pick('body', box),
+                navbar: pick('.navbar', box),
+                navbarLink: pick('.navbar-nav a', ['color', 'font-size', 'padding', 'font-weight']),
+                navbarActive: pick('.navbar-nav .active a', ['color', 'background-color']),
+                modal: pick('.modal-content', box),
+                modalHeader: pick('.modal-header', box),
+                modalBody: pick('.modal-body', box),
+                panel: pick('.panel', box),
+                panelHeading: pick('.panel-heading', box),
+                panelBody: pick('.panel-body', box),
+                well: pick('.well', box),
+                alert: pick('.alert', box),
+                buttonDefault: pick('.btn-default', box),
+                buttonPrimary: pick('.btn-primary', box),
+                buttonSuccess: pick('.btn-success', box),
+                buttonDanger: pick('.btn-danger', box),
+                input: pick('input[type=text], .form-control', box),
+                table: pick('table.table', ['background-color', 'font-size', 'color']),
+                tableHeader: pick('table.table th', ['background-color', 'color', 'border-color']),
+                link: pick('a', ['color', 'text-decoration-line']),
+                heading: pick('h1, h2, h3', ['color', 'font-size', 'font-weight', 'font-family']),
+            },
+            // Everything above is the resting state only. These are the rules
+            // that change it on hover, focus and active.
+            stateRules: rules,
+            unreadableSheets,
             openLightboxes: [...document.querySelectorAll('.modal, .lightbox_content')]
                 .map((el) => el.className).slice(0, 5),
+            viewport: `${window.innerWidth}x${window.innerHeight}`,
         }, 'the interface probe');
         return;
     }

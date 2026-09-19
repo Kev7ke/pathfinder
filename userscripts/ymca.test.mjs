@@ -15,7 +15,10 @@ const errs = [];
 pg.on('pageerror', (e) => errs.push(e.message));
 
 await pg.goto('http://localhost:8777/README.md');
-await pg.setContent(`<html><body>
+await pg.setContent(`<html><head><style>
+    .btn-default:hover{background-color:#e6e6e6}
+    .navbar-nav>.active>a{background-color:#003a78}
+  </style></head><body>
   <nav class="navbar navbar-fixed-top"><div id="navbar-main-collapse">
     <ul class="nav navbar-nav"><li><a href="#">Buildings</a></li></ul>
   </div></nav><p>game</p></body></html>`);
@@ -177,7 +180,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.1');
+assert.equal(report.ymca, '0.0.2');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -192,9 +195,15 @@ await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.i
 const probe = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('probe found       :', JSON.stringify(probe.navbarSelectorsPresent));
 assert.ok(probe.navbarSelectorsPresent.includes('#navbar-main-collapse > ul'));
+assert.ok(probe.stateRules.some((r) => r.includes(':hover')),
+  'the stylesheet scan found no hover rule');
 assert.equal(probe.navbarEntryPlaced, true);
 assert.equal(probe.usingFloatingButton, false);
-assert.ok(probe.navbar, 'the probe did not read the navbar styles');
+assert.ok(probe.resting.navbar, 'the probe did not read the navbar styles');
+assert.ok('stateRules' in probe, 'the probe must report hover and active rules too');
+assert.ok(typeof probe.unreadableSheets === 'number',
+  'the probe should say how many stylesheets it could not read');
+console.log('probe resting keys:', Object.keys(probe.resting).length, 'elements measured');
 
 // ---- feedback ----
 await pg.evaluate(() => { window.prompt = () => 'the tiles are too small'; });

@@ -87,6 +87,30 @@ menu entry.
 The click handler sits on the `<li>`, not the `<a>`: the game pads its navbar
 items by the list item, so a click can land either side of the text.
 
+### Looking like the game
+
+**The game is dark.** Body and modals are `rgb(80,80,80)` with white text, the
+navbar is `rgb(0,73,151)`, panel borders are black, radii are 6px for a modal,
+4px for a panel and 3px for a button, and the type is
+`"Helvetica Neue", Helvetica, Arial` at 14px with 12px buttons. All of that was
+read out of the game with **Diagnostics → Copy interface probe**, not guessed.
+
+Two readings from that probe were deliberately *not* copied: `.btn-default` came
+back white on white and `.panel-heading` as `#ddd` on `#f5f5f5`. Both would be
+invisible, so they were measured on an element something else was overriding.
+Where a reading is implausible, use the Bootstrap 3 default and say so in a
+comment — that is the only part of the palette not straight from the game.
+
+**A module never writes a colour of its own.** Use the role classes the shell
+provides: `.ymca-dim`, `.ymca-accent`, `.ymca-warn`, `.ymca-bad`, `.ymca-num`,
+and the `.ymca-card` / `.ymca-note` containers. The first dark build shipped
+with light-era greys inlined in the Pathfinder and half its text was
+unreadable — the screenshot caught what the tests could not.
+
+When the look needs to change, run the probe again rather than reasoning about
+it. It reports resting styles for 21 elements plus the stylesheet rules for
+hover, focus and active, which computed styles cannot show.
+
 ### Writing a module
 
 ```js

@@ -97,6 +97,19 @@ function pathOf(m) {
     return 'F';
 }
 
+/**
+ * The point of interest, from either shape this data comes in.
+ *
+ * The game's live /einsaetze.json sends `place` as a string and `place_array`
+ * as the array; the slimmed export writes the array into `place`. Both reach
+ * this function, so it must not assume either.
+ */
+function placeOf(m) {
+    if (Array.isArray(m.place_array)) return m.place_array;
+    if (Array.isArray(m.place)) return m.place;
+    return m.place ? [m.place] : [];
+}
+
 export function build(raw) {
     const list = Array.isArray(raw) ? raw : Object.values(raw);
     const extNames = new Set();
@@ -124,7 +137,7 @@ export function build(raw) {
             pre.rescue_stations || 0,
             pre.police_stations || 0,
             extras,
-            (m.place || []).join(', '),
+            placeOf(m).join(', '),
             (m.categories || []).join(' '),
             m.requirements || {},          // new: the vehicles it needs
             pre.main_building ?? null,     // new: the building type that spawns it

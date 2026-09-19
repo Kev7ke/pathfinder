@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.1
+// @version      0.0.2
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -589,6 +589,19 @@ function pathOf(m) {
     return 'F';
 }
 
+/**
+ * The point of interest, from either shape this data comes in.
+ *
+ * The game's live /einsaetze.json sends `place` as a string and `place_array`
+ * as the array; the slimmed export writes the array into `place`. Both reach
+ * this function, so it must not assume either.
+ */
+function placeOf(m) {
+    if (Array.isArray(m.place_array)) return m.place_array;
+    if (Array.isArray(m.place)) return m.place;
+    return m.place ? [m.place] : [];
+}
+
 function build(raw) {
     const list = Array.isArray(raw) ? raw : Object.values(raw);
     const extNames = new Set();
@@ -616,7 +629,7 @@ function build(raw) {
             pre.rescue_stations || 0,
             pre.police_stations || 0,
             extras,
-            (m.place || []).join(', '),
+            placeOf(m).join(', '),
             (m.categories || []).join(' '),
             m.requirements || {},          // new: the vehicles it needs
             pre.main_building ?? null,     // new: the building type that spawns it
@@ -675,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.1',
+    version: '0.0.2',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -820,72 +833,102 @@ async function gameData(path) {
 // ---------- the window ----------
 const WINDOW_ID = 'ymca-window';
 
+/**
+ * The palette is the game's own, read out of it with Diagnostics -> Copy
+ * interface probe rather than guessed:
+ *
+ *   body and modal   rgb(80,80,80) with white text   -> the game is DARK
+ *   navbar           rgb(0,73,151)
+ *   panel borders    black
+ *   radii            modal 6px, panel 4px, button 3px
+ *   type             "Helvetica Neue", Helvetica, Arial, 14px; buttons 12px
+ *
+ * Two readings from that probe were NOT copied, because they cannot be what
+ * they appear to be: .btn-default came back as white on white, and
+ * .panel-heading as #ddd on #f5f5f5. Both would be invisible, so they were
+ * measured on an element with something else overriding it. Where a reading
+ * was implausible the Bootstrap 3 default was used instead, and that is the
+ * only place in here that is not straight from the game.
+ */
 function styles() {
     return `
-#${WINDOW_ID}{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;
-  background:rgba(12,17,23,.55);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+#${WINDOW_ID}{--g-ground:#505050;--g-raise:#5a5a5a;--g-navy:#004997;--g-ink:#fff;
+  --g-dim:rgba(255,255,255,.62);--g-line:rgba(0,0,0,.45);--g-soft:rgba(255,255,255,.14);
+  --g-red:#c9302c;--g-font:"Helvetica Neue",Helvetica,Arial,sans-serif;
+  position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;
+  background:rgba(0,0,0,.5);font:14px/1.42857 var(--g-font);color:var(--g-ink)}
 #${WINDOW_ID} *{box-sizing:border-box}
 #${WINDOW_ID} .ymca-sheet{margin:auto;width:min(1100px,94vw);max-height:92vh;display:flex;
-  flex-direction:column;background:#fff;border-radius:6px;box-shadow:0 12px 50px rgba(0,0,0,.5);
-  overflow:hidden}
-#${WINDOW_ID} .ymca-bar{display:flex;align-items:center;gap:12px;padding:12px 16px;flex:none;
-  background:#2b3a4a;color:#fff}
+  flex-direction:column;background:var(--g-ground);border:1px solid rgba(0,0,0,.2);
+  border-radius:6px;box-shadow:0 5px 15px rgba(0,0,0,.5);overflow:hidden}
+#${WINDOW_ID} .ymca-bar{display:flex;align-items:center;gap:12px;padding:11px 15px;flex:none;
+  background:var(--g-navy);color:#fff;border-bottom:1px solid rgba(0,0,0,.35)}
 #${WINDOW_ID} .ymca-logo{font-weight:700;letter-spacing:.06em}
-#${WINDOW_ID} .ymca-logo small{font-weight:400;opacity:.7;margin-left:8px;letter-spacing:0}
+#${WINDOW_ID} .ymca-logo small{font-weight:400;opacity:.75;margin-left:8px;letter-spacing:0}
 #${WINDOW_ID} .ymca-spacer{flex:1}
-#${WINDOW_ID} .ymca-back{background:rgba(255,255,255,.14);border:0;color:#fff;border-radius:4px;
-  padding:5px 11px;cursor:pointer;font:600 13px/1.2 inherit}
-#${WINDOW_ID} .ymca-back:hover{background:rgba(255,255,255,.24)}
-#${WINDOW_ID} .ymca-close{background:none;border:0;color:#fff;font-size:26px;line-height:1;
-  cursor:pointer;padding:0 4px;opacity:.85}
+#${WINDOW_ID} .ymca-back{background:rgba(255,255,255,.16);border:0;color:#fff;border-radius:3px;
+  padding:5px 11px;cursor:pointer;font:600 12px/1.2 var(--g-font)}
+#${WINDOW_ID} .ymca-back:hover{background:rgba(255,255,255,.28)}
+#${WINDOW_ID} .ymca-close{background:none;border:0;color:#fff;font-size:24px;line-height:1;
+  cursor:pointer;padding:0 4px;opacity:.8}
 #${WINDOW_ID} .ymca-close:hover{opacity:1}
-#${WINDOW_ID} .ymca-main{flex:1;overflow:auto;padding:18px 20px;background:#f4f6f9;color:#141a21}
+#${WINDOW_ID} .ymca-main{flex:1;overflow:auto;padding:16px 18px;background:var(--g-ground)}
 
 /* the launcher */
-#${WINDOW_ID} .ymca-tiles{display:grid;gap:14px;
-  grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
-#${WINDOW_ID} .ymca-tile{display:flex;flex-direction:column;gap:6px;text-align:left;
-  background:#fff;border:1px solid #d5dce5;border-radius:7px;padding:16px;cursor:pointer;
-  font:inherit;color:#141a21;transition:border-color .12s,box-shadow .12s}
-#${WINDOW_ID} .ymca-tile:hover{border-color:#2f4490;box-shadow:0 3px 14px rgba(47,68,144,.18)}
-#${WINDOW_ID} .ymca-tile .ymca-ico{width:34px;height:34px;color:#2f4490}
-#${WINDOW_ID} .ymca-tile b{font-size:15.5px}
-#${WINDOW_ID} .ymca-tile span{color:#5a6673;font-size:12.5px}
-#${WINDOW_ID} .ymca-tile.soon{opacity:.55;cursor:default}
-#${WINDOW_ID} .ymca-tile.soon:hover{border-color:#d5dce5;box-shadow:none}
-#${WINDOW_ID} .ymca-lead{margin:0 0 16px;color:#5a6673}
+#${WINDOW_ID} .ymca-tiles{display:grid;gap:12px;
+  grid-template-columns:repeat(auto-fill,minmax(228px,1fr))}
+#${WINDOW_ID} .ymca-tile{display:flex;flex-direction:column;gap:5px;text-align:left;
+  background:var(--g-raise);border:1px solid var(--g-line);border-radius:4px;padding:15px;
+  cursor:pointer;font:inherit;color:var(--g-ink);transition:border-color .12s,background .12s}
+#${WINDOW_ID} .ymca-tile:hover{border-color:var(--g-navy);background:#636363}
+#${WINDOW_ID} .ymca-tile .ymca-ico{width:32px;height:32px;color:#8ab4f8}
+#${WINDOW_ID} .ymca-tile b{font-size:15px}
+#${WINDOW_ID} .ymca-tile span{color:var(--g-dim);font-size:12.5px}
+#${WINDOW_ID} .ymca-tile.soon{opacity:.5;cursor:default}
+#${WINDOW_ID} .ymca-tile.soon:hover{border-color:var(--g-line);background:var(--g-raise)}
+#${WINDOW_ID} .ymca-lead{margin:0 0 14px;color:var(--g-dim)}
 
-#${WINDOW_ID} h2.ymca-h{margin:0 0 4px;font-size:19px}
-#${WINDOW_ID} p.ymca-sub{margin:0 0 16px;color:#5a6673;font-size:13px}
-#${WINDOW_ID} .ymca-btn{border:1px solid #c3ccd8;background:#fff;border-radius:4px;padding:7px 12px;
-  cursor:pointer;font:600 13px/1.2 inherit;color:#141a21}
-#${WINDOW_ID} .ymca-btn:hover{background:#f0f3f7}
-#${WINDOW_ID} .ymca-btn.primary{background:#2f4490;border-color:#2f4490;color:#fff}
-#${WINDOW_ID} .ymca-btn.danger{background:#9e2b22;border-color:#9e2b22;color:#fff}
-#${WINDOW_ID} .ymca-btn:disabled{opacity:.5;cursor:default}
-#${WINDOW_ID} input,#${WINDOW_ID} select,#${WINDOW_ID} textarea{font:inherit;color:#141a21;
-  background:#fff;border:1px solid #c3ccd8;border-radius:4px;padding:6px 9px}
+#${WINDOW_ID} h2.ymca-h{margin:0 0 4px;font-size:19px;color:#fff}
+#${WINDOW_ID} p.ymca-sub{margin:0 0 14px;color:var(--g-dim);font-size:13px}
+#${WINDOW_ID} .ymca-btn{border:1px solid #252525;background:#fff;border-radius:3px;
+  padding:6px 12px;cursor:pointer;font:600 12px/1.42857 var(--g-font);color:#252525}
+#${WINDOW_ID} .ymca-btn:hover{background:#e6e6e6}
+#${WINDOW_ID} .ymca-btn.primary{background:var(--g-navy);border-color:#003a78;color:#fff}
+#${WINDOW_ID} .ymca-btn.primary:hover{background:#005cbf}
+#${WINDOW_ID} .ymca-btn.danger{background:var(--g-red);border-color:#a02622;color:#fff}
+#${WINDOW_ID} .ymca-btn:disabled{opacity:.45;cursor:default}
+#${WINDOW_ID} input,#${WINDOW_ID} select,#${WINDOW_ID} textarea{font:14px/1.42857 var(--g-font);
+  color:#252525;background:#fff;border:1px solid #252525;border-radius:3px;padding:5px 9px}
 #${WINDOW_ID} table{border-collapse:collapse;width:100%}
 #${WINDOW_ID} th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
-  color:#69737f;border-bottom:1px solid #cfd7e1;padding:7px 9px;font-weight:600}
-#${WINDOW_ID} td{padding:7px 9px;border-bottom:1px solid #e6eaf0;vertical-align:top}
-#${WINDOW_ID} .ymca-card{background:#fff;border:1px solid #dde3ea;border-radius:7px;padding:14px;
-  margin-bottom:12px}
-#${WINDOW_ID} .ymca-note{border-left:3px solid #2f4490;background:#fff;border-radius:0 5px 5px 0;
-  padding:9px 12px;margin:8px 0;font-size:13px}
-#${WINDOW_ID} .ymca-note.warn{border-left-color:#8c6104;background:#fdf6e6}
-#${WINDOW_ID} .ymca-note.bad{border-left-color:#9e2b22;background:#fbeceb}
-#${WINDOW_ID} .ymca-status{font-size:12.5px;opacity:.85;margin-left:6px}
+  color:var(--g-dim);border-bottom:1px solid var(--g-soft);padding:7px 9px;font-weight:600}
+#${WINDOW_ID} td{padding:7px 9px;border-bottom:1px solid var(--g-soft);vertical-align:top}
+#${WINDOW_ID} .ymca-card{background:var(--g-raise);border:1px solid var(--g-line);
+  border-radius:4px;padding:13px;margin-bottom:11px}
+#${WINDOW_ID} .ymca-note{border-left:3px solid var(--g-navy);background:rgba(0,0,0,.18);
+  border-radius:0 3px 3px 0;padding:9px 12px;margin:8px 0;font-size:13px}
+#${WINDOW_ID} .ymca-note.warn{border-left-color:#ec971f;background:rgba(236,151,31,.14)}
+#${WINDOW_ID} .ymca-note.bad{border-left-color:var(--g-red);background:rgba(201,48,44,.16)}
+#${WINDOW_ID} .ymca-status{font-size:12px;opacity:.9;margin-left:6px}
 #${WINDOW_ID} .ymca-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
-#${WINDOW_ID} .ymca-pick{max-height:190px;overflow:auto;border:1px solid #cfd7e1;border-radius:4px;
-  padding:6px;background:#fff}
+#${WINDOW_ID} .ymca-pick{max-height:190px;overflow:auto;border:1px solid var(--g-line);
+  border-radius:3px;padding:6px;background:rgba(0,0,0,.18)}
 #${WINDOW_ID} .ymca-pick label{display:block;font-weight:400;margin-bottom:3px;cursor:pointer}
-#${WINDOW_ID} code{background:#eef1f5;border-radius:3px;padding:1px 5px;font-size:12.5px}
-#ymca-fab{position:fixed;right:14px;bottom:14px;z-index:2147482000;padding:10px 16px;
-  border-radius:999px;border:0;cursor:pointer;background:#2f4490;color:#fff;
-  font:700 13px/1 system-ui,sans-serif;letter-spacing:.06em;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+#${WINDOW_ID} code{background:rgba(0,0,0,.3);border-radius:3px;padding:1px 5px;font-size:12.5px}
+#${WINDOW_ID} small{color:var(--g-dim)}
+/* Named roles, so a module never writes a colour of its own. A hardcoded grey
+   from the light era is exactly what made the first dark build unreadable. */
+#${WINDOW_ID} .ymca-dim{color:var(--g-dim)}
+#${WINDOW_ID} .ymca-accent{color:#8ab4f8}
+#${WINDOW_ID} .ymca-warn{color:#f0ad4e}
+#${WINDOW_ID} .ymca-bad{color:#e88a86}
+#${WINDOW_ID} .ymca-num{font-variant-numeric:tabular-nums}
+#ymca-fab{position:fixed;right:14px;bottom:14px;z-index:2147482000;padding:9px 15px;
+  border-radius:3px;border:1px solid #003a78;cursor:pointer;background:#004997;color:#fff;
+  font:700 12px/1 "Helvetica Neue",Helvetica,Arial,sans-serif;letter-spacing:.06em;
+  box-shadow:0 2px 8px rgba(0,0,0,.5)}
 @media (max-width:620px){
-  #${WINDOW_ID} .ymca-sheet{width:100vw;max-height:100vh;height:100%;border-radius:0}
+  #${WINDOW_ID} .ymca-sheet{width:100vw;max-height:100vh;height:100%;border-radius:0;border:0}
   #${WINDOW_ID} .ymca-tiles{grid-template-columns:1fr}
 }`;
 }
@@ -1117,7 +1160,7 @@ YMCA.register({
         ${Object.keys(owned.state.ext).length
         ? ' &middot; ' + Object.entries(owned.state.ext)
             .map(([k, n]) => `${ctx.esc(k)} ×${n}`).join(', ') : ''}
-        <br><span style="color:#5a6673">Your ceiling now:
+        <br><span class="ymca-dim">Your ceiling now:
           <b>${top ? ctx.fmt(top.credits) : '—'}</b>
           ${top ? ctx.esc(top.name) : 'nothing on this path yet'}</span>
         ${pend.length ? `<div class="ymca-note warn" style="margin-top:8px">Still being built,
@@ -1126,22 +1169,22 @@ YMCA.register({
             const first = queue[0];
             $('pf-next').innerHTML = first
                 ? `<div style="font-size:21px;font-weight:700;margin:6px 0 2px">${ctx.esc(first.label)}</div>
-           <div style="color:#5a6673">${first.price == null ? 'no price known' : ctx.fmt(first.price)}
+           <div class="ymca-dim">${first.price == null ? 'no price known' : ctx.fmt(first.price)}
            ${first.unlocks ? ` &middot; unlocks ${first.unlocks} mission${first.unlocks === 1 ? '' : 's'}` : ''}
            &middot; toward ${ctx.esc(target.mission.name)} (${ctx.fmt(target.mission.credits)})</div>`
                 : '<p>Nothing left to unlock on this path.</p>';
 
             $('pf-spine').innerHTML = spine.length ? spine.map((r, i) => `
-        <div style="display:flex;gap:12px;padding:9px 0;border-bottom:1px solid #e6eaf0">
-          <b style="color:#2f4490">${i + 1}</b>
+        <div style="display:flex;gap:12px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.14)">
+          <b class="ymca-accent">${i + 1}</b>
           <div style="flex:1"><b>${ctx.esc(r.mission.name)}</b>
-            ${r.isDetour ? ' <span style="color:#a94d17">detour</span>' : ''}
-            <div style="color:#5a6673;font-size:12.5px">${ctx.esc(PF.needsText(r))}</div>
-            ${r.unverified.length ? `<div style="color:#a94d17;font-size:12px">Depends on unconfirmed
+            ${r.isDetour ? ' <span class="ymca-warn">detour</span>' : ''}
+            <div class="ymca-dim" style="font-size:12.5px">${ctx.esc(PF.needsText(r))}</div>
+            ${r.unverified.length ? `<div class="ymca-warn" style="font-size:12px">Depends on unconfirmed
               prices: ${ctx.esc([...new Set(r.unverified.map((u) => u.name))].join(', '))}</div>` : ''}
           </div>
           <div style="text-align:right"><b>${ctx.fmt(r.mission.credits)}</b>
-            <div style="color:#5a6673;font-size:12px">${r.costIsLowerBound ? '≥ ' : ''}${ctx.fmt(r.cost)}</div>
+            <div class="ymca-dim" style="font-size:12px">${r.costIsLowerBound ? '≥ ' : ''}${ctx.fmt(r.cost)}</div>
           </div>
         </div>`).join('') : '<p>—</p>';
 
@@ -1152,7 +1195,7 @@ YMCA.register({
           <td>${ctx.fmt(r.mission.credits)}</td>
           <td>${Number.isFinite(r.gainPer100k) ? ctx.fmt(Math.round(r.gainPer100k)) : '—'}</td>
           <td>${Math.round(r.ownShare * 100)}%</td>
-          <td>${ctx.esc(r.mission.name)}${r.isTrap ? ' <span style="color:#8c6104">trap</span>' : ''}</td>
+          <td>${ctx.esc(r.mission.name)}${r.isTrap ? ' <span class="ymca-warn">trap</span>' : ''}</td>
           <td>${ctx.esc(PF.needsText(r))}</td></tr>`).join('')}</tbody></table>`;
 
             ctx.store.write('ui', { path, small: useSmall });
@@ -1715,9 +1758,10 @@ async function run(what, ctx, put) {
     }
 
     if (what === 'ui') {
-        // Whoever styles YMCA cannot open the game. This reports what the game's
-        // own chrome actually looks like, so the window can match it instead of
-        // being guessed at.
+        // Whoever styles YMCA cannot open the game, so this has to do the
+        // looking. Computed styles give the resting state; the stylesheet scan
+        // below is the only way to see hover and active, which nothing renders
+        // until a mouse is over it.
         const pick = (sel, props) => {
             const el = document.querySelector(sel);
             if (!el) return 'not on this page';
@@ -1726,8 +1770,32 @@ async function run(what, ctx, put) {
         };
         const box = ['background-color', 'color', 'border-color', 'border-radius',
             'font-family', 'font-size'];
+
+        /** Rules the game itself declares for the selectors that matter. */
+        const INTERESTING =
+            /(^|[\s,])(\.btn|\.navbar|\.modal|\.panel|\.nav\b|\.alert|\.well|\.table|\.label|\.badge|\.dropdown-menu|body|a)/;
+        const rules = [];
+        let unreadableSheets = 0;
+        for (const sheet of document.styleSheets) {
+            let list;
+            try {
+                list = sheet.cssRules;
+            } catch (err) {
+                unreadableSheets++;    // cross-origin, and not readable by design
+                continue;
+            }
+            for (const rule of list || []) {
+                if (!rule.selectorText || !rule.cssText) continue;
+                if (!/:hover|:focus|:active|\.active|\.disabled/.test(rule.selectorText)) continue;
+                if (!INTERESTING.test(rule.selectorText)) continue;
+                rules.push(rule.cssText.slice(0, 220));
+                if (rules.length >= 60) break;
+            }
+            if (rules.length >= 60) break;
+        }
+
         put({
-            note: 'computed styles of the game\u2019s own chrome, for matching YMCA to it',
+            note: 'the game\u2019s own chrome, so YMCA can be matched to it rather than guessed at',
             navbarSelectorsPresent: [
                 '#navbar-main-collapse > ul', '#navbar-main-collapse ul.navbar-nav',
                 '.navbar-fixed-top .navbar-nav', '.navbar-nav', '#navbar-mobile-footer',
@@ -1735,18 +1803,36 @@ async function run(what, ctx, put) {
             navbarEntryPlaced: !!document.getElementById('ymca-nav'),
             usingFloatingButton: !!document.getElementById('ymca-fab'),
             bootstrapPresent: !!document.querySelector('.navbar, .panel, .btn-default'),
-            body: pick('body', box),
-            navbar: pick('.navbar', box),
-            navbarLink: pick('.navbar-nav a', ['color', 'font-size', 'padding', 'font-weight']),
-            modal: pick('.modal-content', box),
-            modalHeader: pick('.modal-header', box),
-            panel: pick('.panel', box),
-            panelHeading: pick('.panel-heading', box),
-            buttonDefault: pick('.btn-default', box),
-            buttonPrimary: pick('.btn-primary', box),
-            table: pick('table.table', ['background-color', 'font-size']),
+            resting: {
+                body: pick('body', box),
+                navbar: pick('.navbar', box),
+                navbarLink: pick('.navbar-nav a', ['color', 'font-size', 'padding', 'font-weight']),
+                navbarActive: pick('.navbar-nav .active a', ['color', 'background-color']),
+                modal: pick('.modal-content', box),
+                modalHeader: pick('.modal-header', box),
+                modalBody: pick('.modal-body', box),
+                panel: pick('.panel', box),
+                panelHeading: pick('.panel-heading', box),
+                panelBody: pick('.panel-body', box),
+                well: pick('.well', box),
+                alert: pick('.alert', box),
+                buttonDefault: pick('.btn-default', box),
+                buttonPrimary: pick('.btn-primary', box),
+                buttonSuccess: pick('.btn-success', box),
+                buttonDanger: pick('.btn-danger', box),
+                input: pick('input[type=text], .form-control', box),
+                table: pick('table.table', ['background-color', 'font-size', 'color']),
+                tableHeader: pick('table.table th', ['background-color', 'color', 'border-color']),
+                link: pick('a', ['color', 'text-decoration-line']),
+                heading: pick('h1, h2, h3', ['color', 'font-size', 'font-weight', 'font-family']),
+            },
+            // Everything above is the resting state only. These are the rules
+            // that change it on hover, focus and active.
+            stateRules: rules,
+            unreadableSheets,
             openLightboxes: [...document.querySelectorAll('.modal, .lightbox_content')]
                 .map((el) => el.className).slice(0, 5),
+            viewport: `${window.innerWidth}x${window.innerHeight}`,
         }, 'the interface probe');
         return;
     }

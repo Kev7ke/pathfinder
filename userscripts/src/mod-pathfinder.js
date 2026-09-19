@@ -89,7 +89,7 @@ YMCA.register({
         ${Object.keys(owned.state.ext).length
         ? ' &middot; ' + Object.entries(owned.state.ext)
             .map(([k, n]) => `${ctx.esc(k)} ×${n}`).join(', ') : ''}
-        <br><span style="color:#5a6673">Your ceiling now:
+        <br><span class="ymca-dim">Your ceiling now:
           <b>${top ? ctx.fmt(top.credits) : '—'}</b>
           ${top ? ctx.esc(top.name) : 'nothing on this path yet'}</span>
         ${pend.length ? `<div class="ymca-note warn" style="margin-top:8px">Still being built,
@@ -98,22 +98,22 @@ YMCA.register({
             const first = queue[0];
             $('pf-next').innerHTML = first
                 ? `<div style="font-size:21px;font-weight:700;margin:6px 0 2px">${ctx.esc(first.label)}</div>
-           <div style="color:#5a6673">${first.price == null ? 'no price known' : ctx.fmt(first.price)}
+           <div class="ymca-dim">${first.price == null ? 'no price known' : ctx.fmt(first.price)}
            ${first.unlocks ? ` &middot; unlocks ${first.unlocks} mission${first.unlocks === 1 ? '' : 's'}` : ''}
            &middot; toward ${ctx.esc(target.mission.name)} (${ctx.fmt(target.mission.credits)})</div>`
                 : '<p>Nothing left to unlock on this path.</p>';
 
             $('pf-spine').innerHTML = spine.length ? spine.map((r, i) => `
-        <div style="display:flex;gap:12px;padding:9px 0;border-bottom:1px solid #e6eaf0">
-          <b style="color:#2f4490">${i + 1}</b>
+        <div style="display:flex;gap:12px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.14)">
+          <b class="ymca-accent">${i + 1}</b>
           <div style="flex:1"><b>${ctx.esc(r.mission.name)}</b>
-            ${r.isDetour ? ' <span style="color:#a94d17">detour</span>' : ''}
-            <div style="color:#5a6673;font-size:12.5px">${ctx.esc(PF.needsText(r))}</div>
-            ${r.unverified.length ? `<div style="color:#a94d17;font-size:12px">Depends on unconfirmed
+            ${r.isDetour ? ' <span class="ymca-warn">detour</span>' : ''}
+            <div class="ymca-dim" style="font-size:12.5px">${ctx.esc(PF.needsText(r))}</div>
+            ${r.unverified.length ? `<div class="ymca-warn" style="font-size:12px">Depends on unconfirmed
               prices: ${ctx.esc([...new Set(r.unverified.map((u) => u.name))].join(', '))}</div>` : ''}
           </div>
           <div style="text-align:right"><b>${ctx.fmt(r.mission.credits)}</b>
-            <div style="color:#5a6673;font-size:12px">${r.costIsLowerBound ? '≥ ' : ''}${ctx.fmt(r.cost)}</div>
+            <div class="ymca-dim" style="font-size:12px">${r.costIsLowerBound ? '≥ ' : ''}${ctx.fmt(r.cost)}</div>
           </div>
         </div>`).join('') : '<p>—</p>';
 
@@ -124,7 +124,7 @@ YMCA.register({
           <td>${ctx.fmt(r.mission.credits)}</td>
           <td>${Number.isFinite(r.gainPer100k) ? ctx.fmt(Math.round(r.gainPer100k)) : '—'}</td>
           <td>${Math.round(r.ownShare * 100)}%</td>
-          <td>${ctx.esc(r.mission.name)}${r.isTrap ? ' <span style="color:#8c6104">trap</span>' : ''}</td>
+          <td>${ctx.esc(r.mission.name)}${r.isTrap ? ' <span class="ymca-warn">trap</span>' : ''}</td>
           <td>${ctx.esc(PF.needsText(r))}</td></tr>`).join('')}</tbody></table>`;
 
             ctx.store.write('ui', { path, small: useSmall });
