@@ -100,13 +100,18 @@ YMCA.register({
             + centres.map((c) => `<option value="${c.id}"${String(c.id) === area ? ' selected' : ''}>`
                 + `${ctx.esc(c.caption)}</option>`).join('');
 
+        /* Extensions some mission actually requires. Everything under
+         * construction is filtered through this, in the banner as well as in the
+         * panel: a prison cell finishing on Tuesday is not build planning, and
+         * saying so at the top of the tool was the loudest place to say it. */
+        const needed = new Set(missions.flatMap((m) => Object.keys(m.extras)));
+
         /**
          * What is being built right now, narrowed to what actually matters: an
          * extension only appears here if some mission requires it. A prison
          * cell finishing on Tuesday is not build planning.
          */
         function renderBuilding(current) {
-            const needed = new Set(missions.flatMap((m) => Object.keys(m.extras)));
             const now = Date.now();
             const rows = [];
             for (const b of allBuildings) {
@@ -165,7 +170,9 @@ YMCA.register({
             const queue = target
                 ? PF.nextPurchases(target, view.state, missions, prices, opts) : [];
 
-            const pend = Object.entries(view.pending);
+            /* Same filter as the panel below: only what unlocks something. */
+            const pend = Object.entries(view.pending).filter(([k]) => needed.has(k));
+            const pendHidden = Object.keys(view.pending).length - pend.length;
             $('pf-state').innerHTML = `
         <b>${view.state.fire}</b> fire &middot; <b>${view.state.ems}</b> ambulance &middot;
         <b>${view.state.police}</b> police stations
@@ -177,7 +184,11 @@ YMCA.register({
           <b>${top ? ctx.fmt(top.credits) : '—'}</b>
           ${top ? ctx.esc(top.name) : 'nothing on this path yet'}</span>
         ${pend.length ? `<div class="ymca-note warn" style="margin-top:8px">Still being built,
-          so not counted yet: ${pend.map(([k, n]) => `${ctx.esc(k)} ×${n}`).join(', ')}</div>` : ''}`;
+          so not counted yet: ${pend.map(([k, n]) => `${ctx.esc(k)} ×${n}`).join(', ')}${
+        pendHidden ? `<span class="ymca-dim"> · ${pendHidden} more being built that no mission
+          needs</span>` : ''}</div>`
+        : (pendHidden ? `<div class="ymca-dim" style="margin-top:8px">${pendHidden} under
+          construction, none of which unlocks a mission.</div>` : '')}`;
 
             const first = queue[0];
             $('pf-next').innerHTML = first

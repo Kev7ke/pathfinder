@@ -177,6 +177,8 @@ assert.ok(buildList.includes('Forestry Expansion'),
   'an extension a mission needs should be listed while it builds');
 assert.ok(!buildList.includes('Prison cell'),
   'an extension no mission needs must be hidden, not listed');
+assert.ok(!state.includes('Prison cell'),
+  'the banner must filter the same way the panel does');
 
 await pg.click('[data-path="P"]');
 await pg.waitForTimeout(200);
@@ -211,7 +213,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.9');
+assert.equal(report.ymca, '0.0.10');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -398,6 +400,12 @@ await mission.setContent(`<html><body class="dark">
       <div class="col-md-6" id="mission_general_info" data-mission-type="3"></div>
     </div>
     <div class="alert alert-danger alert-missing-vehicles" id="missing_text"></div>
+    <div class="row">
+    <div class="col-lg-6" id="col_left">
+      <a class="aao btn btn-xs" id="aao_reset" reset="true" href="#">Reset</a>
+    </div>
+    <div class="col-lg-6" id="col_right"></div>
+    </div>
     <form id="mission-form" action="/missions/506003398/alarm" method="post">
       <input type="hidden" name="authenticity_token" value="CSRF-XYZ">
       <table id="vehicle_show_table_all"><tbody id="vehicle_show_table_body_all">
@@ -440,13 +448,17 @@ await mission.waitForSelector('#ymca-mm-panel .panel-heading');
 assert.equal(await mission.locator('#ymca-window').count(), 0,
   'the panel must appear without YMCA\'s own window being opened');
 const where = await mission.evaluate(() =>
-  document.getElementById('ymca-mm-panel').nextElementSibling?.id);
-console.log('panel placed      : directly above #' + where);
-assert.equal(where, 'missing_text', 'it belongs above the game\'s own missing-vehicle line');
+  document.getElementById('ymca-mm-panel').parentElement?.id);
+console.log('panel placed      : first child of #' + where);
+assert.equal(where, 'col_right',
+  'it belongs at the top of the right-hand column, where LSS-Manager puts its mission helper');
+assert.equal(await mission.evaluate(() =>
+  document.getElementById('col_right').firstElementChild.id), 'ymca-mm-panel',
+'it must be first in that column, not below whatever else is there');
 const panelRows = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('panel table       :', JSON.stringify(panelRows));
-assert.deepEqual(panelRows, [['Fire engines', '1', '1']]);
+assert.deepEqual(panelRows, [['Fire engines', '1', '\u2013', '1']]);
 
 // Travel time, not map distance: vehicle 22 is further away but arrives in 90s, not 300s.
 await mission.click('#ymca-mm-panel [data-do="select"]');
@@ -457,23 +469,116 @@ assert.deepEqual(chosen, ['22'],
 assert.equal(await mission.evaluate(() => window.__submits), 0,
   'the panel must never submit the dispatch form');
 
-// And it re-reads itself when the game fills a travel time in afterwards.
+// ---- a Quint answers two requirements, and what is already there is subtracted ----
+// The game flags a Quint fire+dlk and a Rescue Engine fire+rw, so one of them covers a platform
+// truck AND an engine. Mission 209 wants 2 platform trucks and 3 engines: two Quints plus one
+// plain engine should do it, not two Quints and three engines.
+await mission.evaluate(async () => {
+  window.__catalogue = [{
+    id: '209', name: 'Factory fire minor', average_credits: 2000,
+    requirements: { platform_trucks: 2, firetrucks: 3 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  localStorage.removeItem('ymca-missionmagician-types');
+  const realFetch = window.fetch;
+  window.fetch = async (url) => (String(url) === '/einsaetze.json'
+    ? new Response(JSON.stringify(window.__catalogue)) : realFetch(url));
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '209');
+  const tbody = document.getElementById('vehicle_show_table_body_all');
+  const row = (id, secs, attrs) => `
+    <tr class="vehicle_select_table_tr" vehicle_id="${id}" data-distance="1">
+      <td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_${id}"
+        value="${id}" name="vehicle_ids[]" ${attrs}></td>
+      <td id="vehicle_sort_${id}" timevalue="${secs}">x</td></tr>`;
+  tbody.innerHTML = [
+    row(31, 10, 'vehicle_type_id="13" fire="1" dlk="1"'),   // Quint
+    row(32, 20, 'vehicle_type_id="13" fire="1" dlk="1"'),   // Quint
+    row(33, 30, 'vehicle_type_id="33" fire="1"'),           // Pumper
+    row(34, 40, 'vehicle_type_id="33" fire="1"'),           // Pumper
+    row(35, 50, 'vehicle_type_id="33" fire="1"'),           // Pumper
+  ].join('');
+  for (const b of document.querySelectorAll('.vehicle_checkbox:checked')) b.checked = false;
+});
+await mission.waitForTimeout(900);
+const quintPlan = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('shared duty       :', JSON.stringify(quintPlan));
+const tickN = await mission.textContent('#ymca-mm-panel [data-do="select"]');
+console.log('tick count        :', tickN.trim());
+assert.ok(/Tick 3 vehicles/.test(tickN),
+  'two Quints cover both platform trucks and two of the three engines, so one more engine: 3');
+
+// Now put an engine on scene. It must come off the requirement, not be sent again.
+await mission.evaluate(() => {
+  const t = document.createElement('table');
+  t.id = 'mission_vehicle_at_mission';
+  t.innerHTML = '<tbody><tr id="vehicle_row_99"><td vehicle_type_id="33">on scene</td></tr></tbody>';
+  document.getElementById('col_right').append(t);
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(900);
+const withScene = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('with one on scene :', JSON.stringify(withScene));
+const engines = withScene.find((r) => r[0] === 'Fire engines');
+assert.equal(engines[2], '1', 'the engine already at the mission must show in the There column');
+const tickAfter = await mission.textContent('#ymca-mm-panel [data-do="select"]');
+console.log('tick after        :', tickAfter.trim());
+assert.ok(/Tick 2 vehicles/.test(tickAfter),
+  'one engine is already there, so only the two Quints are still needed');
+
+// ---- a Rescue Engine covers heavy rescue AND an engine, by the same route ----
+// The game flags it fire+rw exactly as it flags a Quint fire+dlk, so this needs no special case;
+// the test is here because "no special case" is a claim that has to keep being true.
+await mission.evaluate(() => {
+  document.getElementById('mission_vehicle_at_mission')?.remove();
+  window.__catalogue = [{
+    id: '210', name: 'Rescue job', average_credits: 1000,
+    requirements: { heavy_rescue_vehicles: 1, firetrucks: 2 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '210');
+  const tbody = document.getElementById('vehicle_show_table_body_all');
+  const row = (id, secs, attrs) => `
+    <tr class="vehicle_select_table_tr" vehicle_id="${id}" data-distance="1">
+      <td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_${id}"
+        value="${id}" name="vehicle_ids[]" ${attrs}></td>
+      <td id="vehicle_sort_${id}" timevalue="${secs}">x</td></tr>`;
+  tbody.innerHTML = [
+    row(41, 10, 'vehicle_type_id="18" fire="1" rw="1"'),   // Rescue Engine
+    row(42, 20, 'vehicle_type_id="33" fire="1"'),          // Pumper
+    row(43, 30, 'vehicle_type_id="33" fire="1"'),          // Pumper
+  ].join('');
+});
+await mission.waitForTimeout(900);
+const rescue = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('rescue engine     :', JSON.stringify(rescue));
+const tickRescue = await mission.textContent('#ymca-mm-panel [data-do="select"]');
+console.log('tick rescue       :', tickRescue.trim());
+assert.ok(/Tick 2 vehicles/.test(tickRescue),
+  'the Rescue Engine covers the heavy rescue and one of the two engines, so one pumper: 2');
+
+// And it re-reads itself when another engine turns up in the table afterwards. Mission 210 wants
+// two engines and only one pumper was left over; a second pumper arriving should change nothing
+// about the count, but a third engine appearing must be picked up rather than ignored.
 await mission.evaluate(() => {
   const tbody = document.getElementById('vehicle_show_table_body_all');
   const tr = document.createElement('tr');
   tr.className = 'vehicle_select_table_tr';
-  tr.setAttribute('vehicle_id', '23');
+  tr.setAttribute('vehicle_id', '44');
   tr.setAttribute('data-distance', '0.5');
-  tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_23"
-    value="23" name="vehicle_ids[]" elw="1" vehicle_type_id="3" fms="2"></td>
-    <td id="vehicle_sort_23" timevalue="45">45 sec.</td>`;
+  tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_44"
+    value="44" name="vehicle_ids[]" fire="1" vehicle_type_id="33" fms="2"></td>
+    <td id="vehicle_sort_44" timevalue="5">5 sec.</td>`;
   tbody.append(tr);
-  document.getElementById('mission_general_info').setAttribute('data-mission-type', '3');
 });
 await mission.waitForTimeout(900);
-const after = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) => trs.length);
-console.log('panel redrew      :', after, 'requirement rows after the table changed');
-assert.ok(after >= 1, 'the panel should re-read itself when the vehicle table changes');
+const after = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('panel redrew      :', JSON.stringify(after));
+assert.ok(after.length >= 1, 'the panel should re-read itself when the vehicle table changes');
+assert.ok(after.every((r) => r[1] === r[3]), 'every requirement is still covered after the redraw');
 console.log('mission panel     :', missionErrs.length ? missionErrs : 'no page errors');
 assert.equal(missionErrs.length, 0);
 await mission.close();

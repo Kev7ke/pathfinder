@@ -76,6 +76,87 @@ const MM_AMOUNTS = {
     foam_needed: { attr: 'foam_amount_display', label: 'Foam', unit: 'gal.' },
 };
 
+/** Every flag a requirement can ask for, so only those are worth remembering. */
+const MM_FLAGS = Object.values(MM_REQUIREMENTS).map((r) => r.flag);
+
+/** How long the game's own mission catalogue is worth keeping. It changes when
+ * the game is updated, not while anyone is playing. */
+const MM_CATALOGUE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * What each vehicle type can do, learnt from the selection table.
+ *
+ * A vehicle already at the mission is listed in a different table, and that one
+ * carries only `vehicle_type_id` — no capability flags. So the flags are
+ * remembered from the selection table, where both appear on the same row, and
+ * the fleet fills itself in over the first few missions. A type never yet seen
+ * there counts as present but unknown, and the panel says so rather than
+ * quietly treating it as nothing.
+ */
+const MM_TYPES_KEY = 'ymca-missionmagician-types';
+
+function mmKnownTypes() {
+    try {
+        return JSON.parse(localStorage.getItem(MM_TYPES_KEY)) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function mmLearnTypes(vehicles) {
+    const known = mmKnownTypes();
+    let changed = false;
+    for (const v of vehicles) {
+        if (!v.typeId || known[v.typeId]) continue;
+        known[v.typeId] = MM_FLAGS.filter((f) => v.has(f));
+        changed = true;
+    }
+    if (changed) {
+        try { localStorage.setItem(MM_TYPES_KEY, JSON.stringify(known)); } catch (e) { /* private window */ }
+    }
+    return known;
+}
+
+/**
+ * Vehicles already at the mission or on their way to it.
+ *
+ * They meet a requirement just as much as one you are about to send, so not
+ * subtracting them was the difference between "needs 4 engines" and "needs 4
+ * more engines" — and only the second is true once anything has been sent.
+ */
+function mmOnScene(known) {
+    const rows = document.querySelectorAll(
+        '#mission_vehicle_at_mission tbody tr[id^="vehicle_row"], '
+        + '#mission_vehicle_driving tbody tr[id^="vehicle_row"]');
+    const counts = {};
+    let unknown = 0;
+    let total = 0;
+    for (const row of rows) {
+        const typeId = row.querySelector('[vehicle_type_id]')?.getAttribute('vehicle_type_id');
+        if (!typeId) continue;
+        total += 1;
+        const flags = known[typeId];
+        if (!flags) { unknown += 1; continue; }
+        for (const flag of flags) counts[flag] = (counts[flag] || 0) + 1;
+    }
+    return { counts, unknown, total };
+}
+
+/** Only what the panel reads, so the stored catalogue is a fraction of the original. */
+function mmShrinkCatalogue(data) {
+    const list = Array.isArray(data) ? data : Object.values(data);
+    const byId = {};
+    for (const m of list) {
+        byId[String(m.id)] = {
+            name: m.name,
+            requirements: m.requirements || {},
+            average_credits: m.average_credits || null,
+        };
+    }
+    return byId;
+}
+
+
 YMCA.register({
     id: 'missionmagician',
     title: 'MissionMagician',
@@ -185,12 +266,14 @@ async function mmPlan(page, ctx, cfg) {
     let requirements = null;
     let name = null;
     try {
-        const missions = await ctx.game('/einsaetze.json');
-        const list = Array.isArray(missions) ? missions : Object.values(missions);
-        const mission = list.find((m) => String(m.id) === String(page.missionType));
-        if (mission) {
-            requirements = mission.requirements || {};
-            name = mission.name;
+        /* Kept across page loads. Every mission window is its own load, so the
+         * whole catalogue was being refetched each time one opened — which is
+         * what made the panel take a moment to appear. */
+        const byId = await ctx.gameCached('/einsaetze.json', MM_CATALOGUE_MS, mmShrinkCatalogue);
+        const record = byId[String(page.missionType)];
+        if (record) {
+            requirements = record.requirements || {};
+            name = record.name;
         }
     } catch (err) {
         ctx.log.warn('could not read the mission list', err.message);
@@ -199,42 +282,78 @@ async function mmPlan(page, ctx, cfg) {
     const vehicles = page.rows.map(mmVehicle).filter(Boolean);
     if (cfg.fastestFirst !== false) vehicles.sort(mmOrder);
     const untimed = vehicles.filter((v) => v.seconds === null).length;
+    const scene = mmOnScene(mmLearnTypes(vehicles));
 
-    const taken = new Set();
+    const picked = new Map();   // id -> vehicle, so one vehicle can serve two requirements
     const lines = [];
-    const pick = [];
 
     if (requirements) {
-        for (const [key, wanted] of Object.entries(requirements)) {
-            if (MM_AMOUNTS[key]) continue; // totals, not counts — handled below
-            const rule = MM_REQUIREMENTS[key];
+        /* A Quint carries both `fire` and `dlk`; a Rescue Engine both `fire` and
+         * `rw`. The game flags them that way itself, so one of them genuinely
+         * answers two requirements and an ordinary engine can stay at home.
+         * That only works if the scarce requirement is filled first — fill
+         * `fire` first and the Quint is spent as a plain engine — so the
+         * requirements are taken in order of how few vehicles can meet them.
+         * No setting and no special case for either: it falls out of filling
+         * the hardest requirement first. */
+        const counted = Object.entries(requirements)
+            .filter(([key]) => !MM_AMOUNTS[key])
+            .map(([key, wanted]) => {
+                const rule = MM_REQUIREMENTS[key];
+                return { key, wanted, rule, able: rule ? vehicles.filter((v) => v.has(rule.flag)) : [] };
+            })
+            .sort((a, b) => a.able.length - b.able.length);
+
+        for (const { key, wanted, rule, able } of counted) {
             if (!rule) {
                 lines.push({ key, label: mmPretty(key), wanted, found: null, unmatched: true });
                 continue;
             }
-            const chosen = vehicles.filter((v) => !taken.has(v.id) && v.has(rule.flag)).slice(0, wanted);
-            for (const v of chosen) { taken.add(v.id); pick.push(v); }
-            lines.push({ key, label: rule.label, wanted, found: chosen.length });
+            const already = scene.counts[rule.flag] || 0;
+            const stillWanted = Math.max(0, wanted - already);
+            // Anything picked for another requirement counts here too, and costs nothing more.
+            let have = able.filter((v) => picked.has(v.id)).length;
+            for (const v of able) {
+                if (have >= stillWanted) break;
+                if (picked.has(v.id)) continue;
+                picked.set(v.id, v);
+                have += 1;
+            }
+            lines.push({ key, label: rule.label, wanted, onScene: already, found: have + already });
         }
 
-        /* Water and foam are totals, so they are met by adding vehicles until the
-         * figure is reached — and the ones already picked may carry some. */
+        /* Water and foam are totals, so they are filled by adding vehicles until
+         * the figure is reached — the ones already picked may carry some. */
         for (const [key, rule] of Object.entries(MM_AMOUNTS)) {
             const wanted = requirements[key];
             if (!wanted) continue;
             const carried = (v) => (key === 'water_needed' ? v.water : v.foam);
-            let have = pick.reduce((n, v) => n + carried(v), 0);
+            let have = [...picked.values()].reduce((n, v) => n + carried(v), 0);
             for (const v of vehicles) {
                 if (have >= wanted) break;
-                if (taken.has(v.id) || !carried(v)) continue;
-                taken.add(v.id); pick.push(v); have += carried(v);
+                if (picked.has(v.id) || !carried(v)) continue;
+                picked.set(v.id, v);
+                have += carried(v);
             }
             lines.push({ key, label: rule.label, wanted, found: have, unit: rule.unit });
         }
+
+        // Counts first, then the totals, so the table reads the way the game states it.
+        lines.sort((a, b) => Number(!!a.unit) - Number(!!b.unit));
     }
 
-    return { name, requirements, lines, pick, available: vehicles.length, untimed };
+    return {
+        name,
+        requirements,
+        lines,
+        pick: [...picked.values()],
+        available: vehicles.length,
+        untimed,
+        scene,
+        missionType: page.missionType,
+    };
 }
+
 
 /** firetrucks -> Firetrucks, for a requirement with no entry in the map. */
 function mmPretty(key) {
@@ -262,7 +381,20 @@ function mmSelect(pick) {
     return n;
 }
 
+/**
+ * Clear the selection the way the game does.
+ *
+ * Every dispatch order list carries a Reset entry — `.aao[reset="true"]` — and
+ * clicking it is the game's own way of putting the selection back, counters,
+ * water bar and all. Unticking each box by hand is only the fallback for a
+ * window with no dispatch orders on it.
+ */
 function mmClear() {
+    const reset = document.querySelector('.aao[reset="true"]');
+    if (reset) {
+        reset.click();
+        return -1;
+    }
     let n = 0;
     for (const box of document.querySelectorAll('.vehicle_checkbox:checked')) {
         box.checked = false;
@@ -581,11 +713,15 @@ function mmMountPanel(ctx) {
     panel.className = 'panel panel-default';
     panel.innerHTML = '<div class="panel-body"><i>YMCA is reading this mission…</i></div>';
 
-    /* First content, under the mission's own header: the game's missing-vehicle
-     * alert is exactly where "what this needs" belongs, so the panel goes above
-     * it. Failing that, at the top of the frame. */
-    const before = document.getElementById('missing_text');
-    if (before) before.parentNode.insertBefore(panel, before);
+    /* Top of the right-hand half, which is where LSS-Manager puts its own mission
+     * helper. The window is two columns — the dispatch orders on the left and
+     * everything else on the right — and this belongs with the everything else.
+     * Above the game's missing-vehicle line, then the top of the frame, are the
+     * fallbacks for a window laid out differently. */
+    const right = document.getElementById('col_right');
+    const missing = document.getElementById('missing_text');
+    if (right) right.prepend(panel);
+    else if (missing) missing.parentNode.insertBefore(panel, missing);
     else document.getElementById('iframe-inside-container')?.prepend(panel);
 
     let timer = null;
@@ -595,6 +731,7 @@ function mmMountPanel(ctx) {
         const cfg = ctx.store.read('cfg', { fastestFirst: true });
         const plan = await mmPlan(page, ctx, cfg);
         panel.dataset.pick = plan.pick.map((v) => v.id).join(',');
+        panel.dataset.type = String(plan.missionType || '');
         panel.innerHTML = mmGamePanelHtml(plan, cfg, ctx);
     };
     const redraw = () => {
@@ -613,6 +750,8 @@ function mmMountPanel(ctx) {
             mmClear();
             const done = panel.querySelector('#mm-panel-done');
             if (done) done.hidden = true;
+        } else if (e.target.closest('[data-do="type"]')) {
+            mmCopyType(ctx, panel.dataset.type);
         }
     });
 
@@ -654,6 +793,28 @@ function mmSelectIds(ids) {
  * No colour is chosen here. `label-success` and `label-danger` are the game's,
  * so a met requirement and a short one read the same as everywhere else in it.
  */
+/**
+ * Hand back one mission type, complete.
+ *
+ * A mission *type* is the game's static catalogue — no player, no place, no
+ * instance of anything — so the whole record can go back as it is, and that is
+ * what settles a requirement nobody has matched a vehicle attribute to yet.
+ */
+async function mmCopyType(ctx, typeId) {
+    try {
+        const missions = await ctx.rawGame('/einsaetze.json');
+        const list = Array.isArray(missions) ? missions : Object.values(missions);
+        const record = list.find((m) => String(m.id) === String(typeId));
+        if (!record) { ctx.status('That mission type is not in the list.'); return; }
+        await ctx.clipboard(JSON.stringify(record, null, 1), 'this mission type, complete');
+        ctx.log.info('copied mission type', String(typeId));
+    } catch (err) {
+        ctx.status('Could not read the mission list.');
+        ctx.log.warn('copy mission type failed', err.message);
+    }
+}
+
+
 function mmGamePanelHtml(plan, cfg, ctx) {
     if (!plan.requirements) {
         return `<div class="panel-body"><b>YMCA</b> — this mission type is not in the game's own
@@ -667,6 +828,9 @@ function mmGamePanelHtml(plan, cfg, ctx) {
                 ctx.fmt(l.found)}${l.unit ? ` ${l.unit}` : ''}</span>`;
         return `<tr><td>${ctx.esc(l.label)}</td>
       <td class="text-right">${ctx.fmt(l.wanted)}${l.unit ? ` ${l.unit}` : ''}</td>
+      <td class="text-right">${l.onScene
+        ? `<span class="label label-info">${l.onScene}</span>`
+        : '<span class="text-muted">&ndash;</span>'}</td>
       <td class="text-right">${cell}</td></tr>`;
     }).join('');
 
@@ -681,9 +845,15 @@ function mmGamePanelHtml(plan, cfg, ctx) {
     <div class="panel-body">
       <table class="table table-condensed table-striped" style="margin-bottom:8px">
         <thead><tr><th>Needs</th><th class="text-right">Wanted</th>
-          <th class="text-right">Picked</th></tr></thead>
+          <th class="text-right" title="already at the mission or on the way">There</th>
+          <th class="text-right">Covered</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
+
+      ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
+        ${plan.scene.total} already at the mission or on the way, subtracted above${
+        plan.scene.unknown ? ` — except ${plan.scene.unknown} whose type has not been seen in a
+        selection list yet, so what they cover is not known` : ''}.</p>` : ''}
 
       ${short.length ? `<div class="alert alert-warning" style="padding:6px 10px">
         <b>Not enough in range:</b> ${short.map((l) => ctx.esc(l.label)).join(', ')}.
@@ -691,11 +861,13 @@ function mmGamePanelHtml(plan, cfg, ctx) {
 
       ${unmatched.length ? `<div class="alert alert-warning" style="padding:6px 10px">
         <b>Left alone:</b> ${unmatched.map((l) => ctx.esc(l.label)).join(', ')} — which vehicle
-        attribute means this has not been established, and a guess would tick the wrong one.</div>` : ''}
+        attribute means this has not been established, and a guess would tick the wrong one.
+        <button type="button" class="btn btn-xs btn-default" data-do="type">Copy this mission
+          type</button> and it can be added.</div>` : ''}
 
       <button type="button" class="btn btn-success btn-sm" data-do="select">
         Tick ${plan.pick.length} vehicles</button>
-      <button type="button" class="btn btn-default btn-sm" data-do="clear">Untick all</button>
+      <button type="button" class="btn btn-default btn-sm" data-do="clear">Reset selection</button>
       <label style="font-weight:normal;margin:0 0 0 10px">
         <input type="checkbox" data-cfg="fastestFirst" ${cfg.fastestFirst !== false ? 'checked' : ''}>
         Fastest first, by travel time</label>

@@ -431,6 +431,35 @@ function context(moduleId) {
             read: (key, fallback) => readStore(`ymca-${moduleId}-${key}`, fallback),
             write: (key, value) => writeStore(`ymca-${moduleId}-${key}`, value),
         },
+        /**
+         * Game JSON that survives a page load.
+         *
+         * `game()` caches for the page, which is right on the map and wrong
+         * inside a mission: every mission is its own page load, so the whole
+         * mission catalogue was being refetched each time a window opened, and
+         * that is what made the panel take a second to appear. /einsaetze.json
+         * is the game's static list — it changes when the game is updated, not
+         * while you play — so it is worth keeping across loads.
+         *
+         * `shrink` runs once before storing, so only what is actually used
+         * takes up room. A stale read is served immediately and refreshed in
+         * the background, because a catalogue a day old is better than a panel
+         * that waits.
+         */
+        async gameCached(path, maxAgeMs, shrink) {
+            const key = `ymca-cache-${path}`;
+            const held = readStore(key, null);
+            const fresh = held && Date.now() - held.at < maxAgeMs;
+            const load = async () => {
+                const data = await getJSON(path);
+                const value = shrink ? shrink(data) : data;
+                writeStore(key, { at: Date.now(), value });
+                return value;
+            };
+            if (!held) return load();
+            if (!fresh) load().catch(() => { /* the held copy still answers */ });
+            return held.value;
+        },
         log: {
             info: (m, d) => logger.info(moduleId, m, d),
             warn: (m, d) => logger.warn(moduleId, m, d),
