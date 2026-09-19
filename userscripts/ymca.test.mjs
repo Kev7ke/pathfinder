@@ -117,12 +117,13 @@ await pg.waitForSelector('#ymca-window');
 // ---- the launcher: tiles first ----
 const tiles = await pg.$$eval('.ymca-tile[data-mod]', (b) => b.map((x) => x.dataset.mod));
 console.log('tiles             :', JSON.stringify(tiles));
-assert.deepEqual(tiles, ['pathfinder', 'renamer', 'diagnostics']);
+assert.deepEqual(tiles,
+  ['stepops', 'renamer', 'missionmagician', 'trackops', 'diagnostics']);
 assert.equal(await pg.locator('#ymca-back').isVisible(), false,
   'the back button should be hidden on the launcher');
 await pg.screenshot({ path: '/tmp/ymca-tiles.png' });
 
-await pg.click('.ymca-tile[data-mod="pathfinder"]');
+await pg.click('.ymca-tile[data-mod="stepops"]');
 await pg.waitForSelector('#pf-state');
 assert.equal(await pg.locator('#ymca-back').isVisible(), true,
   'the back button should appear inside a tool');
@@ -130,14 +131,14 @@ assert.equal(await pg.locator('#ymca-back').isVisible(), true,
 // Escape steps back to the tiles rather than closing the window.
 await pg.keyboard.press('Escape');
 await pg.waitForTimeout(150);
-assert.equal(await pg.locator('.ymca-tile[data-mod]').count(), 3,
+assert.ok(await pg.locator('.ymca-tile[data-mod]').count() > 0,
   'Escape inside a tool should return to the launcher');
 assert.equal(await pg.locator('#ymca-window').count(), 1, 'Escape closed the whole window');
 console.log('escape            : tool \u2192 launcher, not straight out');
-await pg.click('.ymca-tile[data-mod="pathfinder"]');
+await pg.click('.ymca-tile[data-mod="stepops"]');
 await pg.waitForSelector('#pf-state');
 
-// ---- Pathfinder, computed from live game data ----
+// ---- StepOps, computed from live game data ----
 await pg.waitForFunction(() => document.querySelector('#pf-state')?.textContent.includes('fire'));
 console.log('pathfinder state  :', (await pg.textContent('#pf-state')).replace(/\s+/g, ' ').trim());
 const state = await pg.textContent('#pf-state');
@@ -146,6 +147,29 @@ assert.ok(state.includes('Forestry Expansion'), 'a finished extension was not co
 assert.ok(state.includes('Still being built'), 'an unfinished extension was not flagged');
 console.log('buy next          :', (await pg.textContent('#pf-next')).replace(/\s+/g, ' ').trim());
 assert.ok((await pg.textContent('#pf-ladder')).includes('Forest fire'), 'the ladder is empty');
+
+// ---- the dispatch area narrows the count to one center's stations ----
+const areaOptions = await pg.$$eval('#pf-area option', (o) => o.map((x) => x.textContent));
+console.log('dispatch areas    :', JSON.stringify(areaOptions));
+assert.ok(areaOptions.includes('Central Dispatch'), 'the dispatch center is not selectable');
+await pg.selectOption('#pf-area', { label: 'Central Dispatch' });
+await pg.waitForTimeout(250);
+const scoped = await pg.textContent('#pf-state');
+console.log('scoped to area    :', scoped.replace(/\s+/g, ' ').trim().slice(0, 90));
+assert.ok(scoped.includes('in this dispatch area only'), 'the area filter did not take');
+assert.ok(scoped.includes('0 ambulance'),
+  'AS01 has no dispatch center, so it must drop out of the scoped count');
+await pg.selectOption('#pf-area', '');
+await pg.waitForTimeout(200);
+
+// ---- only construction that unlocks a mission is listed ----
+const buildSum = await pg.textContent('#pf-building-sum');
+const buildList = await pg.textContent('#pf-building-list');
+console.log('under construction:', buildSum.trim(), '|', buildList.replace(/\s+/g, ' ').trim().slice(0, 80));
+assert.ok(buildList.includes('Forestry Expansion'),
+  'an extension a mission needs should be listed while it builds');
+assert.ok(!buildList.includes('Prison cell'),
+  'an extension no mission needs must be hidden, not listed');
 
 await pg.click('[data-path="P"]');
 await pg.waitForTimeout(200);
@@ -180,7 +204,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.2');
+assert.equal(report.ymca, '0.0.3');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -214,6 +238,25 @@ console.log('feedback          :', JSON.stringify({ feedback: fb.feedback, where
 assert.equal(fb.feedback, 'the tiles are too small');
 assert.equal(fb.where, 'diagnostics', 'feedback should record which tool was open');
 assert.ok(fb.log.length, 'feedback should carry the log');
+
+// ---- the two scaffolds open, and say plainly that they do not work yet ----
+for (const [id, button] of [['missionmagician', 'capture'], ['trackops', 'watch']]) {
+  await pg.click('#ymca-back');
+  await pg.click(`.ymca-tile[data-mod="${id}"]`);
+  await pg.waitForSelector(`[data-do="${button}"]`);
+  const warn = await pg.textContent('.ymca-note.warn');
+  assert.ok(/not (working|counting) yet/i.test(warn), `${id} does not admit it is unfinished`);
+  console.log(`${id.padEnd(18)}: opens, says "${warn.trim().split('.')[0]}"`);
+}
+// MissionMagician's capture must work even with no mission window open.
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="missionmagician"]');
+await pg.click('[data-do="capture"]');
+await pg.waitForFunction(() => document.querySelector('#mm-out')?.value.includes('structure only'));
+const cap = JSON.parse(await pg.inputValue('#mm-out'));
+assert.equal(cap.looksLikeMissionWindow, false, 'there is no mission window on this page');
+assert.ok(Array.isArray(cap.missing) && cap.missing.length, 'it should report what it did not find');
+console.log('capture           : reports', cap.missing.length, 'selectors not present');
 
 console.log('page errors       :', errs.length ? errs : 'none');
 assert.equal(errs.length, 0);

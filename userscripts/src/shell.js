@@ -138,6 +138,20 @@ function fetchExternal(url) {
  * from the Pathfinder to the Renamer does not refetch 1,500 missions.
  */
 const cache = new Map();
+
+/**
+ * Throw the cache away, so the next read is fresh.
+ *
+ * The cache lives as long as the page does, which is right for switching
+ * between tools but wrong after buying a station or moving a vehicle. The
+ * refresh button in the title bar calls this so the page does not have to be
+ * reloaded for YMCA to see the change.
+ */
+function forgetGameData() {
+    cache.clear();
+    logger.info('shell', 'game data forgotten, next read is fresh');
+}
+
 async function gameData(path) {
     if (!cache.has(path)) cache.set(path, getJSON(path));
     try {
@@ -187,6 +201,11 @@ function styles() {
 #${WINDOW_ID} .ymca-back{background:rgba(255,255,255,.16);border:0;color:#fff;border-radius:3px;
   padding:5px 11px;cursor:pointer;font:600 12px/1.2 var(--g-font)}
 #${WINDOW_ID} .ymca-back:hover{background:rgba(255,255,255,.28)}
+#${WINDOW_ID} .ymca-refresh{background:none;border:0;color:#fff;font-size:19px;line-height:1;
+  cursor:pointer;padding:0 6px;opacity:.8}
+#${WINDOW_ID} .ymca-refresh:hover{opacity:1}
+#${WINDOW_ID} .ymca-refresh.spin{animation:ymca-spin .6s linear infinite}
+@keyframes ymca-spin{to{transform:rotate(360deg)}}
 #${WINDOW_ID} .ymca-close{background:none;border:0;color:#fff;font-size:24px;line-height:1;
   cursor:pointer;padding:0 4px;opacity:.8}
 #${WINDOW_ID} .ymca-close:hover{opacity:1}
@@ -253,9 +272,13 @@ function styles() {
 
 /** Small, flat icons. A module may bring its own; these are the fallbacks. */
 const ICONS = {
-    pathfinder: '<path d="M4 28 L12 8 L18 20 L24 12 L30 28 Z"/>',
+    stepops: '<path d="M4 29 H10 V23 H16 V17 H22 V11 H28 V5"/><path d="M4 29 H30"/>',
     renamer: '<path d="M6 22 L20 8 L26 14 L12 28 H6 Z"/><path d="M6 30 H30"/>',
     diagnostics: '<circle cx="15" cy="15" r="9"/><path d="M22 22 L30 30"/>',
+    missionmagician: '<path d="M7 27 L24 10"/><path d="M22 5 L24 10 L29 12 L24 14 L22 19 L20 14 '
+        + 'L15 12 L20 10 Z"/>',
+    trackops: '<path d="M5 29 H30"/><rect x="7" y="18" width="5" height="11"/>'
+        + '<rect x="15" y="11" width="5" height="18"/><rect x="23" y="5" width="5" height="24"/>',
     default: '<rect x="6" y="6" width="9" height="9"/><rect x="19" y="6" width="9" height="9"/>'
         + '<rect x="6" y="19" width="9" height="9"/><rect x="19" y="19" width="9" height="9"/>',
 };
@@ -285,6 +308,8 @@ function openWindow(moduleId) {
         <span class="ymca-logo">YMCA <small>Your Mission Chief Alpha ${esc(YMCA.version)}</small></span>
         <span class="ymca-spacer"></span>
         <span class="ymca-status" id="ymca-bar-status"></span>
+        <button class="ymca-refresh" id="ymca-refresh"
+          title="Re-read the game — use this after buying or moving something">&#10227;</button>
         <button class="ymca-close" title="Close">&times;</button>
       </div>
       <main class="ymca-main" id="ymca-main"></main>
@@ -309,6 +334,17 @@ function openWindow(moduleId) {
     const main = win.querySelector('#ymca-main');
     const back = win.querySelector('#ymca-back');
     back.addEventListener('click', () => showLauncher());
+
+    const refresh = win.querySelector('#ymca-refresh');
+    refresh.addEventListener('click', async () => {
+        forgetGameData();
+        refresh.classList.add('spin');
+        setStatus('Re-reading the game\u2026');
+        const mod = YMCA.modules.find((m) => m.id === current);
+        if (mod) showModule(mod); else showLauncher();
+        // The spin is honest about the work: modules fetch inside mount().
+        setTimeout(() => refresh.classList.remove('spin'), 900);
+    });
 
     function showLauncher() {
         current = null;

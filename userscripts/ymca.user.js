@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.2
+// @version      0.0.3
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.2',
+    version: '0.0.3',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -820,6 +820,20 @@ function fetchExternal(url) {
  * from the Pathfinder to the Renamer does not refetch 1,500 missions.
  */
 const cache = new Map();
+
+/**
+ * Throw the cache away, so the next read is fresh.
+ *
+ * The cache lives as long as the page does, which is right for switching
+ * between tools but wrong after buying a station or moving a vehicle. The
+ * refresh button in the title bar calls this so the page does not have to be
+ * reloaded for YMCA to see the change.
+ */
+function forgetGameData() {
+    cache.clear();
+    logger.info('shell', 'game data forgotten, next read is fresh');
+}
+
 async function gameData(path) {
     if (!cache.has(path)) cache.set(path, getJSON(path));
     try {
@@ -869,6 +883,11 @@ function styles() {
 #${WINDOW_ID} .ymca-back{background:rgba(255,255,255,.16);border:0;color:#fff;border-radius:3px;
   padding:5px 11px;cursor:pointer;font:600 12px/1.2 var(--g-font)}
 #${WINDOW_ID} .ymca-back:hover{background:rgba(255,255,255,.28)}
+#${WINDOW_ID} .ymca-refresh{background:none;border:0;color:#fff;font-size:19px;line-height:1;
+  cursor:pointer;padding:0 6px;opacity:.8}
+#${WINDOW_ID} .ymca-refresh:hover{opacity:1}
+#${WINDOW_ID} .ymca-refresh.spin{animation:ymca-spin .6s linear infinite}
+@keyframes ymca-spin{to{transform:rotate(360deg)}}
 #${WINDOW_ID} .ymca-close{background:none;border:0;color:#fff;font-size:24px;line-height:1;
   cursor:pointer;padding:0 4px;opacity:.8}
 #${WINDOW_ID} .ymca-close:hover{opacity:1}
@@ -935,9 +954,13 @@ function styles() {
 
 /** Small, flat icons. A module may bring its own; these are the fallbacks. */
 const ICONS = {
-    pathfinder: '<path d="M4 28 L12 8 L18 20 L24 12 L30 28 Z"/>',
+    stepops: '<path d="M4 29 H10 V23 H16 V17 H22 V11 H28 V5"/><path d="M4 29 H30"/>',
     renamer: '<path d="M6 22 L20 8 L26 14 L12 28 H6 Z"/><path d="M6 30 H30"/>',
     diagnostics: '<circle cx="15" cy="15" r="9"/><path d="M22 22 L30 30"/>',
+    missionmagician: '<path d="M7 27 L24 10"/><path d="M22 5 L24 10 L29 12 L24 14 L22 19 L20 14 '
+        + 'L15 12 L20 10 Z"/>',
+    trackops: '<path d="M5 29 H30"/><rect x="7" y="18" width="5" height="11"/>'
+        + '<rect x="15" y="11" width="5" height="18"/><rect x="23" y="5" width="5" height="24"/>',
     default: '<rect x="6" y="6" width="9" height="9"/><rect x="19" y="6" width="9" height="9"/>'
         + '<rect x="6" y="19" width="9" height="9"/><rect x="19" y="19" width="9" height="9"/>',
 };
@@ -967,6 +990,8 @@ function openWindow(moduleId) {
         <span class="ymca-logo">YMCA <small>Your Mission Chief Alpha ${esc(YMCA.version)}</small></span>
         <span class="ymca-spacer"></span>
         <span class="ymca-status" id="ymca-bar-status"></span>
+        <button class="ymca-refresh" id="ymca-refresh"
+          title="Re-read the game — use this after buying or moving something">&#10227;</button>
         <button class="ymca-close" title="Close">&times;</button>
       </div>
       <main class="ymca-main" id="ymca-main"></main>
@@ -991,6 +1016,17 @@ function openWindow(moduleId) {
     const main = win.querySelector('#ymca-main');
     const back = win.querySelector('#ymca-back');
     back.addEventListener('click', () => showLauncher());
+
+    const refresh = win.querySelector('#ymca-refresh');
+    refresh.addEventListener('click', async () => {
+        forgetGameData();
+        refresh.classList.add('spin');
+        setStatus('Re-reading the game\u2026');
+        const mod = YMCA.modules.find((m) => m.id === current);
+        if (mod) showModule(mod); else showLauncher();
+        // The spin is honest about the work: modules fetch inside mount().
+        setTimeout(() => refresh.classList.remove('spin'), 900);
+    });
 
     function showLauncher() {
         current = null;
@@ -1070,8 +1106,8 @@ function context(moduleId) {
 
 // ---------- modules ----------
 /* --------------------------------------------------------------------------
- * Pathfinder — the cheapest way to raise the highest-paying mission you can
- * spawn, on the department you actually want to play.
+ * StepOps — the cheapest way to raise the highest-paying mission you can
+ * spawn, on the department you actually want to play. One step at a time.
  *
  * Inside the game it reads the mission list live from /einsaetze.json and your
  * stations from /api/buildings, so it is never working from a snapshot. The
@@ -1086,8 +1122,8 @@ const PATHS = [
 ];
 
 YMCA.register({
-    id: 'pathfinder',
-    title: 'Pathfinder',
+    id: 'stepops',
+    title: 'StepOps',
     tagline: 'What to build next',
     description: 'Reads your stations and the mission list straight from the game. '
         + 'Costs are absolute, from where you are now — never add the rungs together.',
@@ -1096,12 +1132,14 @@ YMCA.register({
         el.innerHTML = '<p>Reading the game…</p>';
         let missions;
         let owned;
+        let allBuildings = [];
         try {
             const [raw, buildings] = await Promise.all([
                 ctx.game('/einsaetze.json'),
                 ctx.game('/api/buildings'),
             ]);
             missions = PF.parseMissions(PF.buildDataset(raw));
+            allBuildings = buildings;
             owned = PF.stateFromBuildings(buildings);
         } catch (err) {
             el.innerHTML = `<div class="ymca-note bad">Could not read the game: ${ctx.esc(err.message)}.
@@ -1111,13 +1149,38 @@ YMCA.register({
 
         const prices = PF.PRICES;
         const extDept = PF.extensionDepartments(missions);
-        const saved = ctx.store.read('ui', { path: 'F', small: true });
+        const saved = ctx.store.read('ui', { path: 'F', small: true, area: '' });
         let path = saved.path;
         let useSmall = saved.small !== false;
+        let area = saved.area || '';
+
+        /**
+         * A dispatch center's own area, for players who run one path in one
+         * area and another elsewhere. Only the stations that answer to that
+         * center are counted.
+         *
+         * NOTE: the game's "create own dispatch area" setting is not in
+         * /api/buildings, so this groups by leitstelle_building_id alone. If a
+         * center has that setting off, its stations still show here. Diagnostics
+         * -> Copy building fields is the way to find the flag if it exists.
+         */
+        const centres = allBuildings.filter((b) =>
+            allBuildings.some((x) => x.leitstelle_building_id === b.id));
+
+        function ownedFor(areaId) {
+            if (!areaId) return owned;
+            const inArea = allBuildings.filter((b) =>
+                String(b.leitstelle_building_id) === String(areaId));
+            return PF.stateFromBuildings(inArea);
+        }
 
         el.innerHTML = `
       <div class="ymca-card">
         <div class="ymca-row">
+          <div style="min-width:230px"><b>Dispatch area</b><br>
+            <select id="pf-area"></select>
+            <div class="ymca-dim" style="font-size:12px;margin-top:3px">
+              Counts only the stations of one center.</div></div>
           <div><b>Path</b><br>
             <span id="pf-paths">${PATHS.map(([id, label]) =>
         `<button class="ymca-btn" data-path="${id}">${label}</button>`).join(' ')}</span></div>
@@ -1127,6 +1190,9 @@ YMCA.register({
         </div>
         <div id="pf-state" style="margin-top:12px"></div>
       </div>
+      <details class="ymca-card" id="pf-building"><summary style="cursor:pointer">
+        <b>Under construction</b> <span class="ymca-dim" id="pf-building-sum"></span></summary>
+        <div id="pf-building-list" style="margin-top:10px"></div></details>
       <div class="ymca-card"><b>Buy this next</b><div id="pf-next"></div></div>
       <div class="ymca-card"><b>Your milestones</b><div id="pf-spine"></div></div>
       <div class="ymca-card"><b>Every rung</b><div id="pf-ladder"></div></div>
@@ -1137,6 +1203,58 @@ YMCA.register({
 
         const $ = (id) => el.querySelector('#' + id);
 
+        $('pf-area').innerHTML = '<option value="">Everything you own</option>'
+            + centres.map((c) => `<option value="${c.id}"${String(c.id) === area ? ' selected' : ''}>`
+                + `${ctx.esc(c.caption)}</option>`).join('');
+
+        /**
+         * What is being built right now, narrowed to what actually matters: an
+         * extension only appears here if some mission requires it. A prison
+         * cell finishing on Tuesday is not build planning.
+         */
+        function renderBuilding(current) {
+            const needed = new Set(missions.flatMap((m) => Object.keys(m.extras)));
+            const now = Date.now();
+            const rows = [];
+            for (const b of allBuildings) {
+                if (area && String(b.leitstelle_building_id) !== area) continue;
+                for (const e of b.extensions || []) {
+                    if (e.available === true || !e.available_at) continue;
+                    const done = new Date(e.available_at).getTime();
+                    if (!(done > now)) continue;
+                    if (!needed.has(e.caption)) continue;
+                    rows.push({ station: b.caption, name: e.caption, done });
+                }
+            }
+            rows.sort((x, y) => x.done - y.done);
+            const skipped = allBuildings.reduce((n, b) => n + (b.extensions || []).filter((e) =>
+                e.available !== true && e.available_at && new Date(e.available_at) > now
+                && !needed.has(e.caption)).length, 0);
+
+            $('pf-building-sum').textContent = rows.length
+                ? `\u2014 ${rows.length} that unlock missions`
+                : '\u2014 nothing that unlocks a mission';
+            $('pf-building-list').innerHTML = (rows.length ? `<table><thead><tr>
+          <th>Extension</th><th>Station</th><th>Ready in</th></tr></thead>
+          <tbody>${rows.map((r) => `<tr><td>${ctx.esc(r.name)}</td>
+            <td class="ymca-dim">${ctx.esc(r.station)}</td>
+            <td class="ymca-num">${remaining(r.done - now)}</td></tr>`).join('')}</tbody></table>`
+                : '<p class="ymca-dim">Nothing under construction that any mission needs.</p>')
+              + (skipped ? `<p class="ymca-dim" style="font-size:12px;margin-top:8px">
+                ${skipped} other extension${skipped === 1 ? '' : 's'} building, but no mission
+                requires ${skipped === 1 ? 'it' : 'them'} \u2014 hidden.</p>` : '');
+        }
+
+        function remaining(ms) {
+            const mins = Math.max(0, Math.round(ms / 60000));
+            const d = Math.floor(mins / 1440);
+            const h = Math.floor((mins % 1440) / 60);
+            const m = mins % 60;
+            if (d) return `${d}d ${h}h`;
+            if (h) return `${h}h ${m}m`;
+            return `${m}m`;
+        }
+
         const paint = () => {
             for (const b of el.querySelectorAll('[data-path]')) {
                 b.classList.toggle('primary', b.dataset.path === path);
@@ -1146,19 +1264,21 @@ YMCA.register({
             }
 
             const opts = { useSmall, extensionDepartments: extDept };
-            const rungs = PF.annotate(PF.ladder(missions, path, owned.state, prices, opts), path);
+            const view = ownedFor(area);
+            const rungs = PF.annotate(PF.ladder(missions, path, view.state, prices, opts), path);
             const spine = PF.milestones(rungs);
-            const top = PF.ceiling(missions, path, owned.state);
+            const top = PF.ceiling(missions, path, view.state);
             const target = spine[0] || rungs[0];
             const queue = target
-                ? PF.nextPurchases(target, owned.state, missions, prices, opts) : [];
+                ? PF.nextPurchases(target, view.state, missions, prices, opts) : [];
 
-            const pend = Object.entries(owned.pending);
+            const pend = Object.entries(view.pending);
             $('pf-state').innerHTML = `
-        <b>${owned.state.fire}</b> fire &middot; <b>${owned.state.ems}</b> ambulance &middot;
-        <b>${owned.state.police}</b> police stations
-        ${Object.keys(owned.state.ext).length
-        ? ' &middot; ' + Object.entries(owned.state.ext)
+        <b>${view.state.fire}</b> fire &middot; <b>${view.state.ems}</b> ambulance &middot;
+        <b>${view.state.police}</b> police stations
+        ${area ? ' <span class="ymca-accent">in this dispatch area only</span>' : ''}
+        ${Object.keys(view.state.ext).length
+        ? ' &middot; ' + Object.entries(view.state.ext)
             .map(([k, n]) => `${ctx.esc(k)} ×${n}`).join(', ') : ''}
         <br><span class="ymca-dim">Your ceiling now:
           <b>${top ? ctx.fmt(top.credits) : '—'}</b>
@@ -1198,9 +1318,14 @@ YMCA.register({
           <td>${ctx.esc(r.mission.name)}${r.isTrap ? ' <span class="ymca-warn">trap</span>' : ''}</td>
           <td>${ctx.esc(PF.needsText(r))}</td></tr>`).join('')}</tbody></table>`;
 
-            ctx.store.write('ui', { path, small: useSmall });
+            renderBuilding();
+            ctx.store.write('ui', { path, small: useSmall, area });
         };
 
+        $('pf-area').addEventListener('change', (e) => {
+            area = e.target.value;
+            paint();
+        });
         el.addEventListener('click', (e) => {
             const p = e.target.closest('[data-path]');
             if (p) { path = p.dataset.path; paint(); return; }
@@ -1626,6 +1751,293 @@ YMCA.register({
         renderRestore();
     },
 });
+
+/* --------------------------------------------------------------------------
+ * MissionMagician — read a mission window, say which vehicles it wants, and
+ * alarm them in one go.
+ *
+ * NOT BUILT YET, and deliberately so. Doing this properly means writing into
+ * the game's own mission window: reading the requirement block, matching it
+ * against the vehicles in range, ticking them and pressing alarm. None of that
+ * markup has ever been seen from the side this was written on, and guessing at
+ * a selector that ticks checkboxes and submits a form is exactly the way to
+ * alarm the wrong vehicles.
+ *
+ * So this module ships as its settings plus one button: open a mission, press
+ * "Capture this mission window", and it takes the structure — not the content —
+ * of the window back. That is the missing piece.
+ * -------------------------------------------------------------------------- */
+
+YMCA.register({
+    id: 'missionmagician',
+    title: 'MissionMagician',
+    tagline: 'Alarm the right vehicles',
+
+    description: 'Reads a mission window, works out what it needs, and alarms it. '
+        + 'Not working yet — it needs the shape of your mission window first.',
+
+    async mount(el, ctx) {
+        const cfg = ctx.store.read('cfg', { enabled: false, showTable: true, confirmBeforeAlarm: true });
+
+        el.innerHTML = `
+      <div class="ymca-note warn"><b>Not working yet.</b> Everything below is settings and a
+        way to send the one thing that is missing. Turning it on does nothing until the mission
+        window has been read once.</div>
+
+      <div class="ymca-card">
+        <b>Settings</b>
+        <p class="ymca-sub" style="margin:4px 0 10px">These are remembered now so they are ready
+          when the tool is.</p>
+        <label style="display:block;margin:4px 0"><input type="checkbox" data-cfg="enabled"
+          ${cfg.enabled ? 'checked' : ''}> Add the helper to mission windows</label>
+        <label style="display:block;margin:4px 0"><input type="checkbox" data-cfg="showTable"
+          ${cfg.showTable ? 'checked' : ''}> Show required against selected as a table</label>
+        <label style="display:block;margin:4px 0"><input type="checkbox" data-cfg="confirmBeforeAlarm"
+          ${cfg.confirmBeforeAlarm ? 'checked' : ''}> Show what is selected before alarming</label>
+      </div>
+
+      <div class="ymca-card">
+        <b>What is needed to build it</b>
+        <p class="ymca-sub" style="margin:4px 0 10px">Open any mission in the game, leave it open,
+          then come back here and press this. It copies the <i>structure</i> of that window —
+          element names, classes and the shape of the vehicle list — and no mission text,
+          addresses or player names.</p>
+        <button class="ymca-btn primary" data-do="capture">Capture this mission window</button>
+        <span class="ymca-status" id="mm-status"></span>
+        <textarea id="mm-out" rows="12" readonly style="width:100%;margin-top:10px;
+          font-family:ui-monospace,monospace;font-size:11.5px"></textarea>
+      </div>`;
+
+        el.addEventListener('change', (e) => {
+            const key = e.target.dataset.cfg;
+            if (!key) return;
+            cfg[key] = e.target.checked;
+            ctx.store.write('cfg', cfg);
+            ctx.status('Saved.');
+        });
+
+        el.addEventListener('click', (e) => {
+            if (!e.target.closest('[data-do="capture"]')) return;
+            const out = el.querySelector('#mm-out');
+            const report = captureMissionWindow();
+            out.value = JSON.stringify(report, null, 1);
+            ctx.clipboard(out.value, 'the mission window structure');
+            ctx.log.info('captured mission window', report.found ? 'found' : 'nothing found');
+        });
+    },
+});
+
+/**
+ * Describe the mission window without reading its content.
+ *
+ * Structure is what is needed — which container holds the requirements, how the
+ * vehicle rows are marked up, what the alarm control is. Mission text, street
+ * names and player names are not, so they are not taken.
+ */
+function captureMissionWindow() {
+    const CANDIDATES = [
+        '#mission_general_info', '#missing_text', '.mission_header', '#mission_vehicle_driving',
+        '#vehicle_show_table_all', '#vehicle_show_table_body', 'table.vehicle_table',
+        '#mission_vehicle_amount', '.alert-missing-vehicles', '#mission_aao_group',
+        'form#vehicle_select', 'input[name="vehicle_ids[]"]', '.aao', '#vehicle_list',
+    ];
+    const seen = CANDIDATES.filter((sel) => !!document.querySelector(sel));
+
+    const describe = (el, depth = 0) => {
+        if (!el || depth > 3) return null;
+        return {
+            tag: el.tagName.toLowerCase(),
+            id: el.id || undefined,
+            class: el.className && typeof el.className === 'string'
+                ? el.className.slice(0, 120) : undefined,
+            children: [...el.children].slice(0, 8)
+                .map((c) => describe(c, depth + 1)).filter(Boolean),
+        };
+    };
+
+    // The vehicle list is the part that matters most: how a row is identified,
+    // and what the checkbox is called.
+    const row = document.querySelector('#vehicle_show_table_body tr, table.vehicle_table tbody tr');
+    const checkbox = document.querySelector('input[type=checkbox][name*="vehicle"], .vehicle_checkbox');
+
+    return {
+        note: 'structure only — no mission text, addresses or player names',
+        url: location.pathname,
+        looksLikeMissionWindow: /\/missions?\//.test(location.pathname)
+            || !!document.querySelector('#mission_general_info, #missing_text'),
+        found: seen,
+        missing: CANDIDATES.filter((sel) => !seen.includes(sel)),
+        vehicleRow: row ? {
+            outline: describe(row),
+            cellCount: row.cells?.length,
+            dataAttributes: Object.keys(row.dataset || {}),
+        } : 'no vehicle row found',
+        checkbox: checkbox ? {
+            name: checkbox.name, class: checkbox.className,
+            dataAttributes: Object.keys(checkbox.dataset || {}),
+        } : 'no vehicle checkbox found',
+        alarmControls: [...document.querySelectorAll('input[type=submit], button[type=submit], .btn-success')]
+            .slice(0, 6).map((b) => ({
+                tag: b.tagName.toLowerCase(), type: b.type, name: b.name || undefined,
+                class: typeof b.className === 'string' ? b.className.slice(0, 80) : undefined,
+                text: (b.value || b.textContent || '').trim().slice(0, 30),
+            })),
+        requirementBlocks: [...document.querySelectorAll('#missing_text, .missing_text, #mission_general_info')]
+            .map((e) => ({ id: e.id, class: e.className, childTags: [...e.children].map((c) => c.tagName) })),
+    };
+}
+
+/* --------------------------------------------------------------------------
+ * TrackOps — count the missions you finish, and what they paid.
+ *
+ * Only from the day it is installed, which is the honest limit: the game does
+ * not hand out a history.
+ *
+ * NOT COUNTING YET. Counting means noticing the moment a mission completes, and
+ * that moment has never been observed from the side this was written on. It
+ * might be a page the game navigates to, a websocket frame, or a row leaving a
+ * list. Guessing would produce a counter that is quietly wrong, which is worse
+ * than one that says it is empty.
+ *
+ * So this ships as the store, the display, and a button that watches for the
+ * event and reports what it saw.
+ * -------------------------------------------------------------------------- */
+
+YMCA.register({
+    id: 'trackops',
+    title: 'TrackOps',
+    tagline: 'What you have run',
+
+    description: 'Counts the missions you finish and what they paid, from today onward. '
+        + 'Not counting yet — it needs to learn how the game announces a completed mission.',
+
+    async mount(el, ctx) {
+        const log = ctx.store.read('missions', []);
+        const total = log.reduce((n, m) => n + (m.credits || 0), 0);
+
+        el.innerHTML = `
+      <div class="ymca-note warn"><b>Not counting yet.</b> Nothing has been recorded, because
+        the moment a mission completes has not been identified yet. The watcher below is how
+        that gets found.</div>
+
+      <div class="ymca-card">
+        <b>So far</b>
+        <p style="font-size:26px;font-weight:700;margin:8px 0 2px">${log.length}
+          <span class="ymca-dim" style="font-size:14px;font-weight:400">missions</span></p>
+        <p class="ymca-dim">${ctx.fmt(total)} credits recorded</p>
+        ${log.length ? '' : '<p class="ymca-dim">Nothing yet.</p>'}
+      </div>
+
+      <div class="ymca-card">
+        <b>Teach it what a finished mission looks like</b>
+        <p class="ymca-sub" style="margin:4px 0 10px">Press start, then play normally and finish
+          a mission. The watcher records how the page changed around that moment — which
+          requests were made and which parts of the page appeared or vanished. Press stop and
+          send the result; that is what turns the counter on.</p>
+        <button class="ymca-btn primary" data-do="watch">Start watching</button>
+        <button class="ymca-btn" data-do="stop" disabled>Stop and copy</button>
+        <span class="ymca-status" id="to-status"></span>
+        <textarea id="to-out" rows="12" readonly style="width:100%;margin-top:10px;
+          font-family:ui-monospace,monospace;font-size:11.5px"></textarea>
+      </div>
+
+      <div class="ymca-card">
+        <b>What is also needed</b>
+        <ul style="margin:6px 0 0;padding-left:20px" class="ymca-dim">
+          <li>The game's own mission icons, so the list can look like the game. They are served
+            from <code>/images/</code> — the mission list already names them.</li>
+          <li>Whether the credit figure on completion is the mission's listed average or the
+            exact amount paid. TrackOps should record what was paid, not what was expected.</li>
+        </ul>
+      </div>`;
+
+        let watcher = null;
+        el.addEventListener('click', (e) => {
+            const start = e.target.closest('[data-do="watch"]');
+            const stop = e.target.closest('[data-do="stop"]');
+            if (start) {
+                watcher = startWatching();
+                el.querySelector('[data-do="watch"]').disabled = true;
+                el.querySelector('[data-do="stop"]').disabled = false;
+                ctx.status('Watching — go and finish a mission.');
+                ctx.log.info('mission watcher started');
+            } else if (stop && watcher) {
+                const report = watcher.stop();
+                el.querySelector('#to-out').value = JSON.stringify(report, null, 1);
+                ctx.clipboard(el.querySelector('#to-out').value, 'what the watcher saw');
+                el.querySelector('[data-do="watch"]').disabled = false;
+                el.querySelector('[data-do="stop"]').disabled = true;
+                watcher = null;
+                ctx.log.info('mission watcher stopped', `${report.requests.length} requests`);
+            }
+        });
+    },
+});
+
+/**
+ * Watch how the page behaves around a finished mission.
+ *
+ * Records request paths and coarse page changes, never response bodies or page
+ * text, so nothing about the player or the missions themselves is carried.
+ */
+function startWatching() {
+    const started = Date.now();
+    const requests = [];
+    const mutations = [];
+
+    const realFetch = window.fetch;
+    window.fetch = async function (...args) {
+        const url = String(args[0]);
+        const at = Date.now() - started;
+        try {
+            const res = await realFetch.apply(this, args);
+            requests.push({ at, url: url.split('?')[0], status: res.status, method: args[1]?.method || 'GET' });
+            return res;
+        } catch (err) {
+            requests.push({ at, url: url.split('?')[0], error: true });
+            throw err;
+        }
+    };
+
+    const realOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+        requests.push({ at: Date.now() - started, url: String(url).split('?')[0], method, xhr: true });
+        return realOpen.call(this, method, url, ...rest);
+    };
+
+    const observer = new MutationObserver((list) => {
+        for (const m of list) {
+            if (mutations.length > 120) return;
+            const target = m.target;
+            if (!(target instanceof Element)) continue;
+            const id = target.id || target.className;
+            if (!id || typeof id !== 'string') continue;
+            if (!/mission|credit|alarm|vehicle/i.test(id)) continue;
+            mutations.push({
+                at: Date.now() - started,
+                on: id.slice(0, 60),
+                added: m.addedNodes.length,
+                removed: m.removedNodes.length,
+            });
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return {
+        stop() {
+            window.fetch = realFetch;
+            XMLHttpRequest.prototype.open = realOpen;
+            observer.disconnect();
+            return {
+                note: 'request paths and coarse page changes only — no response bodies, no page text',
+                watchedForSeconds: Math.round((Date.now() - started) / 1000),
+                url: location.pathname,
+                requests: requests.slice(0, 120),
+                mutations,
+            };
+        },
+    };
+}
 
 /* --------------------------------------------------------------------------
  * Diagnostics — the channel back to whoever is fixing this.

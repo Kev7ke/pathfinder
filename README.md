@@ -90,12 +90,18 @@ rest. Opening it gives a lightbox with a tile per tool; Escape steps back to the
 tiles and again to close. If the navbar cannot be found a floating button
 appears instead, so "no way in at all" still means the script is not running.
 
-- **Pathfinder** reads your stations and the mission list live from the game, so
-  it is never working from a snapshot.
+- **StepOps** reads your stations and the mission list live from the game and
+  says what to build next. Scope it to one dispatch area, and see which
+  extensions under construction actually unlock missions.
 - **Renamer** bulk-renames vehicles and stations from a pattern, with a
   mandatory preview and an undo.
+- **MissionMagician** and **TrackOps** are scaffolded but not working yet; each
+  carries the button that collects what is still missing.
 - **Diagnostics** turns every question about the game into a button that copies
   or downloads an answer.
+
+The refresh button in the title bar re-reads the game, so buying a station does
+not mean reloading the page.
 
 It is generated — never edit `ymca.user.js` by hand. Sources live in
 `userscripts/src/`, and `npm run build:ymca` bundles them together with

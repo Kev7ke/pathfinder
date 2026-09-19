@@ -1,6 +1,6 @@
 /* --------------------------------------------------------------------------
- * Pathfinder — the cheapest way to raise the highest-paying mission you can
- * spawn, on the department you actually want to play.
+ * StepOps — the cheapest way to raise the highest-paying mission you can
+ * spawn, on the department you actually want to play. One step at a time.
  *
  * Inside the game it reads the mission list live from /einsaetze.json and your
  * stations from /api/buildings, so it is never working from a snapshot. The
@@ -15,8 +15,8 @@ const PATHS = [
 ];
 
 YMCA.register({
-    id: 'pathfinder',
-    title: 'Pathfinder',
+    id: 'stepops',
+    title: 'StepOps',
     tagline: 'What to build next',
     description: 'Reads your stations and the mission list straight from the game. '
         + 'Costs are absolute, from where you are now — never add the rungs together.',
@@ -25,12 +25,14 @@ YMCA.register({
         el.innerHTML = '<p>Reading the game…</p>';
         let missions;
         let owned;
+        let allBuildings = [];
         try {
             const [raw, buildings] = await Promise.all([
                 ctx.game('/einsaetze.json'),
                 ctx.game('/api/buildings'),
             ]);
             missions = PF.parseMissions(PF.buildDataset(raw));
+            allBuildings = buildings;
             owned = PF.stateFromBuildings(buildings);
         } catch (err) {
             el.innerHTML = `<div class="ymca-note bad">Could not read the game: ${ctx.esc(err.message)}.
@@ -40,13 +42,38 @@ YMCA.register({
 
         const prices = PF.PRICES;
         const extDept = PF.extensionDepartments(missions);
-        const saved = ctx.store.read('ui', { path: 'F', small: true });
+        const saved = ctx.store.read('ui', { path: 'F', small: true, area: '' });
         let path = saved.path;
         let useSmall = saved.small !== false;
+        let area = saved.area || '';
+
+        /**
+         * A dispatch center's own area, for players who run one path in one
+         * area and another elsewhere. Only the stations that answer to that
+         * center are counted.
+         *
+         * NOTE: the game's "create own dispatch area" setting is not in
+         * /api/buildings, so this groups by leitstelle_building_id alone. If a
+         * center has that setting off, its stations still show here. Diagnostics
+         * -> Copy building fields is the way to find the flag if it exists.
+         */
+        const centres = allBuildings.filter((b) =>
+            allBuildings.some((x) => x.leitstelle_building_id === b.id));
+
+        function ownedFor(areaId) {
+            if (!areaId) return owned;
+            const inArea = allBuildings.filter((b) =>
+                String(b.leitstelle_building_id) === String(areaId));
+            return PF.stateFromBuildings(inArea);
+        }
 
         el.innerHTML = `
       <div class="ymca-card">
         <div class="ymca-row">
+          <div style="min-width:230px"><b>Dispatch area</b><br>
+            <select id="pf-area"></select>
+            <div class="ymca-dim" style="font-size:12px;margin-top:3px">
+              Counts only the stations of one center.</div></div>
           <div><b>Path</b><br>
             <span id="pf-paths">${PATHS.map(([id, label]) =>
         `<button class="ymca-btn" data-path="${id}">${label}</button>`).join(' ')}</span></div>
@@ -56,6 +83,9 @@ YMCA.register({
         </div>
         <div id="pf-state" style="margin-top:12px"></div>
       </div>
+      <details class="ymca-card" id="pf-building"><summary style="cursor:pointer">
+        <b>Under construction</b> <span class="ymca-dim" id="pf-building-sum"></span></summary>
+        <div id="pf-building-list" style="margin-top:10px"></div></details>
       <div class="ymca-card"><b>Buy this next</b><div id="pf-next"></div></div>
       <div class="ymca-card"><b>Your milestones</b><div id="pf-spine"></div></div>
       <div class="ymca-card"><b>Every rung</b><div id="pf-ladder"></div></div>
@@ -66,6 +96,58 @@ YMCA.register({
 
         const $ = (id) => el.querySelector('#' + id);
 
+        $('pf-area').innerHTML = '<option value="">Everything you own</option>'
+            + centres.map((c) => `<option value="${c.id}"${String(c.id) === area ? ' selected' : ''}>`
+                + `${ctx.esc(c.caption)}</option>`).join('');
+
+        /**
+         * What is being built right now, narrowed to what actually matters: an
+         * extension only appears here if some mission requires it. A prison
+         * cell finishing on Tuesday is not build planning.
+         */
+        function renderBuilding(current) {
+            const needed = new Set(missions.flatMap((m) => Object.keys(m.extras)));
+            const now = Date.now();
+            const rows = [];
+            for (const b of allBuildings) {
+                if (area && String(b.leitstelle_building_id) !== area) continue;
+                for (const e of b.extensions || []) {
+                    if (e.available === true || !e.available_at) continue;
+                    const done = new Date(e.available_at).getTime();
+                    if (!(done > now)) continue;
+                    if (!needed.has(e.caption)) continue;
+                    rows.push({ station: b.caption, name: e.caption, done });
+                }
+            }
+            rows.sort((x, y) => x.done - y.done);
+            const skipped = allBuildings.reduce((n, b) => n + (b.extensions || []).filter((e) =>
+                e.available !== true && e.available_at && new Date(e.available_at) > now
+                && !needed.has(e.caption)).length, 0);
+
+            $('pf-building-sum').textContent = rows.length
+                ? `\u2014 ${rows.length} that unlock missions`
+                : '\u2014 nothing that unlocks a mission';
+            $('pf-building-list').innerHTML = (rows.length ? `<table><thead><tr>
+          <th>Extension</th><th>Station</th><th>Ready in</th></tr></thead>
+          <tbody>${rows.map((r) => `<tr><td>${ctx.esc(r.name)}</td>
+            <td class="ymca-dim">${ctx.esc(r.station)}</td>
+            <td class="ymca-num">${remaining(r.done - now)}</td></tr>`).join('')}</tbody></table>`
+                : '<p class="ymca-dim">Nothing under construction that any mission needs.</p>')
+              + (skipped ? `<p class="ymca-dim" style="font-size:12px;margin-top:8px">
+                ${skipped} other extension${skipped === 1 ? '' : 's'} building, but no mission
+                requires ${skipped === 1 ? 'it' : 'them'} \u2014 hidden.</p>` : '');
+        }
+
+        function remaining(ms) {
+            const mins = Math.max(0, Math.round(ms / 60000));
+            const d = Math.floor(mins / 1440);
+            const h = Math.floor((mins % 1440) / 60);
+            const m = mins % 60;
+            if (d) return `${d}d ${h}h`;
+            if (h) return `${h}h ${m}m`;
+            return `${m}m`;
+        }
+
         const paint = () => {
             for (const b of el.querySelectorAll('[data-path]')) {
                 b.classList.toggle('primary', b.dataset.path === path);
@@ -75,19 +157,21 @@ YMCA.register({
             }
 
             const opts = { useSmall, extensionDepartments: extDept };
-            const rungs = PF.annotate(PF.ladder(missions, path, owned.state, prices, opts), path);
+            const view = ownedFor(area);
+            const rungs = PF.annotate(PF.ladder(missions, path, view.state, prices, opts), path);
             const spine = PF.milestones(rungs);
-            const top = PF.ceiling(missions, path, owned.state);
+            const top = PF.ceiling(missions, path, view.state);
             const target = spine[0] || rungs[0];
             const queue = target
-                ? PF.nextPurchases(target, owned.state, missions, prices, opts) : [];
+                ? PF.nextPurchases(target, view.state, missions, prices, opts) : [];
 
-            const pend = Object.entries(owned.pending);
+            const pend = Object.entries(view.pending);
             $('pf-state').innerHTML = `
-        <b>${owned.state.fire}</b> fire &middot; <b>${owned.state.ems}</b> ambulance &middot;
-        <b>${owned.state.police}</b> police stations
-        ${Object.keys(owned.state.ext).length
-        ? ' &middot; ' + Object.entries(owned.state.ext)
+        <b>${view.state.fire}</b> fire &middot; <b>${view.state.ems}</b> ambulance &middot;
+        <b>${view.state.police}</b> police stations
+        ${area ? ' <span class="ymca-accent">in this dispatch area only</span>' : ''}
+        ${Object.keys(view.state.ext).length
+        ? ' &middot; ' + Object.entries(view.state.ext)
             .map(([k, n]) => `${ctx.esc(k)} ×${n}`).join(', ') : ''}
         <br><span class="ymca-dim">Your ceiling now:
           <b>${top ? ctx.fmt(top.credits) : '—'}</b>
@@ -127,9 +211,14 @@ YMCA.register({
           <td>${ctx.esc(r.mission.name)}${r.isTrap ? ' <span class="ymca-warn">trap</span>' : ''}</td>
           <td>${ctx.esc(PF.needsText(r))}</td></tr>`).join('')}</tbody></table>`;
 
-            ctx.store.write('ui', { path, small: useSmall });
+            renderBuilding();
+            ctx.store.write('ui', { path, small: useSmall, area });
         };
 
+        $('pf-area').addEventListener('change', (e) => {
+            area = e.target.value;
+            paint();
+        });
         el.addEventListener('click', (e) => {
             const p = e.target.closest('[data-path]');
             if (p) { path = p.dataset.path; paint(); return; }

@@ -50,8 +50,10 @@ userscripts/
   src/
     shell.js          the window, the module registry, the services
     pf-core.js        adapts the planner to live game data
-    mod-pathfinder.js
+    mod-stepops.js
     mod-renamer.js
+    mod-missionmagician.js
+    mod-trackops.js
     mod-diagnostics.js
 tools/build_ymca.mjs  the bundler, and the single home of VERSION
 ```
@@ -86,6 +88,28 @@ menu entry.
 
 The click handler sits on the `<li>`, not the `<a>`: the game pads its navbar
 items by the list item, so a click can land either side of the text.
+
+### Freshness
+
+`ctx.game()` caches for the whole page load, which is right when switching
+between tools and wrong the moment a station is bought or a vehicle moved.
+**The refresh button in the title bar** drops the cache and re-mounts the
+current tool, so the page does not have to be reloaded. Anything a module
+computes from game data must therefore be computed in `mount()`, not cached in
+the module itself — otherwise refresh will not reach it.
+
+### Shipping a module that does not work yet
+
+Some tools need something from the game that has never been seen from this
+side — the markup of a mission window, how a completed mission is announced.
+**Do not guess a selector that clicks things on the player's behalf.** Ship the
+module with its settings, a plain warning that it does not work yet, and the
+button that collects the missing piece. MissionMagician and TrackOps are both
+in that state on purpose, and each says so in its own first line.
+
+A capture button takes **structure, not content**: element names, classes,
+request paths, which parts of the page changed. Never mission text, addresses,
+player names or response bodies.
 
 ### Looking like the game
 
@@ -128,7 +152,7 @@ through `ctx`. It never touches the shell's chrome. `ctx` gives you:
 
 | | |
 |---|---|
-| `ctx.game(path)` | game JSON, cached per window open and shared between modules |
+| `ctx.game(path)` | game JSON, shared between modules, cached **for the page load** |
 | `ctx.rawGame(path)` | the same, uncached — for probing whether an endpoint answers |
 | `ctx.fetchExternal(url)` | cross-origin via `GM_xmlhttpRequest`, so CORS and the page's CSP cannot block it |
 | `ctx.store.read/write` | localStorage namespaced to the module |
