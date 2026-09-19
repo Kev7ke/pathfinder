@@ -44,6 +44,7 @@ src/
 tests/
   planner.test.mjs  27 tests against the real dataset
   i18n.test.mjs     both languages load and stay in step
+  pattern.test.mjs  the renamer's counter and token rules
 web/
   index.html            the app
   planner-offline.html  generated single-file build
@@ -61,58 +62,71 @@ docs/
   CORRECTIONS.md    mistakes already made — do not repeat them
 ```
 
-## Tampermonkey script: bulk vehicle renaming
+## Tampermonkey script: bulk renaming
 
-`userscripts/vehicle-renamer.user.js` renames your vehicles from a pattern such
-as `{building} {type} {nn}`. Install it by opening the raw file with Tampermonkey
-active. It puts a **"Rename vehicles" button in the bottom right of the game**.
-If that button is not there, the script is not running — that is the whole
-diagnosis. It also registers in the Tampermonkey menu, adds a profile-menu entry
-where that markup is found, and exposes `pfRenamer()` in the console.
+`userscripts/vehicle-renamer.user.js` renames **vehicles and stations** from a
+pattern. Install it by opening the raw file with Tampermonkey active:
 
-Run `pfRenamerCheck()` in the console when something is wrong: it reports
-whether the script is loaded and whether `/api/vehicles` and `/api/buildings`
-actually answer on this game.
+    https://raw.githubusercontent.com/Kev7ke/pathfinder/claude/keen-hawking-g3z0ph/userscripts/vehicle-renamer.user.js
 
-- Filters by station and by vehicle type; the counter restarts per station.
-- **Vehicle type names.** `/api/vehicles` sends a numeric `vehicle_type` and
-  fills `vehicle_type_caption` only for custom types, so standard vehicles have
-  no name in any data the script can see. The script ships with the names for
-  nine types, read out of a real en_US fleet, so a fresh install is useful at
-  once. The dialog lists every type in your fleet with its id and vehicle count
-  and lets you name the rest; typed names win over the built-in list and persist
-  in the browser.
+It puts a **"Renamer" button in the bottom right of the game**. If that button is
+not there, the script is not running — that is the whole diagnosis. It also
+registers in the Tampermonkey menu and exposes `pfRenamer()` in the console.
 
-  To extend the built-in list: name the missing types, press **Copy type map**,
-  and paste the result into `BUILTIN_TYPE_NAMES` in the script. A button can fill them from `api.lss-manager.de` in your
-  game's language — third-party, opt-in, never called on its own. That lookup
-  goes through `GM_xmlhttpRequest`, because a plain cross-origin fetch from the
-  game page is not dependable: the game's own console shows requests to
-  lss-manager.de being refused by CORS. **Copy type
-  map** exports the result as JSON and **Paste type map** reads one back, so the
-  list can be fetched once and then carried between browsers, or built into the
-  script as defaults. A preview that would write a bare `Type <number>` says so
-  instead of doing it.
-- **Preview is mandatory** — nothing is written until you have seen the list and
-  confirmed a second time.
-- **Undo.** Every run records what each name was before it changed, in this
-  browser. Reopen the dialog to preview and apply the reverse, or copy the
-  backup out as JSON. If the backup cannot be written the run says so, loudly,
-  instead of leaving you without a way back.
+**Three tabs.** *Vehicles* and *Stations* rename; *Data for Claude* only copies
+small pieces of JSON to the clipboard — vehicle types, station types, the
+dispatch centres and their stations, a `/einsaetze.json` check, and a self-check
+— so nothing has to be typed into a browser console.
 
-It never posts a hand-built request. For each vehicle it fetches
-`/vehicles/<id>/edit`, takes the real form out of the response and builds a
-`FormData` from it, so the CSRF token and every other setting travel along
-untouched; only `vehicle[caption]` is replaced.
+**Picking what to rename.** Stations and types are checkbox lists, not
+dropdowns, so any combination works. Choosing a dispatch centre and pressing
+*Select its stations* stamps that centre's stations onto the selection; every
+box stays clickable afterwards, so a station that should be left out is one
+click away and no "except" syntax is needed.
 
-`vehicle-renamer.test.mjs` drives the whole cycle — rename, backup, undo — in a
-headless browser against a stand-in game server, and asserts the preview names,
-the per-station counter, and that both directions keep the CSRF token and every
-unrelated vehicle setting. It needs Playwright and a static server on :8777.
+**Pattern placeholders.**
 
-The request pattern and the 150-character caption limit come from
-[jxn-30/LSS-Scripts](https://github.com/jxn-30/LSS-Scripts) (MIT), which
-supports these same MissionChief domains.
+| | |
+|---|---|
+| `{n}` `{nn}` `{nnn}` | counter, padded to as many digits as you write |
+| `{x12nn}` | the same counter, starting at 12 instead of 1 |
+| `{typenn}` | counts per type, running on across stations |
+| `{typex12nn}` | per type, starting at 12 |
+| `{dcnn}` | counts per dispatch centre |
+| `{type}` `{typeid}` | type name, or its numeric id |
+| `{building}` `{dc}` | the station, and the dispatch centre it belongs to |
+| `{id}` `{name}` | the object id, and its current name |
+
+On the vehicles tab `{n}` restarts at each station; on the stations tab it runs
+across the whole selection. Vehicle names are cut to 150 characters, station
+names to 40.
+
+**Safety.** The preview is mandatory and warns before it would write a bare
+`Type <number>`, leave `{dc}` empty, or give the same name to more than one
+object. Every run records the previous names in this browser, so reopening the
+dialog offers the reverse; the backup can also be copied out as JSON. If it
+cannot be saved the run says so rather than implying an undo exists.
+
+It never posts a hand-built request. For each object it fetches its edit page,
+takes the real form out of the response and builds a `FormData` from it, so the
+CSRF token and every other setting travel along untouched; only
+`vehicle[caption]` or `building[name]` is replaced.
+
+**Vehicle type names.** `/api/vehicles` sends a numeric `vehicle_type` and fills
+`vehicle_type_caption` only for custom types, so standard vehicles have no name
+in any data the script can see. Nine names read out of a real en_US fleet ship
+with the script; the dialog lets you name the rest, and a button can fetch them
+from `api.lss-manager.de` over `GM_xmlhttpRequest` (third-party, opt-in, never
+called on its own). Typed names win over the built-in list. To extend that list,
+press **Copy type map** and paste the result into `BUILTIN_TYPE_NAMES`.
+
+Station type names start empty for the same reason — use the *Station types*
+button on the data tab to send them over.
+
+`vehicle-renamer.test.mjs` drives both tabs in a headless browser against a
+stand-in game server and asserts the counters, the dispatch-centre stamp, and
+that both kinds of save keep the CSRF token and unrelated fields.
+`tests/pattern.test.mjs` pins the counter rules without a browser.
 
 ## The one thing to get right
 

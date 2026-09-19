@@ -1,232 +1,171 @@
+// Drives the userscript against a stand-in for the game: the /api endpoints,
+// realistic edit forms for vehicles and buildings, and a save endpoint that
+// records what was posted. Verifies both tabs, the pickers, the dispatch-centre
+// stamp, and that a write preserves the CSRF token and every unrelated field.
+//
+// Needs Playwright and a static server on :8777:
+//   python3 -m http.server 8777 & node userscripts/vehicle-renamer.test.mjs
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 
-// Drives the userscript against a stand-in for the game: the /api endpoints,
-// a realistic edit form, and a save endpoint that records what was posted.
-// Verifies the write preserves the CSRF token and every unrelated field.
-//
-// Needs Playwright and a static server on :8777 (npm start, port changed):
-//   node userscripts/vehicle-renamer.test.mjs
 const script = readFileSync(new URL('./vehicle-renamer.user.js', import.meta.url), 'utf8');
 
-const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args:['--no-sandbox']});
-const pg = await b.newPage();
-const errs = []; pg.on('pageerror', e => errs.push(e.message));
+const b = await chromium.launch({
+  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'],
+});
+const pg = await b.newPage({ viewport: { width: 1200, height: 1000 } });
+const errs = [];
+pg.on('pageerror', (e) => errs.push(e.message));
 
-// any same-origin page will do; the script resolves form actions against it
 await pg.goto('http://localhost:8777/README.md');
-await pg.setContent(`<html><body>
-  <ul class="navbar-nav"><li class="dropdown"><ul class="dropdown-menu"><li><a>Profile</a></li></ul></li></ul>
-</body></html>`);
+await pg.setContent('<html><body></body></html>');
 
-// A stand-in for the game: the API, the edit form, and the save endpoint.
 await pg.evaluate(() => {
   window.__posts = [];
-  // As the real game sends it: a numeric vehicle_type, and vehicle_type_caption
-  // only on custom types. This is what made {type} render as a bare number.
-  const vehicles = [
-    { id: 11, caption: 'Old A', building_id: 1, vehicle_type: 0 },
-    { id: 12, caption: 'Old B', building_id: 1, vehicle_type: 0 },
-    { id: 13, caption: 'Old C', building_id: 2, vehicle_type: 28 },
-    { id: 14, caption: 'Old D', building_id: 2, vehicle_type: 10 },
-  ];
+  window.confirm = () => true;
+  window.GM_registerMenuCommand = () => {};
+  window.I18n = { locale: 'en_US' };
+
+  // As the real game sends it: numeric types, vehicle_type_caption only on
+  // custom types, and leitstelle_building_id linking a station to its centre.
   const buildings = [
-    { id: 1, caption: 'Downtown Fire' },
-    { id: 2, caption: 'North EMS' },
+    { id: 90, caption: 'Central Dispatch', building_type: 7 },
+    { id: 1, caption: 'Downtown Fire', building_type: 0, leitstelle_building_id: 90 },
+    { id: 2, caption: 'North EMS', building_type: 2, leitstelle_building_id: 90 },
+    { id: 3, caption: 'Lone Station', building_type: 0 },
   ];
+  const vehicles = [
+    { id: 11, caption: 'Old A', building_id: 1, vehicle_type: 13 },
+    { id: 12, caption: 'Old B', building_id: 1, vehicle_type: 13 },
+    { id: 13, caption: 'Old C', building_id: 2, vehicle_type: 5 },
+    { id: 14, caption: 'Old D', building_id: 3, vehicle_type: 13 },
+  ];
+  window.__vehicles = vehicles;
+  window.__buildings = buildings;
+
+  const form = (action, field, value) => `<html><body>
+    <form action="${action}" method="post">
+      <input name="authenticity_token" value="CSRF-TOKEN-XYZ">
+      <input name="${field}" value="${value}">
+      <input name="keep_this" value="preserve-me">
+    </form></body></html>`;
+
   window.fetch = async (url, opts = {}) => {
     url = String(url);
-    if (url === '/api/vehicles') return new Response(JSON.stringify(vehicles), {status:200});
-    if (url === '/api/buildings') return new Response(JSON.stringify(buildings), {status:200});
-    const edit = url.match(/^\/vehicles\/(\d+)\/edit$/);
-    if (edit) {
-      const v = vehicles.find(x => x.id === Number(edit[1]));
-      return new Response(`<html><body><form action="/vehicles/${v.id}" method="post">
-        <input name="authenticity_token" value="CSRF-TOKEN-XYZ">
-        <input name="vehicle[caption]" value="${v.caption}">
-        <input name="vehicle[hospital_max_price]" value="42">
-        <input name="vehicle[keep_this]" value="preserve-me">
-      </form></body></html>`, {status:200, headers:{'content-type':'text/html'}});
+    if (url === '/api/vehicles') return new Response(JSON.stringify(vehicles));
+    if (url === '/api/buildings') return new Response(JSON.stringify(buildings));
+    let m = url.match(/^\/vehicles\/(\d+)\/edit$/);
+    if (m) {
+      const v = vehicles.find((x) => x.id === Number(m[1]));
+      return new Response(form(`/vehicles/${v.id}`, 'vehicle[caption]', v.caption),
+        { headers: { 'content-type': 'text/html' } });
+    }
+    m = url.match(/^\/buildings\/(\d+)\/edit$/);
+    if (m) {
+      const bl = buildings.find((x) => x.id === Number(m[1]));
+      return new Response(form(`/buildings/${bl.id}`, 'building[name]', bl.caption),
+        { headers: { 'content-type': 'text/html' } });
     }
     if (opts.method && opts.method.toLowerCase() === 'post') {
       const entries = {};
       for (const [k, val] of opts.body.entries()) entries[k] = val;
       window.__posts.push({ url, entries });
-      return new Response('ok', {status:200});
+      return new Response('ok');
     }
     throw new Error('unexpected fetch: ' + url);
   };
-  window.confirm = () => true;
-  window.GM_registerMenuCommand = () => {};
-  // Stand-in for the userscript transport, so the CORS-proof path is covered.
-  window.__gmCalls = [];
-  window.GM_xmlhttpRequest = (opts) => {
-    window.__gmCalls.push(opts.url);
-    opts.onload({ status: 200, responseText: JSON.stringify({
-      '0': { caption: 'Fetched Engine' },
-      '28': { caption: 'Fetched Ambulance' },
-    }) });
-  };
-  window.I18n = { locale: 'en_US' };
 });
 
 await pg.addScriptTag({ content: script });
 
-// The launcher is what failed in the field: the navbar entry depends on markup
-// that was never verified, so the floating button must appear on its own.
-const fab = await pg.locator('#pf-renamer-fab');
+const fab = pg.locator('#pf-renamer-fab');
 assert.equal(await fab.count(), 1, 'the floating launcher button was not added');
-assert.ok(await fab.isVisible(), 'the launcher button is not visible');
-console.log('launcher button   : visible, text =', JSON.stringify(await fab.textContent()));
-
-// Opening by clicking it, not by calling the function, is the real path.
+console.log('launcher          : visible');
 await fab.click();
-await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.includes('vehicles found'));
+await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.includes('stations'));
+console.log('loaded            :', (await pg.textContent('#pf-status')).trim());
 
-console.log('status after load :', await pg.textContent('#pf-status'));
+// ---- built-in type names ----
+const typeLabels = await pg.$$eval('#pf-v-types .pf-pick span', (e) => e.map((x) => x.textContent));
+console.log('vehicle types     :', JSON.stringify(typeLabels));
+assert.ok(typeLabels.some((t) => t.startsWith('Quint')), 'built-in name for type 13 not used');
+assert.ok(typeLabels.some((t) => t.startsWith('ALS Ambulance')), 'built-in name for type 5 not used');
 
-// Type 10 ships with the script, so it must already carry a name; 0 and 28 do not.
-const builtinName = await pg.textContent('#pf-type');
-assert.ok(builtinName.includes('Patrol Car'), 'the built-in name for type 10 was not used');
-console.log('built-in name     : Patrol Car resolved without being typed');
-// Fetching names must go through the userscript transport, not plain fetch:
-// the game's own console shows lss-manager.de requests refused by CORS.
-await pg.click('[data-pf="fetch-types"]');
-await pg.waitForTimeout(250);
-const gmCalls = await pg.evaluate(() => window.__gmCalls);
-console.log('name lookup via GM :', JSON.stringify(gmCalls));
-assert.deepEqual(gmCalls, ['https://api.lss-manager.de/en_US/vehicles'],
-  'the name lookup did not use the userscript transport');
-const fetchedNames = await pg.$$eval('#pf-type option', o => o.map(x => x.textContent));
-assert.ok(fetchedNames.includes('Fetched Engine (2)'), 'fetched names did not reach the dropdown');
-assert.ok(fetchedNames.some(n => n.startsWith('Patrol Car')),
-  'the fetch overwrote a built-in name that matched');
-console.log('after fetch        :', JSON.stringify(fetchedNames));
+// ---- the dispatch-centre stamp ----
+await pg.selectOption('#pf-v-dc', '90');
+await pg.click('[data-pf="stamp-dc"][data-for="vehicle"]');
+await pg.waitForTimeout(150);
+const picked = await pg.$$eval('#pf-v-stations input:checked', (e) => e.map((x) => x.value));
+console.log('stamped stations  :', JSON.stringify(picked), '(Lone Station 3 must be out)');
+assert.deepEqual(picked.sort(), ['1', '2'], 'the stamp did not select exactly that centre\'s stations');
 
-// Clear them again so the rest of the run exercises typing the names by hand.
+// ---- the new counters, on the vehicles tab ----
+await pg.fill('#pf-pattern', '{dc} {type} {x12nn} [{typenn}]');
+await pg.click('[data-pf="preview"]');
+await pg.waitForTimeout(200);
+const rows = await pg.$$eval('#pf-preview tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent)));
+console.log('preview           :', JSON.stringify(rows));
+assert.deepEqual(rows, [
+  ['Old A', 'Central Dispatch Quint 12 [01]'],
+  ['Old B', 'Central Dispatch Quint 13 [02]'],
+  ['Old C', 'Central Dispatch ALS Ambulance 12 [01]'],
+], 'x12 counter restarts per station, type counter runs on within its type');
+
+await pg.click('[data-pf="apply"]');
+await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.startsWith('Renamed'));
+const vPosts = await pg.evaluate(() => window.__posts);
+assert.equal(vPosts.length, 3, 'expected three vehicle saves');
+assert.equal(new URL(vPosts[0].url).pathname, '/vehicles/11');
+assert.equal(vPosts[0].entries['vehicle[caption]'], 'Central Dispatch Quint 12 [01]');
+assert.equal(vPosts[0].entries.authenticity_token, 'CSRF-TOKEN-XYZ', 'CSRF token lost');
+assert.equal(vPosts[0].entries.keep_this, 'preserve-me', 'an unrelated field was lost');
+console.log('vehicle save      :', JSON.stringify(vPosts[0].entries));
+
+// ---- the stations tab ----
+await pg.evaluate(() => { window.__posts = []; });
+await pg.click('[data-pf="tab"][data-tab="building"]');
+await pg.waitForTimeout(150);
+await pg.fill('#pf-pattern', '{dc} station {nn}');
+await pg.click('[data-pf="preview"]');
+await pg.waitForTimeout(200);
+const bRows = await pg.$$eval('#pf-preview tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent)));
+console.log('station preview   :', JSON.stringify(bRows));
+assert.ok(bRows.some((r) => r[0] === 'Downtown Fire' && r[1] === 'Central Dispatch station 02'),
+  'stations were not renamed with the dispatch centre and a running counter');
+
+await pg.click('[data-pf="apply"]');
+await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.startsWith('Renamed'));
+const bPosts = await pg.evaluate(() => window.__posts);
+assert.ok(bPosts.length > 0, 'no station was saved');
+assert.ok(new URL(bPosts[0].url).pathname.startsWith('/buildings/'), 'posted to the wrong place');
+assert.ok('building[name]' in bPosts[0].entries, 'the station name field was not set');
+assert.equal(bPosts[0].entries.authenticity_token, 'CSRF-TOKEN-XYZ', 'CSRF token lost on a station');
+console.log('station save      :', JSON.stringify(bPosts[0].entries));
+
+// ---- undo, which must know it was stations ----
 await pg.evaluate(() => {
-  localStorage.removeItem('pf-vehicle-renamer-types');
-  document.getElementById('pf-vehicle-renamer').remove();
+  window.__posts = [];
+  document.getElementById('pf-renamer').remove();
 });
 await pg.locator('#pf-renamer-fab').click();
-await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.includes('vehicles found'));
+await pg.waitForFunction(() => document.querySelector('#pf-restore .alert'));
+const backupNote = await pg.textContent('#pf-restore');
+console.log('backup note       :', backupNote.replace(/\s+/g, ' ').trim().slice(0, 80));
+assert.ok(backupNote.includes('station'), 'the backup did not record that it renamed stations');
 
-// Types start unnamed, and the panel must say so rather than quietly using numbers.
-const summary = await pg.textContent('#pf-types-summary');
-console.log('types summary     :', summary.trim());
-assert.ok(summary.includes('2 of 3 still unnamed'),
-  `expected the built-in type to count as named, got: ${summary}`);
-
-await pg.fill('#pf-pattern', '{building} {type} {nn}');
-await pg.click('[data-pf="preview"]');
-await pg.waitForTimeout(150);
-const warned = await pg.locator('#pf-preview .alert-warning').count();
-console.log('unnamed warning   :', warned === 1 ? 'shown' : 'MISSING');
-assert.equal(warned, 1, 'renaming to a bare type number was not warned about');
-
-// Now name them, the way the user would.
-await pg.fill('[data-type="0"] [data-pf="type-name"]', 'Type 1 Engine');
-await pg.fill('[data-type="28"] [data-pf="type-name"]', 'Ambulance');
-await pg.waitForTimeout(150);
-const typeOptions = await pg.$$eval('#pf-type option', o => o.map(x => x.textContent));
-console.log('type dropdown     :', JSON.stringify(typeOptions));
-assert.ok(typeOptions.includes('Type 1 Engine (2)'), 'the dropdown still shows numbers');
-
-// The map must survive a round trip: copy it out, wipe it, paste it back.
-const copied = await pg.evaluate(async () => {
-  let captured = null;
-  navigator.clipboard.writeText = async (t) => { captured = t; };
-  document.querySelector('[data-pf="copy-types"]').click();
-  await new Promise(r => setTimeout(r, 100));
-  return captured;
-});
-console.log('copied type map   :', copied && copied.replace(/\s+/g,' '));
-assert.deepEqual(JSON.parse(copied),
-  { '0': 'Type 1 Engine', '10': 'Patrol Car', '28': 'Ambulance' },
-  'the copied type map should include the built-in name too');
-
-await pg.evaluate(() => {
-  localStorage.removeItem('pf-vehicle-renamer-types');
-  window.prompt = () => '{"0":"Type 1 Engine","28":"Ambulance"}';
-  document.querySelector('[data-pf="paste-types"]').click();
-});
+// ---- the data buttons ----
+await pg.click('[data-pf="tab"][data-tab="data"]');
+await pg.waitForTimeout(100);
+await pg.click('[data-pf="dump"][data-what="dispatch"]');
 await pg.waitForTimeout(200);
-const afterPaste = await pg.$$eval('#pf-type option', o => o.map(x => x.textContent));
-console.log('after paste       :', JSON.stringify(afterPaste));
-assert.ok(afterPaste.includes('Type 1 Engine (2)'), 'pasting the map did not restore the names');
-
-await pg.click('[data-pf="preview"]');
-await pg.waitForTimeout(200);
-console.log('preview status    :', await pg.textContent('#pf-status'));
-const rows = await pg.$$eval('#pf-preview tbody tr', trs =>
-  trs.map(tr => [...tr.cells].map(c => c.textContent)));
-console.log('preview rows      :', JSON.stringify(rows));
-
-assert.deepEqual(rows, [
-  ['Old A', 'Downtown Fire Type 1 Engine 01'],
-  ['Old B', 'Downtown Fire Type 1 Engine 02'],
-  ['Old C', 'North EMS Ambulance 01'],
-  ['Old D', 'North EMS Patrol Car 02'],
-], 'preview did not render the expected names (counter must restart per station)');
-
-await pg.click('[data-pf="apply"]');
-await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.startsWith('Renamed'));
-console.log('apply status      :', await pg.textContent('#pf-status'));
-
-const posts = await pg.evaluate(() => window.__posts);
-assert.equal(posts.length, 4, 'expected four saves');
-assert.equal(new URL(posts[0].url).pathname, '/vehicles/11', 'posted to the wrong url');
-assert.equal(posts[0].entries['vehicle[caption]'], 'Downtown Fire Type 1 Engine 01');
-assert.equal(posts[0].entries['authenticity_token'], 'CSRF-TOKEN-XYZ', 'CSRF token was lost');
-assert.equal(posts[0].entries['vehicle[keep_this]'], 'preserve-me', 'an unrelated field was lost');
-assert.equal(posts[0].entries['vehicle[hospital_max_price]'], '42', 'a setting was lost');
-console.log('post[0] fields    :', JSON.stringify(posts[0].entries));
-// ---- the undo path ----
-// The mock now reports the NEW names, as the game would after a rename.
-await pg.evaluate(() => {
-  const renamed = { 11:'Downtown Fire Type 1 Engine 01', 12:'Downtown Fire Type 1 Engine 02',
-                    13:'North EMS Ambulance 01', 14:'North EMS Patrol Car 02' };
-  const inner = window.fetch;
-  window.fetch = async (url, opts = {}) => {
-    if (String(url) === '/api/vehicles') {
-      return new Response(JSON.stringify([
-        { id:11, caption: renamed[11], building_id:1, vehicle_type: 0 },
-        { id:12, caption: renamed[12], building_id:1, vehicle_type: 0 },
-        { id:13, caption: renamed[13], building_id:2, vehicle_type: 28 },
-        { id:14, caption: renamed[14], building_id:2, vehicle_type: 10 },
-      ]), {status:200});
-    }
-    return inner(url, opts);
-  };
-  window.__posts = [];
-  document.getElementById('pf-vehicle-renamer')?.remove();
-});
-
-await pg.evaluate(() => window.pfRenamer());
-await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.includes('vehicles found'));
-const hasBackup = await pg.locator('[data-pf="undo"]').count();
-console.log('backup offered    :', hasBackup === 1 ? 'yes' : 'NO');
-assert.equal(hasBackup, 1, 'the backup panel did not appear after a rename');
-
-await pg.click('[data-pf="undo"]');
-await pg.waitForTimeout(200);
-const undoRows = await pg.$$eval('#pf-preview tbody tr', trs => trs.map(tr => [...tr.cells].map(c => c.textContent)));
-console.log('undo preview      :', JSON.stringify(undoRows));
-assert.deepEqual(undoRows, [
-  ['Downtown Fire Type 1 Engine 01', 'Old A'],
-  ['Downtown Fire Type 1 Engine 02', 'Old B'],
-  ['North EMS Ambulance 01', 'Old C'],
-  ['North EMS Patrol Car 02', 'Old D'],
-], 'undo did not offer the original names back');
-
-await pg.click('[data-pf="apply"]');
-await pg.waitForFunction(() => document.querySelector('#pf-status')?.textContent.startsWith('Renamed'));
-const undoPosts = await pg.evaluate(() => window.__posts);
-assert.equal(undoPosts.length, 4, 'undo did not write four vehicles');
-assert.equal(undoPosts[0].entries['vehicle[caption]'], 'Old A', 'undo wrote the wrong name');
-assert.equal(undoPosts[0].entries['authenticity_token'], 'CSRF-TOKEN-XYZ', 'undo lost the CSRF token');
-console.log('undo post[0]      :', JSON.stringify(undoPosts[0].entries));
+const dump = JSON.parse(await pg.inputValue('#pf-dump'));
+console.log('dispatch dump     :', JSON.stringify(dump));
+assert.equal(dump.dispatchCenters.length, 1);
+assert.deepEqual(dump.withoutDispatchCenter, ['Lone Station'],
+  'a station with no dispatch centre was not reported');
 
 console.log('page errors       :', errs.length ? errs : 'none');
 assert.equal(errs.length, 0);

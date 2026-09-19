@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         MissionChief Vehicle Renamer
+// @name         MissionChief Renamer
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      1.6.0
-// @description  Bulk-rename your vehicles from a pattern, with a preview before anything is written.
+// @version      2.0.0
+// @description  Bulk-rename vehicles and stations from a pattern, with a preview before anything is written and an undo afterwards.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
 // @downloadURL  https://raw.githubusercontent.com/Kev7ke/pathfinder/claude/keen-hawking-g3z0ph/userscripts/vehicle-renamer.user.js
@@ -23,49 +23,30 @@
 /*
  * How it saves, and why this way:
  *
- * It does NOT post a hand-built request. For each vehicle it fetches
- * /vehicles/<id>/edit, takes the real <form> out of the returned HTML, and
- * builds a FormData from it. That carries the CSRF token and every other
- * setting the vehicle already has. Only vehicle[caption] is replaced, then the
- * form is posted back to its own action. Nothing else about the vehicle can be
- * lost, because nothing else is ever touched.
+ * It does NOT post a hand-built request. For each vehicle or station it fetches
+ * the object's own edit page, takes the real <form> out of the returned HTML and
+ * builds a FormData from it. That carries the CSRF token and every other setting
+ * the object already has. Only the name field is replaced, then the form is
+ * posted back to its own action, so nothing else can be lost.
  *
- * This request pattern is the one used by jxn_30's LSS-Scripts
+ * The request pattern and the field limits come from jxn_30's LSS-Scripts
  * (https://github.com/jxn-30/LSS-Scripts, MIT), which supports these same
- * MissionChief domains. The 150-character cap on vehicle[caption] comes from
- * there too.
+ * MissionChief domains.
  */
 
 (function () {
     'use strict';
 
-    const CAPTION_MAX = 150;
-    const DELAY_MS = 350;      // between writes — be kind to the server
-    const MODAL_ID = 'pf-vehicle-renamer';
-
-    const PLACEHOLDERS = [
-        ['{n}', 'counter, 1 2 3 …'],
-        ['{nn}', 'counter, zero-padded: 01 02 03'],
-        ['{type}', 'vehicle type name — see the Vehicle types panel'],
-        ['{typeid}', 'the numeric vehicle type id'],
-        ['{building}', 'name of the station it is in'],
-        ['{id}', 'the vehicle id'],
-        ['{name}', 'the current name'],
-    ];
-
-    const esc = (s) =>
-        String(s).replace(/[&<>"]/g, (c) =>
-            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-    // Renaming writes to the account and the game offers no undo, so every run
-    // records what each name was before it changed. Kept in this browser only.
-    // The game's own /api/vehicles gives a numeric vehicle_type and only fills
-    // vehicle_type_caption for custom types, so standard vehicles have no name
-    // anywhere in the data this script can see. The names therefore live here,
-    // supplied by you or fetched on request, and persist in this browser.
+    const LIMITS = {
+        vehicle: { path: (id) => `/vehicles/${id}/edit`, field: 'vehicle[caption]', max: 150 },
+        building: { path: (id) => `/buildings/${id}/edit`, field: 'building[name]', max: 40 },
+    };
+    const DELAY_MS = 350;
+    const MODAL_ID = 'pf-renamer';
     const TYPES_KEY = 'pf-vehicle-renamer-types';
+    const BTYPES_KEY = 'pf-renamer-building-types';
+    const BACKUP_KEY = 'pf-vehicle-renamer-backups';
+    const BACKUP_KEEP = 10;
 
     /**
      * Vehicle type names that ship with the script, so a fresh install is
@@ -73,7 +54,7 @@
      *
      * Read out of a real MissionChief (en_US) fleet, so these are confirmed
      * against the game rather than taken from a catalogue. The list covers only
-     * the types that fleet owned — it is a starting point, not the full
+     * the types that fleet owned - it is a starting point, not the full
      * catalogue, and unknown ids still fall through to "Type <id>".
      *
      * To extend it: name the missing types in the dialog, press "Copy type map",
@@ -91,37 +72,59 @@
         33: 'Pumper Tanker',
     };
 
-    function readTypeNames() {
+    /** Building type names. Empty until confirmed from a real game, same rule. */
+    const BUILTIN_BUILDING_TYPES = {};
+
+    /** What the player calls each kind, so the dialog never says "buildings". */
+    const KIND_NOUN = { vehicle: 'vehicle', building: 'station' };
+
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const $ = (id) => document.getElementById(id);
+
+    // ---------- stored names ----------
+    function readStore(key) {
         try {
-            return JSON.parse(localStorage.getItem(TYPES_KEY)) || {};
+            return JSON.parse(localStorage.getItem(key)) || {};
         } catch (e) {
             return {};
         }
     }
-    function writeTypeNames(map) {
+    function writeStore(key, map) {
         try {
-            localStorage.setItem(TYPES_KEY, JSON.stringify(map));
-        } catch (e) { /* nothing to do; the names just will not persist */ }
+            localStorage.setItem(key, JSON.stringify(map));
+        } catch (e) { /* names just will not persist */ }
     }
 
-    let typeNames = readTypeNames();
+    let typeNames = readStore(TYPES_KEY);
+    let buildingTypeNames = readStore(BTYPES_KEY);
 
-    /** The name to use for a vehicle's type, and whether it is a real name. */
+    /** The name to use for a vehicle's type, and where it came from. */
     function typeInfo(vehicle) {
         const id = String(vehicle.vehicle_type ?? '');
         if (vehicle.vehicle_type_caption) {
             return { id, name: vehicle.vehicle_type_caption, named: true, source: 'custom' };
         }
-        const given = typeNames[id];
-        if (given) return { id, name: given, named: true, source: 'yours' };
-        const builtin = BUILTIN_TYPE_NAMES[id];
-        if (builtin) return { id, name: builtin, named: true, source: 'builtin' };
+        if (typeNames[id]) return { id, name: typeNames[id], named: true, source: 'yours' };
+        if (BUILTIN_TYPE_NAMES[id]) {
+            return { id, name: BUILTIN_TYPE_NAMES[id], named: true, source: 'builtin' };
+        }
         return { id, name: `Type ${id}`, named: false, source: 'none' };
     }
 
-    const BACKUP_KEY = 'pf-vehicle-renamer-backups';
-    const BACKUP_KEEP = 10;
+    function buildingTypeInfo(building) {
+        const id = String(building.building_type ?? '');
+        if (buildingTypeNames[id]) {
+            return { id, name: buildingTypeNames[id], named: true, source: 'yours' };
+        }
+        if (BUILTIN_BUILDING_TYPES[id]) {
+            return { id, name: BUILTIN_BUILDING_TYPES[id], named: true, source: 'builtin' };
+        }
+        return { id, name: `Type ${id}`, named: false, source: 'none' };
+    }
 
+    // ---------- backups ----------
     function readBackups() {
         try {
             return JSON.parse(localStorage.getItem(BACKUP_KEY)) || [];
@@ -129,35 +132,112 @@
             return [];
         }
     }
-    function writeBackup(entries) {
+    function writeBackup(kind, entries) {
         if (!entries.length) return null;
-        const record = { at: new Date().toISOString(), entries };
+        const record = { at: new Date().toISOString(), kind, entries };
         try {
             localStorage.setItem(BACKUP_KEY,
                 JSON.stringify([record, ...readBackups()].slice(0, BACKUP_KEEP)));
         } catch (e) {
-            // A full or blocked store must not stop the rename; the user is
-            // told instead, so they can copy the backup out by hand.
             return null;
         }
         return record;
     }
 
+    // ---------- the pattern engine ----------
+    /**
+     * Counters are written {n}, and grow by prefix and start value:
+     *
+     *   {n} {nn} {nnn}   the default counter, padded to as many digits as n's
+     *   {typenn}         counts within the vehicle or building type
+     *   {dcnn}           counts within the dispatch center
+     *   {x12nn}          the default counter, starting at 12 instead of 1
+     *   {typex12nn}      per type, starting at 12
+     *
+     * Everything else is a plain token: {type} {typeid} {building} {dc} {id} {name}.
+     * The counter pattern requires at least one "n" before the brace, so {type}
+     * and {typeid} can never be mistaken for one.
+     */
+    const COUNTER_RE = /\{(type|dc)?(?:x(\d+))?(n+)\}/g;
+
+    function expandPattern(pattern, indexes, tokens, max) {
+        const withCounters = pattern.replace(COUNTER_RE, (_m, scope, start, ns) => {
+            const base = indexes[scope || 'default'] ?? 0;
+            const from = start === undefined ? 1 : Number(start);
+            return String(base + from).padStart(ns.length, '0');
+        });
+        let out = withCounters;
+        for (const [key, value] of Object.entries(tokens)) {
+            out = out.split('{' + key + '}').join(value ?? '');
+        }
+        return out.slice(0, max).trim();
+    }
+
+    /** Which counters a pattern actually uses — drives the preview warnings. */
+    function countersUsed(pattern) {
+        const scopes = new Set();
+        for (const m of pattern.matchAll(COUNTER_RE)) scopes.add(m[1] || 'default');
+        return scopes;
+    }
+
+    /**
+     * Give every row its position within each counter scope, in the order the
+     * rows are listed, so {nn} restarts per station while {typenn} runs on
+     * across stations.
+     */
+    function assignIndexes(rows, scopeOf) {
+        const seen = new Map();
+        return rows.map((row) => {
+            const indexes = {};
+            for (const [scope, key] of Object.entries(scopeOf(row))) {
+                const composite = scope + '\u0000' + key;
+                const n = seen.get(composite) ?? 0;
+                seen.set(composite, n + 1);
+                indexes[scope] = n;
+            }
+            return { row, indexes };
+        });
+    }
+
+    // ---------- the game ----------
     async function getJSON(url) {
         const res = await fetch(url, { credentials: 'include' });
         if (!res.ok) throw new Error(`${url} answered ${res.status}`);
         return res.json();
     }
 
+    /** Replace only the name on the object's own edit form. */
+    async function renameEntity(kind, id, name) {
+        const spec = LIMITS[kind];
+        const res = await fetch(spec.path(id), { credentials: 'include' });
+        if (!res.ok) throw new Error(`could not open the edit form (${res.status})`);
+        const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+        const form = doc.querySelector('form');
+        if (!form) throw new Error('no form on the edit page');
+        const data = new FormData(form);
+        if (!data.has(spec.field)) {
+            throw new Error(`this edit form has no ${spec.field} field`);
+        }
+        data.set(spec.field, name);
+        // Resolve the target explicitly: a document from DOMParser has no base
+        // URL of its own, so form.action can come back empty.
+        const action = form.getAttribute('action') || spec.path(id).replace(/\/edit$/, '');
+        const target = new URL(action, location.origin).toString();
+        const post = await fetch(target, {
+            method: (form.getAttribute('method') || 'POST').toUpperCase(),
+            body: data,
+            credentials: 'include',
+        });
+        if (!post.ok) throw new Error(`saving answered ${post.status}`);
+    }
+
     /**
      * Fetch the vehicle type catalogue from the name service.
      *
      * This is a cross-origin request from the game's page, and the game's own
-     * console shows other requests to lss-manager.de being refused by CORS. A
-     * plain fetch is therefore not dependable here, so the userscript transport
-     * is used when it is available: it is made for exactly this and is subject
-     * to neither CORS nor the page's content policy. Plain fetch stays as the
-     * fallback for anything that does not grant it.
+     * console shows other requests to lss-manager.de being refused by CORS. The
+     * userscript transport is used when available: it is made for exactly this
+     * and is subject to neither CORS nor the page's content policy.
      */
     function getTypeCatalogue(locale) {
         const url = `https://api.lss-manager.de/${locale}/vehicles`;
@@ -189,250 +269,350 @@
         });
     }
 
-    /** Replace only the caption on the vehicle's own edit form. */
-    async function renameVehicle(id, caption) {
-        const res = await fetch(`/vehicles/${id}/edit`, { credentials: 'include' });
-        if (!res.ok) throw new Error(`could not open the edit form (${res.status})`);
-        const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
-        const form = doc.querySelector('form');
-        if (!form) throw new Error('no form on the edit page');
-        const data = new FormData(form);
-        if (!data.has('vehicle[caption]')) {
-            throw new Error('this edit form has no vehicle[caption] field');
+    function gameLocale() {
+        try {
+            const w = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
+            return w.I18n?.locale || '';
+        } catch (e) {
+            return '';
         }
-        data.set('vehicle[caption]', caption);
-        // Resolve the target explicitly. A document from DOMParser has no base
-        // URL of its own, so form.action can come back empty; reading the
-        // attribute and resolving it against the game origin is deterministic.
-        const action = form.getAttribute('action') || `/vehicles/${id}`;
-        const target = new URL(action, location.origin).toString();
-        const post = await fetch(target, {
-            method: (form.getAttribute('method') || 'POST').toUpperCase(),
-            body: data,
-            credentials: 'include',
-        });
-        if (!post.ok) throw new Error(`saving answered ${post.status}`);
     }
 
-    function applyPattern(pattern, vehicle, index, buildings) {
-        const building = buildings.get(vehicle.building_id);
-        const n = index + 1;
-        return pattern
-            .replaceAll('{nn}', String(n).padStart(2, '0'))
-            .replaceAll('{n}', String(n))
-            .replaceAll('{type}', typeInfo(vehicle).name)
-            .replaceAll('{typeid}', String(vehicle.vehicle_type ?? ''))
-            .replaceAll('{building}', building ? building.caption : '')
-            .replaceAll('{id}', String(vehicle.id))
-            .replaceAll('{name}', vehicle.caption || '')
-            .slice(0, CAPTION_MAX)
-            .trim();
-    }
+    // ---------- the dialog ----------
+    const TOKEN_HELP = [
+        ['{n} {nn} {nnn}', 'counter, padded to as many digits as you write'],
+        ['{x12nn}', 'same counter but starting at 12'],
+        ['{typenn}', 'counts per type, across stations'],
+        ['{typex12nn}', 'per type, starting at 12'],
+        ['{dcnn}', 'counts per dispatch center'],
+        ['{type}', 'type name'],
+        ['{typeid}', 'the numeric type id'],
+        ['{building}', 'the station it is in'],
+        ['{dc}', 'the dispatch center it belongs to'],
+        ['{id}', 'the object id'],
+        ['{name}', 'the current name'],
+    ];
 
-    function buildModal() {
-        const wrap = document.createElement('div');
-        wrap.id = MODAL_ID;
-        wrap.className = 'modal fade in';
-        // Explicit, because the page's own CSS must not be able to hide this.
-        wrap.style.cssText =
-            'display:block;position:fixed;inset:0;z-index:2147483000;overflow:auto;'
-            + 'background:rgba(0,0,0,.4)';
-        wrap.innerHTML = `
-      <div class="modal-dialog" style="width:min(860px,94vw)">
+    function modalHtml() {
+        return `
+      <div class="modal-dialog" style="width:min(940px,95vw)">
         <div class="modal-content">
           <div class="modal-header">
             <button type="button" class="close" data-pf="close">&times;</button>
-            <h4 class="modal-title">Vehicle Renamer</h4>
+            <h4 class="modal-title">Renamer</h4>
           </div>
-          <div class="modal-body" style="max-height:72vh;overflow:auto">
-            <div class="row" style="margin-bottom:10px">
-              <div class="col-sm-6">
-                <label for="pf-building">Station</label>
-                <select id="pf-building" class="form-control"></select>
+          <div class="modal-body" style="max-height:76vh;overflow:auto">
+            <ul class="nav nav-tabs" style="margin-bottom:12px">
+              <li class="active"><a href="#" data-pf="tab" data-tab="vehicle">Vehicles</a></li>
+              <li><a href="#" data-pf="tab" data-tab="building">Stations</a></li>
+              <li><a href="#" data-pf="tab" data-tab="data">Data for Claude</a></li>
+            </ul>
+
+            <div data-pane="vehicle">
+              <details id="pf-types-panel" style="margin-bottom:10px">
+                <summary style="cursor:pointer"><b>Vehicle types</b>
+                  <span id="pf-types-summary" class="text-muted"></span></summary>
+                <p class="help-block" style="margin:6px 0">
+                  The game only sends a number for standard types, so the names are yours to set.
+                  Remembered in this browser.
+                  <button class="btn btn-xs btn-default" data-pf="fetch-types">Fetch names</button>
+                  <button class="btn btn-xs btn-default" data-pf="copy-types">Copy type map</button>
+                  <button class="btn btn-xs btn-default" data-pf="paste-types">Paste type map</button>
+                </p>
+                <div id="pf-types-list"></div>
+              </details>
+              <div class="row">
+                <div class="col-sm-6">
+                  <label>Dispatch center</label>
+                  <div class="input-group">
+                    <select id="pf-v-dc" class="form-control"></select>
+                    <span class="input-group-btn">
+                      <button class="btn btn-default" data-pf="stamp-dc" data-for="vehicle">Select its stations</button>
+                    </span>
+                  </div>
+                </div>
+                <div class="col-sm-6">
+                  <label>Vehicle types <span class="text-muted" id="pf-v-typecount"></span></label>
+                  <div id="pf-v-types" class="pf-picker"></div>
+                </div>
               </div>
-              <div class="col-sm-6">
-                <label for="pf-type">Vehicle type</label>
-                <select id="pf-type" class="form-control"></select>
-              </div>
+              <label style="margin-top:10px">Stations <span class="text-muted" id="pf-v-stationcount"></span>
+                <button class="btn btn-xs btn-link" data-pf="all" data-for="pf-v-stations">all</button>
+                <button class="btn btn-xs btn-link" data-pf="none" data-for="pf-v-stations">none</button></label>
+              <div id="pf-v-stations" class="pf-picker"></div>
             </div>
-            <details id="pf-types-panel" style="margin-bottom:12px">
-              <summary style="cursor:pointer"><b>Vehicle types</b>
-                <span id="pf-types-summary" class="text-muted"></span></summary>
-              <p class="help-block" style="margin:6px 0">
-                The game only sends a number for standard vehicle types, so the names
-                are yours to set. They are remembered in this browser.
-                <button class="btn btn-xs btn-default" data-pf="fetch-types">Fetch names</button>
-                <button class="btn btn-xs btn-default" data-pf="copy-types">Copy type map</button>
-                <button class="btn btn-xs btn-default" data-pf="paste-types">Paste type map</button>
-                <span class="text-muted">— asks api.lss-manager.de, a third-party service, for the
-                names in your game's language. Optional; you can just type them.</span>
+
+            <div data-pane="building" hidden>
+              <div class="row">
+                <div class="col-sm-6">
+                  <label>Dispatch center</label>
+                  <div class="input-group">
+                    <select id="pf-b-dc" class="form-control"></select>
+                    <span class="input-group-btn">
+                      <button class="btn btn-default" data-pf="stamp-dc" data-for="building">Select its stations</button>
+                    </span>
+                  </div>
+                </div>
+                <div class="col-sm-6">
+                  <label>Station types <span class="text-muted" id="pf-b-typecount"></span></label>
+                  <div id="pf-b-types" class="pf-picker"></div>
+                </div>
+              </div>
+              <label style="margin-top:10px">Stations <span class="text-muted" id="pf-b-stationcount"></span>
+                <button class="btn btn-xs btn-link" data-pf="all" data-for="pf-b-stations">all</button>
+                <button class="btn btn-xs btn-link" data-pf="none" data-for="pf-b-stations">none</button></label>
+              <div id="pf-b-stations" class="pf-picker"></div>
+              <p class="help-block" style="margin-top:8px">Station names are limited to
+                ${LIMITS.building.max} characters.</p>
+            </div>
+
+            <div data-pane="data" hidden>
+              <p class="help-block">Each button copies a small piece of JSON to your clipboard,
+                ready to paste into the chat. Nothing is changed in the game.</p>
+              <p>
+                <button class="btn btn-default" data-pf="dump" data-what="vehicle-types">Vehicle types</button>
+                <button class="btn btn-default" data-pf="dump" data-what="building-types">Station types</button>
+                <button class="btn btn-default" data-pf="dump" data-what="dispatch">Dispatch centers and stations</button>
+                <button class="btn btn-default" data-pf="dump" data-what="missions">Mission list check</button>
+                <button class="btn btn-default" data-pf="dump" data-what="selfcheck">Self-check</button>
               </p>
-              <div id="pf-types-list"></div>
-            </details>
-            <label for="pf-pattern">Pattern</label>
-            <input id="pf-pattern" class="form-control" value="{building} {type} {nn}">
-            <p class="help-block" style="margin-top:6px">
-              ${PLACEHOLDERS.map(([p, d]) =>
-                  `<code>${esc(p)}</code> ${esc(d)}`).join(' &nbsp;·&nbsp; ')}
-              <br>The counter restarts per station. Names are cut to ${CAPTION_MAX} characters.
-            </p>
-            <div style="margin:10px 0">
-              <button class="btn btn-default" data-pf="preview">Preview</button>
-              <button class="btn btn-danger" data-pf="apply" disabled>Apply</button>
-              <span id="pf-status" style="margin-left:10px"></span>
+              <textarea id="pf-dump" class="form-control" rows="12" readonly
+                placeholder="The copied text also appears here, in case the clipboard is refused."></textarea>
             </div>
-            <div id="pf-restore"></div>
-            <div id="pf-preview"></div>
+
+            <div id="pf-shared" style="margin-top:14px;border-top:1px solid #ddd;padding-top:12px">
+              <label for="pf-pattern">Pattern</label>
+              <input id="pf-pattern" class="form-control" value="{building} {type} {nn}">
+              <p class="help-block" style="margin-top:6px">
+                ${TOKEN_HELP.map(([t, d]) =>
+                    `<code>${esc(t)}</code> ${esc(d)}`).join(' &nbsp;·&nbsp; ')}
+              </p>
+              <div style="margin:10px 0">
+                <button class="btn btn-default" data-pf="preview">Preview</button>
+                <button class="btn btn-danger" data-pf="apply" disabled>Apply</button>
+                <span id="pf-status" style="margin-left:10px"></span>
+              </div>
+              <div id="pf-restore"></div>
+              <div id="pf-preview"></div>
+            </div>
           </div>
         </div>
       </div>`;
-        return wrap;
+    }
+
+    function pickerHtml(items, checked) {
+        return items.map((it) => `<label class="pf-pick">
+        <input type="checkbox" value="${esc(it.id)}"${checked ? ' checked' : ''}>
+        <span>${esc(it.label)}</span></label>`).join('')
+        || '<p class="help-block" style="margin:6px">nothing here</p>';
+    }
+
+    function injectStyles() {
+        if ($('pf-renamer-style')) return;
+        const st = document.createElement('style');
+        st.id = 'pf-renamer-style';
+        st.textContent = `
+      .pf-picker{max-height:170px;overflow:auto;border:1px solid #ccc;border-radius:4px;
+        padding:6px;background:#fff}
+      .pf-pick{display:block;font-weight:400;margin:0 0 3px;cursor:pointer;color:#111}
+      .pf-pick input{margin-right:6px}
+      #${MODAL_ID} .nav-tabs>li>a{cursor:pointer}`;
+        document.head.append(st);
     }
 
     async function openRenamer(undoMode = false) {
-        // Re-read on every open, so a map pasted in another tab is picked up.
-        typeNames = readTypeNames();
-        document.getElementById(MODAL_ID)?.remove();
-        const modal = buildModal();
+        typeNames = readStore(TYPES_KEY);
+        buildingTypeNames = readStore(BTYPES_KEY);
+        injectStyles();
+        $(MODAL_ID)?.remove();
+
+        const modal = document.createElement('div');
+        modal.id = MODAL_ID;
+        modal.className = 'modal fade in';
+        modal.style.cssText =
+            'display:block;position:fixed;inset:0;z-index:2147483000;overflow:auto;'
+            + 'background:rgba(0,0,0,.4)';
+        modal.innerHTML = modalHtml();
         document.body.append(modal);
 
-        const $ = (id) => modal.querySelector('#' + id);
         const status = $('pf-status');
         const previewBox = $('pf-preview');
         let planned = [];
+        let plannedKind = 'vehicle';
+        let tab = 'vehicle';
 
         modal.addEventListener('click', (e) => {
             if (e.target.dataset.pf === 'close') modal.remove();
         });
 
-        status.textContent = 'Loading your vehicles…';
+        status.textContent = 'Loading…';
         let vehicles;
         let buildings;
         try {
-            const [v, b] = await Promise.all([
-                getJSON('/api/vehicles'),
-                getJSON('/api/buildings'),
-            ]);
+            const [v, b] = await Promise.all([getJSON('/api/vehicles'), getJSON('/api/buildings')]);
             vehicles = v;
-            buildings = new Map(b.map((x) => [x.id, x]));
+            buildings = b;
         } catch (err) {
             status.innerHTML = `<span class="text-danger">${esc(err.message)}</span>`;
             return;
         }
-        status.textContent = `${vehicles.length} vehicles found.`;
+        const byId = new Map(buildings.map((b) => [b.id, b]));
+        const dcName = (b) => byId.get(b?.leitstelle_building_id)?.caption || '';
+        status.textContent = `${vehicles.length} vehicles, ${buildings.length} stations.`;
 
-        // Restoring uses the same preview-then-apply path as renaming: the
-        // backup simply supplies the target names instead of a pattern.
-        const backups = readBackups();
-        const restoreBox = $('pf-restore');
-        if (backups.length) {
-            const newest = backups[0];
-            restoreBox.innerHTML = `
-        <div class="alert alert-info" style="margin-top:12px">
-          Last rename: <b>${esc(new Date(newest.at).toLocaleString())}</b>,
-          ${newest.entries.length} vehicle${newest.entries.length === 1 ? '' : 's'}.
-          <button class="btn btn-xs btn-default" data-pf="undo" style="margin-left:8px">Preview undo</button>
-          <button class="btn btn-xs btn-link" data-pf="copy-backup">Copy backup</button>
-        </div>`;
-            restoreBox.querySelector('[data-pf="copy-backup"]').addEventListener('click', () => {
-                navigator.clipboard.writeText(JSON.stringify(newest, null, 2))
-                    .then(() => { status.textContent = 'Backup copied to the clipboard.'; })
-                    .catch(() => { status.textContent = 'Could not copy — open the console and run localStorage.getItem("' + BACKUP_KEY + '")'; });
-            });
-            restoreBox.querySelector('[data-pf="undo"]').addEventListener('click', () => {
-                const byId = new Map(vehicles.map((v) => [v.id, v]));
-                planned = newest.entries
-                    .map((e) => ({ vehicle: byId.get(e.id), to: e.from }))
-                    .filter((r) => r.vehicle && r.to && r.to !== r.vehicle.caption);
-                showPlan(newest.entries.length, 'Undo');
-            });
-        }
-        if (undoMode) restoreBox.querySelector('[data-pf="undo"]')?.click();
-
-        const buildingSel = $('pf-building');
-        const typeSel = $('pf-type');
-        const used = [...new Set(vehicles.map((v) => v.building_id))]
-            .map((id) => buildings.get(id))
-            .filter(Boolean)
+        // ---- pickers ----
+        const withVehicles = [...new Set(vehicles.map((v) => v.building_id))]
+            .map((id) => byId.get(id)).filter(Boolean)
             .sort((a, b) => a.caption.localeCompare(b.caption));
-        buildingSel.innerHTML = `<option value="">All stations</option>` +
-            used.map((b) => `<option value="${b.id}">${esc(b.caption)}</option>`).join('');
+        const allStations = buildings.slice().sort((a, b) => a.caption.localeCompare(b.caption));
 
-        // One row per distinct type in the fleet, so nothing is guessed by number.
-        const typeCounts = new Map();
+        const dcs = buildings
+            .filter((b) => buildings.some((x) => x.leitstelle_building_id === b.id))
+            .sort((a, b) => a.caption.localeCompare(b.caption));
+        const dcOptions = `<option value="">— pick one —</option>` +
+            dcs.map((d) => `<option value="${d.id}">${esc(d.caption)}</option>`).join('');
+        $('pf-v-dc').innerHTML = dcOptions;
+        $('pf-b-dc').innerHTML = dcOptions;
+
+        $('pf-v-stations').innerHTML = pickerHtml(
+            withVehicles.map((b) => ({ id: b.id, label: b.caption })), true);
+        $('pf-b-stations').innerHTML = pickerHtml(
+            allStations.map((b) => ({ id: b.id, label: b.caption })), true);
+
+        const vTypeCounts = new Map();
         for (const v of vehicles) {
-            const { id } = typeInfo(v);
-            typeCounts.set(id, (typeCounts.get(id) || 0) + 1);
+            const id = typeInfo(v).id;
+            vTypeCounts.set(id, (vTypeCounts.get(id) || 0) + 1);
         }
-        const typeIds = [...typeCounts.keys()].sort((a, b) => Number(a) - Number(b));
-        const sample = (id) => vehicles.find((v) => String(v.vehicle_type ?? '') === id);
+        const vTypeIds = [...vTypeCounts.keys()].sort((a, b) => Number(a) - Number(b));
+        const vSample = (id) => vehicles.find((v) => String(v.vehicle_type ?? '') === id);
 
-        function renderTypes() {
-            const unnamed = typeIds.filter((id) => !typeInfo(sample(id)).named).length;
+        const bTypeCounts = new Map();
+        for (const b of buildings) {
+            const id = buildingTypeInfo(b).id;
+            bTypeCounts.set(id, (bTypeCounts.get(id) || 0) + 1);
+        }
+        const bTypeIds = [...bTypeCounts.keys()].sort((a, b) => Number(a) - Number(b));
+        const bSample = (id) => buildings.find((b) => String(b.building_type ?? '') === id);
+
+        function renderPickers() {
+            $('pf-v-types').innerHTML = pickerHtml(vTypeIds.map((id) => ({
+                id, label: `${typeInfo(vSample(id)).name} (${vTypeCounts.get(id)})`,
+            })), true);
+            $('pf-b-types').innerHTML = pickerHtml(bTypeIds.map((id) => ({
+                id, label: `${buildingTypeInfo(bSample(id)).name} (${bTypeCounts.get(id)})`,
+            })), true);
+            updateCounts();
+        }
+
+        const checkedIds = (id) => [...$(id).querySelectorAll('input:checked')].map((i) => i.value);
+        function updateCounts() {
+            $('pf-v-stationcount').textContent = `(${checkedIds('pf-v-stations').length} of ${withVehicles.length})`;
+            $('pf-b-stationcount').textContent = `(${checkedIds('pf-b-stations').length} of ${allStations.length})`;
+            $('pf-v-typecount').textContent = `(${checkedIds('pf-v-types').length} of ${vTypeIds.length})`;
+            $('pf-b-typecount').textContent = `(${checkedIds('pf-b-types').length} of ${bTypeIds.length})`;
+        }
+
+        function renderTypeTable() {
+            const unnamed = vTypeIds.filter((id) => !typeInfo(vSample(id)).named).length;
             $('pf-types-summary').textContent = unnamed
-                ? ` — ${unnamed} of ${typeIds.length} still unnamed`
-                : ` — all ${typeIds.length} named`;
+                ? ` — ${unnamed} of ${vTypeIds.length} still unnamed`
+                : ` — all ${vTypeIds.length} named`;
             if (unnamed) $('pf-types-panel').open = true;
-
             $('pf-types-list').innerHTML = `<table class="table table-condensed">
           <thead><tr><th style="width:70px">Id</th><th style="width:90px">Vehicles</th><th>Name</th></tr></thead>
-          <tbody>${typeIds.map((id) => {
-                const info = typeInfo(sample(id));
-                const fixed = !!sample(id).vehicle_type_caption;
+          <tbody>${vTypeIds.map((id) => {
+                const info = typeInfo(vSample(id));
+                const fixed = !!vSample(id).vehicle_type_caption;
                 return `<tr data-type="${esc(id)}">
-              <td class="text-muted">${esc(id)}</td>
-              <td>${typeCounts.get(id)}</td>
+              <td class="text-muted">${esc(id)}</td><td>${vTypeCounts.get(id)}</td>
               <td>${fixed
                     ? `<span>${esc(info.name)}</span> <span class="text-muted">(custom type)</span>`
                     : `<input class="form-control input-sm" data-pf="type-name"
                          value="${esc(typeNames[id] || '')}"
                          placeholder="${esc(BUILTIN_TYPE_NAMES[id] || `Type ${id}`)}">
                        ${info.source === 'builtin'
-                        ? '<span class="text-muted" style="font-size:11px">built into the script</span>'
-                        : ''}`}</td>
-            </tr>`;
+                        ? '<span class="text-muted" style="font-size:11px">built into the script</span>' : ''}`}
+              </td></tr>`;
             }).join('')}</tbody></table>`;
-
-            typeSel.innerHTML = `<option value="">All types</option>` + typeIds.map((id) =>
-                `<option value="${esc(id)}">${esc(typeInfo(sample(id)).name)} (${typeCounts.get(id)})</option>`
-            ).join('');
         }
-        renderTypes();
+        renderTypeTable();
+        renderPickers();
 
+        // ---- tabs ----
+        modal.addEventListener('click', (e) => {
+            const a = e.target.closest('[data-pf="tab"]');
+            if (!a) return;
+            e.preventDefault();
+            tab = a.dataset.tab;
+            modal.querySelectorAll('.nav-tabs li').forEach((li) =>
+                li.classList.toggle('active', li.contains(a)));
+            modal.querySelectorAll('[data-pane]').forEach((p) => {
+                p.hidden = p.dataset.pane !== tab;
+            });
+            $('pf-shared').hidden = tab === 'data';
+            planned = [];
+            modal.querySelector('[data-pf="apply"]').disabled = true;
+            previewBox.innerHTML = '';
+            if (tab === 'building' && $('pf-pattern').value === '{building} {type} {nn}') {
+                $('pf-pattern').value = '{dc} {type} {nn}';
+            }
+        });
+
+        // ---- picker helpers ----
+        modal.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-pf="all"],[data-pf="none"]');
+            if (btn) {
+                e.preventDefault();
+                const on = btn.dataset.pf === 'all';
+                $(btn.dataset.for).querySelectorAll('input').forEach((i) => { i.checked = on; });
+                updateCounts();
+                return;
+            }
+            const stamp = e.target.closest('[data-pf="stamp-dc"]');
+            if (!stamp) return;
+            e.preventDefault();
+            // Stamp the dispatch center's stations onto the selection. It is a
+            // starting point, not a lock: every box stays clickable afterwards.
+            const which = stamp.dataset.for;
+            const dcId = Number($(which === 'vehicle' ? 'pf-v-dc' : 'pf-b-dc').value);
+            if (!dcId) {
+                status.textContent = 'Pick a dispatch center first.';
+                return;
+            }
+            const box = $(which === 'vehicle' ? 'pf-v-stations' : 'pf-b-stations');
+            let hit = 0;
+            box.querySelectorAll('input').forEach((i) => {
+                const b = byId.get(Number(i.value));
+                const belongs = b && (b.leitstelle_building_id === dcId || b.id === dcId);
+                i.checked = !!belongs;
+                if (belongs) hit++;
+            });
+            updateCounts();
+            status.textContent = `Selected ${hit} station${hit === 1 ? '' : 's'} of that dispatch center.`;
+        });
+        modal.addEventListener('change', (e) => {
+            if (e.target.closest('.pf-picker')) updateCounts();
+        });
+
+        // ---- type names ----
         $('pf-types-list').addEventListener('input', (e) => {
             if (e.target.dataset.pf !== 'type-name') return;
             const id = e.target.closest('tr').dataset.type;
             const name = e.target.value.trim();
             if (name) typeNames[id] = name; else delete typeNames[id];
-            writeTypeNames(typeNames);
-            const keep = typeSel.value;
-            $('pf-types-summary').textContent = '';
-            typeSel.innerHTML = `<option value="">All types</option>` + typeIds.map((tid) =>
-                `<option value="${esc(tid)}">${esc(typeInfo(sample(tid)).name)} (${typeCounts.get(tid)})</option>`
-            ).join('');
-            typeSel.value = keep;
+            writeStore(TYPES_KEY, typeNames);
+            renderPickers();
         });
 
-        // The map is worth keeping and sharing: fetched once, it can be pasted
-        // into another browser or sent on to be built into the script.
         modal.querySelector('[data-pf="copy-types"]').addEventListener('click', (e) => {
             e.preventDefault();
             const map = {};
-            for (const id of typeIds) {
-                const info = typeInfo(sample(id));
+            for (const id of vTypeIds) {
+                const info = typeInfo(vSample(id));
                 if (info.named) map[id] = info.name;
             }
-            const text = JSON.stringify(map, null, 2);
-            navigator.clipboard.writeText(text)
-                .then(() => {
-                    status.textContent = `Copied ${Object.keys(map).length} type names.`;
-                })
-                .catch(() => {
-                    previewBox.innerHTML =
-                        `<p class="help-block">Copy this by hand:</p>
-                         <textarea class="form-control" rows="10">${esc(text)}</textarea>`;
-                    status.textContent = 'Clipboard refused — the map is below.';
-                });
+            toClipboard(JSON.stringify(map, null, 1), `${Object.keys(map).length} type names`);
         });
 
         modal.querySelector('[data-pf="paste-types"]').addEventListener('click', (e) => {
@@ -457,21 +637,15 @@
                     added++;
                 }
             }
-            writeTypeNames(typeNames);
-            renderTypes();
+            writeStore(TYPES_KEY, typeNames);
+            renderTypeTable();
+            renderPickers();
             status.textContent = `Took ${added} name${added === 1 ? '' : 's'} from the pasted map.`;
         });
 
         modal.querySelector('[data-pf="fetch-types"]').addEventListener('click', async (e) => {
             e.preventDefault();
-            const locale = (() => {
-                try {
-                    const w = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
-                    return w.I18n?.locale || '';
-                } catch (err) {
-                    return '';
-                }
-            })();
+            const locale = gameLocale();
             if (!locale) {
                 status.innerHTML = '<span class="text-danger">Could not read the game language,'
                     + ' so the right names cannot be requested. Type them instead.</span>';
@@ -481,97 +655,228 @@
             try {
                 const data = await getTypeCatalogue(locale);
                 let filled = 0;
-                for (const id of typeIds) {
+                for (const id of vTypeIds) {
                     const caption = data[id]?.caption;
                     if (caption && !typeNames[id] && caption !== BUILTIN_TYPE_NAMES[id]) {
                         typeNames[id] = caption;
                         filled++;
                     }
                 }
-                writeTypeNames(typeNames);
-                renderTypes();
+                writeStore(TYPES_KEY, typeNames);
+                renderTypeTable();
+                renderPickers();
                 status.textContent = filled
                     ? `Filled in ${filled} name${filled === 1 ? '' : 's'}.`
                       + ' Check them, then "Copy type map" keeps them for good.'
-                    : 'That service knew none of your type ids — type the names instead.';
+                    : 'Nothing new — the names you have already cover your fleet.';
             } catch (err) {
                 status.innerHTML = `<span class="text-danger">Could not reach the name service`
                     + ` (${esc(err.message)}). Type the names instead.</span>`;
             }
         });
 
-        const selected = () => {
-            const bId = buildingSel.value;
-            const type = typeSel.value;
-            return vehicles.filter((v) =>
-                (!bId || String(v.building_id) === bId) &&
-                (!type || String(v.vehicle_type ?? '') === type));
-        };
+        function toClipboard(text, what) {
+            $('pf-dump').value = text;
+            navigator.clipboard.writeText(text)
+                .then(() => { status.textContent = `Copied ${what}.`; })
+                .catch(() => { status.textContent = `Clipboard refused — the text is in the box below.`; });
+        }
 
-        modal.querySelector('[data-pf="preview"]').addEventListener('click', () => {
-            const pattern = $('pf-pattern').value;
-            const rows = selected();
-            // The counter restarts per station, which is what people expect.
-            const perBuilding = new Map();
-            planned = rows.map((v) => {
-                const i = perBuilding.get(v.building_id) ?? 0;
-                perBuilding.set(v.building_id, i + 1);
-                return { vehicle: v, to: applyPattern(pattern, v, i, buildings) };
-            }).filter((r) => r.to && r.to !== r.vehicle.caption);
-
-            const usesType = /\{type\}/.test(pattern);
-            const unnamedHit = usesType && planned.some((r) => !typeInfo(r.vehicle).named);
-            showPlan(rows.length, 'Apply');
-            if (unnamedHit) {
-                previewBox.insertAdjacentHTML('afterbegin',
-                    '<div class="alert alert-warning">Some of these use a type that has no name yet,'
-                    + ' so they would be called <b>Type &lt;number&gt;</b>. Fill the names in above first.</div>');
+        // ---- data buttons ----
+        modal.addEventListener('click', async (e) => {
+            const btn = e.target.closest('[data-pf="dump"]');
+            if (!btn) return;
+            e.preventDefault();
+            const what = btn.dataset.what;
+            if (what === 'vehicle-types') {
+                const rows = vTypeIds.map((id) => ({
+                    id: Number(id), vehicles: vTypeCounts.get(id),
+                    name: typeInfo(vSample(id)).named ? typeInfo(vSample(id)).name : null,
+                }));
+                toClipboard(JSON.stringify(rows, null, 1), 'the vehicle types');
+            } else if (what === 'building-types') {
+                const rows = bTypeIds.map((id) => ({
+                    id: Number(id), stations: bTypeCounts.get(id),
+                    name: buildingTypeInfo(bSample(id)).named ? buildingTypeInfo(bSample(id)).name : null,
+                    example: bSample(id).caption,
+                    small: !!bSample(id).small_building,
+                }));
+                toClipboard(JSON.stringify(rows, null, 1), 'the station types');
+            } else if (what === 'dispatch') {
+                const rows = dcs.map((d) => ({
+                    dispatchCenter: d.caption,
+                    stations: buildings.filter((b) => b.leitstelle_building_id === d.id)
+                        .map((b) => b.caption),
+                }));
+                const loose = buildings.filter((b) => !b.leitstelle_building_id
+                    && !dcs.some((d) => d.id === b.id)).map((b) => b.caption);
+                toClipboard(JSON.stringify({ dispatchCenters: rows, withoutDispatchCenter: loose }, null, 1),
+                    `${rows.length} dispatch centers`);
+            } else if (what === 'missions') {
+                status.textContent = 'Checking /einsaetze.json…';
+                try {
+                    const data = await getJSON('/einsaetze.json');
+                    const summary = {
+                        shape: Array.isArray(data) ? 'array' : typeof data,
+                        count: Array.isArray(data) ? data.length : Object.keys(data).length,
+                        firstEntry: Array.isArray(data) ? data[0] : Object.entries(data)[0],
+                    };
+                    toClipboard(JSON.stringify(summary, null, 1), 'the mission list check');
+                } catch (err) {
+                    toClipboard(JSON.stringify({ error: err.message }, null, 1), 'the error');
+                }
+            } else if (what === 'selfcheck') {
+                toClipboard(JSON.stringify(await selfCheck(), null, 1), 'the self-check');
             }
         });
+
+        // ---- preview and apply ----
+        function currentRows() {
+            if (tab === 'building') {
+                const stations = new Set(checkedIds('pf-b-stations').map(Number));
+                const types = new Set(checkedIds('pf-b-types'));
+                return buildings
+                    .filter((b) => stations.has(b.id) && types.has(buildingTypeInfo(b).id))
+                    .sort((a, b) => a.caption.localeCompare(b.caption));
+            }
+            const stations = new Set(checkedIds('pf-v-stations').map(Number));
+            const types = new Set(checkedIds('pf-v-types'));
+            return vehicles.filter((v) =>
+                stations.has(v.building_id) && types.has(typeInfo(v).id));
+        }
+
+        function planFor(pattern) {
+            const kind = tab === 'building' ? 'building' : 'vehicle';
+            const max = LIMITS[kind].max;
+            const rows = currentRows();
+            const scopeOf = kind === 'building'
+                ? (b) => ({ default: 'all', type: buildingTypeInfo(b).id, dc: String(b.leitstelle_building_id || '') })
+                : (v) => ({ default: String(v.building_id), type: typeInfo(v).id,
+                    dc: String(byId.get(v.building_id)?.leitstelle_building_id || '') });
+
+            const plan = assignIndexes(rows, scopeOf).map(({ row, indexes }) => {
+                const tokens = kind === 'building'
+                    ? { type: buildingTypeInfo(row).name, typeid: String(row.building_type ?? ''),
+                        building: row.caption, dc: dcName(row), id: String(row.id), name: row.caption }
+                    : { type: typeInfo(row).name, typeid: String(row.vehicle_type ?? ''),
+                        building: byId.get(row.building_id)?.caption || '',
+                        dc: dcName(byId.get(row.building_id)), id: String(row.id),
+                        name: row.caption };
+                return {
+                    entity: row,
+                    from: kind === 'building' ? row.caption : row.caption,
+                    to: expandPattern(pattern, indexes, tokens, max),
+                };
+            });
+            return { kind, rows, plan };
+        }
 
         function showPlan(considered, verb) {
             const applyBtn = modal.querySelector('[data-pf="apply"]');
             applyBtn.disabled = planned.length === 0;
             applyBtn.textContent = planned.length
-                ? `${verb} ${planned.length} vehicle${planned.length === 1 ? '' : 's'}`
-                : verb;
+                ? `${verb} ${planned.length}` : verb;
             applyBtn.classList.toggle('btn-warning', verb === 'Undo');
             applyBtn.classList.toggle('btn-danger', verb !== 'Undo');
             status.textContent = planned.length
                 ? `${planned.length} of ${considered} would change.`
                 : `Nothing would change in those ${considered}.`;
-
             previewBox.innerHTML = planned.length ? `
         <table class="table table-condensed">
           <thead><tr><th>Now</th><th>Becomes</th></tr></thead>
           <tbody>${planned.slice(0, 200).map((r) => `
-            <tr><td>${esc(r.vehicle.caption)}</td><td><b>${esc(r.to)}</b></td></tr>`).join('')}
+            <tr><td>${esc(r.from)}</td><td><b>${esc(r.to)}</b></td></tr>`).join('')}
           </tbody>
         </table>${planned.length > 200
             ? `<p class="help-block">…and ${planned.length - 200} more.</p>` : ''}` : '';
         }
 
+        modal.querySelector('[data-pf="preview"]').addEventListener('click', (e) => {
+            e.preventDefault();
+            const pattern = $('pf-pattern').value;
+            const { kind, rows, plan } = planFor(pattern);
+            plannedKind = kind;
+            planned = plan.filter((r) => r.to && r.to !== r.from);
+            showPlan(rows.length, 'Apply');
+
+            const warn = [];
+            if (/\{type\}/.test(pattern)) {
+                const unnamed = kind === 'building'
+                    ? planned.some((r) => !buildingTypeInfo(r.entity).named)
+                    : planned.some((r) => !typeInfo(r.entity).named);
+                if (unnamed) {
+                    warn.push('Some of these use a type that has no name yet, so they would be'
+                        + ' called <b>Type &lt;number&gt;</b>. Name them first.');
+                }
+            }
+            if (/\{dc\}/.test(pattern) && planned.some((r) => {
+                const b = kind === 'building' ? r.entity : byId.get(r.entity.building_id);
+                return !dcName(b);
+            })) {
+                warn.push('Some of these are in no dispatch center, so <b>{dc}</b> would be empty for them.');
+            }
+            const dup = new Map();
+            for (const r of planned) dup.set(r.to, (dup.get(r.to) || 0) + 1);
+            const clashes = [...dup.entries()].filter(([, n]) => n > 1);
+            if (clashes.length) {
+                warn.push(`This pattern gives <b>${clashes.length}</b> name${clashes.length === 1 ? '' : 's'}`
+                    + ' to more than one of them. Add a counter to tell them apart.');
+            }
+            if (warn.length) {
+                previewBox.insertAdjacentHTML('afterbegin',
+                    `<div class="alert alert-warning">${warn.join('<br>')}</div>`);
+            }
+        });
+
+        // ---- undo ----
+        const backups = readBackups();
+        const restoreBox = $('pf-restore');
+        if (backups.length) {
+            const newest = backups[0];
+            restoreBox.innerHTML = `
+        <div class="alert alert-info">
+          Last rename: <b>${esc(new Date(newest.at).toLocaleString())}</b>,
+          ${newest.entries.length} ${esc(KIND_NOUN[newest.kind] || 'vehicle')}${newest.entries.length === 1 ? '' : 's'}.
+          <button class="btn btn-xs btn-default" data-pf="undo">Preview undo</button>
+          <button class="btn btn-xs btn-link" data-pf="copy-backup">Copy backup</button>
+        </div>`;
+            restoreBox.querySelector('[data-pf="copy-backup"]').addEventListener('click', (e) => {
+                e.preventDefault();
+                toClipboard(JSON.stringify(newest, null, 1), 'the backup');
+            });
+            restoreBox.querySelector('[data-pf="undo"]').addEventListener('click', (e) => {
+                e.preventDefault();
+                plannedKind = newest.kind || 'vehicle';
+                const pool = plannedKind === 'building' ? byId : new Map(vehicles.map((v) => [v.id, v]));
+                planned = newest.entries
+                    .map((en) => ({ entity: pool.get(en.id), from: pool.get(en.id)?.caption, to: en.from }))
+                    .filter((r) => r.entity && r.to && r.to !== r.from);
+                showPlan(newest.entries.length, 'Undo');
+            });
+        }
+        if (undoMode) restoreBox.querySelector('[data-pf="undo"]')?.click();
+
         modal.querySelector('[data-pf="apply"]').addEventListener('click', async (e) => {
+            e.preventDefault();
             const btn = e.target;
             if (!planned.length) return;
-            if (!confirm(
-                `Rename ${planned.length} vehicles?\n\n` +
-                `This writes to your account. The old names are saved in this ` +
-                `browser so you can undo it, but check the preview first.`)) return;
+            const noun = KIND_NOUN[plannedKind] + 's';
+            if (!confirm(`Rename ${planned.length} ${noun}?\n\n`
+                + `This writes to your account. The old names are saved in this browser `
+                + `so you can undo it, but check the preview first.`)) return;
 
-            const saved = writeBackup(planned.map(
-                ({ vehicle, to }) => ({ id: vehicle.id, from: vehicle.caption, to })));
-
+            const saved = writeBackup(plannedKind,
+                planned.map((r) => ({ id: r.entity.id, from: r.from, to: r.to })));
             btn.disabled = true;
             let done = 0;
             const failed = [];
-            for (const { vehicle, to } of planned) {
+            for (const { entity, to } of planned) {
                 status.textContent = `Renaming ${done + 1} of ${planned.length}…`;
                 try {
-                    await renameVehicle(vehicle.id, to);
+                    await renameEntity(plannedKind, entity.id, to);
                     done++;
                 } catch (err) {
-                    failed.push(`${vehicle.caption}: ${err.message}`);
+                    failed.push(`${entity.caption}: ${err.message}`);
                 }
                 await sleep(DELAY_MS);
             }
@@ -590,19 +895,14 @@
         });
     }
 
-    // ---- getting in ----
-    // The navbar markup was never verified against the live game, so the
-    // floating button is the one that must always work. It is deliberately
-    // impossible to miss: if you cannot see it, the script is not running.
-
+    // ---------- getting in ----------
     function addFloatingButton() {
-        if (document.getElementById('pf-renamer-fab')) return;
-        if (!document.body) return;
+        if ($('pf-renamer-fab') || !document.body) return;
         const btn = document.createElement('button');
         btn.id = 'pf-renamer-fab';
         btn.type = 'button';
-        btn.textContent = 'Rename vehicles';
-        btn.title = 'MissionChief Vehicle Renamer';
+        btn.textContent = 'Renamer';
+        btn.title = 'MissionChief Renamer';
         btn.style.cssText =
             'position:fixed;right:14px;bottom:14px;z-index:2147483000;'
             + 'padding:9px 14px;border-radius:999px;border:0;cursor:pointer;'
@@ -613,7 +913,7 @@
     }
 
     function addMenuEntry() {
-        if (document.getElementById('pf-renamer-entry')) return;
+        if ($('pf-renamer-entry')) return;
         const menu = document.querySelector('#menu_profile + .dropdown-menu')
             || document.querySelector('.navbar-nav .dropdown-menu');
         if (!menu) return;
@@ -621,9 +921,9 @@
         li.id = 'pf-renamer-entry';
         const a = document.createElement('a');
         a.href = '#';
-        a.textContent = 'Vehicle Renamer';
-        a.addEventListener('click', (e) => {
-            e.preventDefault();
+        a.textContent = 'Renamer';
+        a.addEventListener('click', (ev) => {
+            ev.preventDefault();
             openRenamer();
         });
         li.append(a);
@@ -631,7 +931,7 @@
     }
 
     if (typeof GM_registerMenuCommand === 'function') {
-        GM_registerMenuCommand('Rename vehicles', () => openRenamer());
+        GM_registerMenuCommand('Rename vehicles and stations', () => openRenamer());
         GM_registerMenuCommand('Undo last rename', () => openRenamer(true));
     }
 
@@ -643,28 +943,23 @@
     document.addEventListener('DOMContentLoaded', mount);
     setInterval(mount, 5000);
 
-    /**
-     * Self-check. Run pfRenamerCheck() in the console when something is wrong:
-     * it says whether the script is loaded, what the page is, and whether the
-     * two endpoints it depends on actually answer on this game.
-     */
     async function selfCheck() {
         const out = {
-            script: 'MissionChief Vehicle Renamer 1.2.0 is running',
+            script: 'MissionChief Renamer 2.0.0 is running',
             url: location.href,
-            buttonOnPage: !!document.getElementById('pf-renamer-fab'),
-            menuEntryOnPage: !!document.getElementById('pf-renamer-entry'),
+            locale: gameLocale() || '(not readable)',
+            buttonOnPage: !!$('pf-renamer-fab'),
         };
         for (const path of ['/api/vehicles', '/api/buildings']) {
             try {
                 const res = await fetch(path, { credentials: 'include' });
                 const body = await res.text();
-                let count = 'not an array';
+                let count;
                 try {
                     const json = JSON.parse(body);
                     count = Array.isArray(json) ? `${json.length} entries`
                         : `object with keys: ${Object.keys(json).slice(0, 6).join(', ')}`;
-                } catch (e) {
+                } catch (err) {
                     count = `not JSON — starts with: ${body.slice(0, 60)}`;
                 }
                 out[path] = `HTTP ${res.status}, ${count}`;
@@ -672,17 +967,17 @@
                 out[path] = `request failed: ${err.message}`;
             }
         }
-        console.log('%c Vehicle Renamer self-check ', 'background:#2f4490;color:#fff', out);
         return out;
     }
 
     try {
         const w = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
         w.pfRenamer = openRenamer;
-        w.pfRenamerCheck = selfCheck;
+        w.pfRenamerCheck = () => selfCheck().then((r) => {
+            console.log('%c Renamer self-check ', 'background:#2f4490;color:#fff', r);
+            return r;
+        });
     } catch (e) {
         window.pfRenamer = openRenamer;
-        window.pfRenamerCheck = selfCheck;
     }
-
 })();
