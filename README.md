@@ -85,9 +85,10 @@ modules follow. Install by opening the raw file with Tampermonkey active:
 
     https://raw.githubusercontent.com/Kev7ke/pathfinder/claude/keen-hawking-g3z0ph/userscripts/ymca.user.js
 
-A **YMCA** button sits in the bottom right of the game; each module also gets a
-Tampermonkey menu entry. If that button is missing, the script is not running —
-that is the whole diagnosis.
+It adds a **YMCA** entry to the game's own navbar, next to Buildings and the
+rest. Opening it gives a lightbox with a tile per tool; Escape steps back to the
+tiles and again to close. If the navbar cannot be found a floating button
+appears instead, so "no way in at all" still means the script is not running.
 
 - **Pathfinder** reads your stations and the mission list live from the game, so
   it is never working from a snapshot.

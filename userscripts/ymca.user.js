@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.0
+// @version      0.0.1
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -675,7 +675,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.0',
+    version: '0.0.1',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -823,61 +823,85 @@ const WINDOW_ID = 'ymca-window';
 function styles() {
     return `
 #${WINDOW_ID}{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;
-  background:#f4f6f9;color:#141a21;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+  background:rgba(12,17,23,.55);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
 #${WINDOW_ID} *{box-sizing:border-box}
-#${WINDOW_ID} .ymca-bar{display:flex;align-items:center;gap:14px;padding:10px 16px;
-  background:#1d2733;color:#fff;flex:none}
+#${WINDOW_ID} .ymca-sheet{margin:auto;width:min(1100px,94vw);max-height:92vh;display:flex;
+  flex-direction:column;background:#fff;border-radius:6px;box-shadow:0 12px 50px rgba(0,0,0,.5);
+  overflow:hidden}
+#${WINDOW_ID} .ymca-bar{display:flex;align-items:center;gap:12px;padding:12px 16px;flex:none;
+  background:#2b3a4a;color:#fff}
 #${WINDOW_ID} .ymca-logo{font-weight:700;letter-spacing:.06em}
-#${WINDOW_ID} .ymca-logo small{font-weight:400;opacity:.65;margin-left:8px;letter-spacing:0}
+#${WINDOW_ID} .ymca-logo small{font-weight:400;opacity:.7;margin-left:8px;letter-spacing:0}
 #${WINDOW_ID} .ymca-spacer{flex:1}
+#${WINDOW_ID} .ymca-back{background:rgba(255,255,255,.14);border:0;color:#fff;border-radius:4px;
+  padding:5px 11px;cursor:pointer;font:600 13px/1.2 inherit}
+#${WINDOW_ID} .ymca-back:hover{background:rgba(255,255,255,.24)}
 #${WINDOW_ID} .ymca-close{background:none;border:0;color:#fff;font-size:26px;line-height:1;
-  cursor:pointer;padding:0 6px}
-#${WINDOW_ID} .ymca-body{flex:1;display:flex;min-height:0}
-#${WINDOW_ID} .ymca-side{width:216px;flex:none;background:#e7ebf1;border-right:1px solid #cfd7e1;
-  overflow:auto;padding:10px 0}
-#${WINDOW_ID} .ymca-side button{display:block;width:100%;text-align:left;background:none;border:0;
-  padding:10px 16px;cursor:pointer;font:inherit;color:#39424e;border-left:3px solid transparent}
-#${WINDOW_ID} .ymca-side button:hover{background:#dde3ea}
-#${WINDOW_ID} .ymca-side button[aria-current="true"]{background:#fff;color:#141a21;font-weight:600;
-  border-left-color:#2f4490}
-#${WINDOW_ID} .ymca-side button small{display:block;font-weight:400;color:#69737f;font-size:11.5px}
-#${WINDOW_ID} .ymca-main{flex:1;overflow:auto;padding:18px 20px;min-width:0}
+  cursor:pointer;padding:0 4px;opacity:.85}
+#${WINDOW_ID} .ymca-close:hover{opacity:1}
+#${WINDOW_ID} .ymca-main{flex:1;overflow:auto;padding:18px 20px;background:#f4f6f9;color:#141a21}
+
+/* the launcher */
+#${WINDOW_ID} .ymca-tiles{display:grid;gap:14px;
+  grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+#${WINDOW_ID} .ymca-tile{display:flex;flex-direction:column;gap:6px;text-align:left;
+  background:#fff;border:1px solid #d5dce5;border-radius:7px;padding:16px;cursor:pointer;
+  font:inherit;color:#141a21;transition:border-color .12s,box-shadow .12s}
+#${WINDOW_ID} .ymca-tile:hover{border-color:#2f4490;box-shadow:0 3px 14px rgba(47,68,144,.18)}
+#${WINDOW_ID} .ymca-tile .ymca-ico{width:34px;height:34px;color:#2f4490}
+#${WINDOW_ID} .ymca-tile b{font-size:15.5px}
+#${WINDOW_ID} .ymca-tile span{color:#5a6673;font-size:12.5px}
+#${WINDOW_ID} .ymca-tile.soon{opacity:.55;cursor:default}
+#${WINDOW_ID} .ymca-tile.soon:hover{border-color:#d5dce5;box-shadow:none}
+#${WINDOW_ID} .ymca-lead{margin:0 0 16px;color:#5a6673}
+
 #${WINDOW_ID} h2.ymca-h{margin:0 0 4px;font-size:19px}
 #${WINDOW_ID} p.ymca-sub{margin:0 0 16px;color:#5a6673;font-size:13px}
-#${WINDOW_ID} .ymca-btn{border:1px solid #c3ccd8;background:#fff;border-radius:6px;padding:7px 12px;
+#${WINDOW_ID} .ymca-btn{border:1px solid #c3ccd8;background:#fff;border-radius:4px;padding:7px 12px;
   cursor:pointer;font:600 13px/1.2 inherit;color:#141a21}
 #${WINDOW_ID} .ymca-btn:hover{background:#f0f3f7}
 #${WINDOW_ID} .ymca-btn.primary{background:#2f4490;border-color:#2f4490;color:#fff}
 #${WINDOW_ID} .ymca-btn.danger{background:#9e2b22;border-color:#9e2b22;color:#fff}
 #${WINDOW_ID} .ymca-btn:disabled{opacity:.5;cursor:default}
 #${WINDOW_ID} input,#${WINDOW_ID} select,#${WINDOW_ID} textarea{font:inherit;color:#141a21;
-  background:#fff;border:1px solid #c3ccd8;border-radius:6px;padding:6px 9px}
+  background:#fff;border:1px solid #c3ccd8;border-radius:4px;padding:6px 9px}
 #${WINDOW_ID} table{border-collapse:collapse;width:100%}
 #${WINDOW_ID} th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
   color:#69737f;border-bottom:1px solid #cfd7e1;padding:7px 9px;font-weight:600}
 #${WINDOW_ID} td{padding:7px 9px;border-bottom:1px solid #e6eaf0;vertical-align:top}
-#${WINDOW_ID} .ymca-card{background:#fff;border:1px solid #dde3ea;border-radius:9px;padding:14px;
+#${WINDOW_ID} .ymca-card{background:#fff;border:1px solid #dde3ea;border-radius:7px;padding:14px;
   margin-bottom:12px}
-#${WINDOW_ID} .ymca-note{border-left:3px solid #2f4490;background:#fff;border-radius:0 7px 7px 0;
+#${WINDOW_ID} .ymca-note{border-left:3px solid #2f4490;background:#fff;border-radius:0 5px 5px 0;
   padding:9px 12px;margin:8px 0;font-size:13px}
 #${WINDOW_ID} .ymca-note.warn{border-left-color:#8c6104;background:#fdf6e6}
 #${WINDOW_ID} .ymca-note.bad{border-left-color:#9e2b22;background:#fbeceb}
-#${WINDOW_ID} .ymca-status{font-size:12.5px;color:#5a6673;margin-left:10px}
+#${WINDOW_ID} .ymca-status{font-size:12.5px;opacity:.85;margin-left:6px}
 #${WINDOW_ID} .ymca-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
-#${WINDOW_ID} .ymca-pick{max-height:190px;overflow:auto;border:1px solid #cfd7e1;border-radius:6px;
+#${WINDOW_ID} .ymca-pick{max-height:190px;overflow:auto;border:1px solid #cfd7e1;border-radius:4px;
   padding:6px;background:#fff}
 #${WINDOW_ID} .ymca-pick label{display:block;font-weight:400;margin-bottom:3px;cursor:pointer}
-#${WINDOW_ID} code{background:#eef1f5;border-radius:4px;padding:1px 5px;font-size:12.5px}
+#${WINDOW_ID} code{background:#eef1f5;border-radius:3px;padding:1px 5px;font-size:12.5px}
 #ymca-fab{position:fixed;right:14px;bottom:14px;z-index:2147482000;padding:10px 16px;
   border-radius:999px;border:0;cursor:pointer;background:#2f4490;color:#fff;
   font:700 13px/1 system-ui,sans-serif;letter-spacing:.06em;box-shadow:0 2px 10px rgba(0,0,0,.35)}
-@media (max-width:700px){
-  #${WINDOW_ID} .ymca-body{flex-direction:column}
-  #${WINDOW_ID} .ymca-side{width:auto;display:flex;overflow-x:auto;padding:0;border-right:0;
-    border-bottom:1px solid #cfd7e1}
-  #${WINDOW_ID} .ymca-side button{white-space:nowrap;border-left:0;border-bottom:3px solid transparent}
-  #${WINDOW_ID} .ymca-side button small{display:none}
+@media (max-width:620px){
+  #${WINDOW_ID} .ymca-sheet{width:100vw;max-height:100vh;height:100%;border-radius:0}
+  #${WINDOW_ID} .ymca-tiles{grid-template-columns:1fr}
 }`;
+}
+
+/** Small, flat icons. A module may bring its own; these are the fallbacks. */
+const ICONS = {
+    pathfinder: '<path d="M4 28 L12 8 L18 20 L24 12 L30 28 Z"/>',
+    renamer: '<path d="M6 22 L20 8 L26 14 L12 28 H6 Z"/><path d="M6 30 H30"/>',
+    diagnostics: '<circle cx="15" cy="15" r="9"/><path d="M22 22 L30 30"/>',
+    default: '<rect x="6" y="6" width="9" height="9"/><rect x="19" y="6" width="9" height="9"/>'
+        + '<rect x="6" y="19" width="9" height="9"/><rect x="19" y="19" width="9" height="9"/>',
+};
+function iconFor(id) {
+    return `<svg class="ymca-ico" viewBox="0 0 34 34" fill="none" stroke="currentColor"
+    stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">
+    ${ICONS[id] || ICONS.default}</svg>`;
 }
 
 let current = null;
@@ -894,14 +918,14 @@ function openWindow(moduleId) {
     const win = document.createElement('div');
     win.id = WINDOW_ID;
     win.innerHTML = `
-    <div class="ymca-bar">
-      <span class="ymca-logo">YMCA <small>Your Mission Chief Alpha ${esc(YMCA.version)}</small></span>
-      <span class="ymca-spacer"></span>
-      <span class="ymca-status" id="ymca-bar-status"></span>
-      <button class="ymca-close" title="Close">&times;</button>
-    </div>
-    <div class="ymca-body">
-      <nav class="ymca-side" id="ymca-side"></nav>
+    <div class="ymca-sheet">
+      <div class="ymca-bar">
+        <button class="ymca-back" id="ymca-back" hidden>&larr; All tools</button>
+        <span class="ymca-logo">YMCA <small>Your Mission Chief Alpha ${esc(YMCA.version)}</small></span>
+        <span class="ymca-spacer"></span>
+        <span class="ymca-status" id="ymca-bar-status"></span>
+        <button class="ymca-close" title="Close">&times;</button>
+      </div>
       <main class="ymca-main" id="ymca-main"></main>
     </div>`;
     document.body.append(win);
@@ -912,20 +936,44 @@ function openWindow(moduleId) {
         document.body.style.overflow = '';
         document.removeEventListener('keydown', onKey);
     };
+    // Escape steps back the way the game's own lightboxes do: out of a tool
+    // first, out of the window only from the launcher.
     const onKey = (e) => {
-        if (e.key === 'Escape') close();
+        if (e.key !== 'Escape') return;
+        if (current) showLauncher(); else close();
     };
     win.querySelector('.ymca-close').addEventListener('click', close);
     document.addEventListener('keydown', onKey);
 
-    const side = win.querySelector('#ymca-side');
     const main = win.querySelector('#ymca-main');
+    const back = win.querySelector('#ymca-back');
+    back.addEventListener('click', () => showLauncher());
 
-    const show = (mod) => {
+    function showLauncher() {
+        current = null;
+        back.hidden = true;
+        setStatus('');
+        main.innerHTML = `<p class="ymca-lead">Pick a tool.</p>
+      <div class="ymca-tiles">
+        ${YMCA.modules.map((m) => `<button class="ymca-tile" data-mod="${esc(m.id)}">
+          ${iconFor(m.id)}<b>${esc(m.title)}</b><span>${esc(m.tagline || '')}</span>
+        </button>`).join('')}
+        <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
+          <span>This is where the next tools land.</span></div>
+      </div>`;
+        main.querySelectorAll('[data-mod]').forEach((b) => {
+            b.addEventListener('click', () => {
+                const mod = YMCA.modules.find((m) => m.id === b.dataset.mod);
+                if (mod) showModule(mod);
+            });
+        });
+    }
+
+    function showModule(mod) {
         current = mod.id;
+        YMCA.lastModule = mod.id;
+        back.hidden = false;
         writeStore(LS.ui, { last: mod.id });
-        [...side.children].forEach((b) =>
-            b.setAttribute('aria-current', b.dataset.mod === mod.id ? 'true' : 'false'));
         main.innerHTML = `<h2 class="ymca-h">${esc(mod.title)}</h2>
       <p class="ymca-sub">${esc(mod.description)}</p><div id="ymca-panel"></div>`;
         const panel = main.querySelector('#ymca-panel');
@@ -935,20 +983,17 @@ function openWindow(moduleId) {
         } catch (err) {
             logger.error(mod.id, 'failed to open', err.stack || err.message);
             panel.innerHTML = `<div class="ymca-note bad"><b>${esc(mod.title)} could not open.</b>
-        ${esc(err.message)}<br>Diagnostics → Copy report has the details.</div>`;
+        ${esc(err.message)}<br>Diagnostics \u2192 Copy problem report has the details.</div>`;
         }
-    };
-
-    for (const mod of YMCA.modules) {
-        const b = document.createElement('button');
-        b.dataset.mod = mod.id;
-        b.innerHTML = `${esc(mod.title)}<small>${esc(mod.tagline || '')}</small>`;
-        b.addEventListener('click', () => show(mod));
-        side.append(b);
     }
 
-    const wanted = moduleId || readStore(LS.ui, {}).last;
-    show(YMCA.modules.find((m) => m.id === wanted) || YMCA.modules[0]);
+    function setStatus(text) {
+        const el = win.querySelector('#ymca-bar-status');
+        if (el) el.textContent = text;
+    }
+
+    const wanted = moduleId && YMCA.modules.find((m) => m.id === moduleId);
+    if (wanted) showModule(wanted); else showLauncher();
 }
 
 /** What a module is handed. Nothing here touches the shell's own chrome. */
@@ -1594,6 +1639,8 @@ YMCA.register({
           report carries what YMCA did, what failed, your browser and the game it ran on
           &mdash; and nothing about your account beyond its station and vehicle counts.</p>
         <button class="ymca-btn primary" data-do="report">Copy problem report</button>
+        <button class="ymca-btn" data-do="feedback">Send feedback</button>
+        <button class="ymca-btn" data-do="ui">Copy interface probe</button>
         <button class="ymca-btn" data-do="clearlog">Clear the log</button>
       </div>
 
@@ -1651,6 +1698,59 @@ async function run(what, ctx, put) {
         return;
     }
 
+    if (what === 'feedback') {
+        const note = prompt('What is wrong, or what would you like YMCA to do?\n\n'
+            + 'Your note is packaged with the version, the page and the last log entries, '
+            + 'and copied to your clipboard. Nothing is sent anywhere by itself.');
+        if (!note) return;
+        put({
+            feedback: note,
+            ymca: YMCA.version,
+            at: new Date().toISOString(),
+            page: location.origin + location.pathname,
+            where: YMCA.lastModule || null,
+            log: YMCA.logger.read().slice(-25),
+        }, 'your feedback');
+        return;
+    }
+
+    if (what === 'ui') {
+        // Whoever styles YMCA cannot open the game. This reports what the game's
+        // own chrome actually looks like, so the window can match it instead of
+        // being guessed at.
+        const pick = (sel, props) => {
+            const el = document.querySelector(sel);
+            if (!el) return 'not on this page';
+            const cs = getComputedStyle(el);
+            return Object.fromEntries(props.map((p) => [p, cs.getPropertyValue(p)]));
+        };
+        const box = ['background-color', 'color', 'border-color', 'border-radius',
+            'font-family', 'font-size'];
+        put({
+            note: 'computed styles of the game\u2019s own chrome, for matching YMCA to it',
+            navbarSelectorsPresent: [
+                '#navbar-main-collapse > ul', '#navbar-main-collapse ul.navbar-nav',
+                '.navbar-fixed-top .navbar-nav', '.navbar-nav', '#navbar-mobile-footer',
+            ].filter((sel) => !!document.querySelector(sel)),
+            navbarEntryPlaced: !!document.getElementById('ymca-nav'),
+            usingFloatingButton: !!document.getElementById('ymca-fab'),
+            bootstrapPresent: !!document.querySelector('.navbar, .panel, .btn-default'),
+            body: pick('body', box),
+            navbar: pick('.navbar', box),
+            navbarLink: pick('.navbar-nav a', ['color', 'font-size', 'padding', 'font-weight']),
+            modal: pick('.modal-content', box),
+            modalHeader: pick('.modal-header', box),
+            panel: pick('.panel', box),
+            panelHeading: pick('.panel-heading', box),
+            buttonDefault: pick('.btn-default', box),
+            buttonPrimary: pick('.btn-primary', box),
+            table: pick('table.table', ['background-color', 'font-size']),
+            openLightboxes: [...document.querySelectorAll('.modal, .lightbox_content')]
+                .map((el) => el.className).slice(0, 5),
+        }, 'the interface probe');
+        return;
+    }
+
     if (what === 'report') {
         const report = {
             ymca: YMCA.version,
@@ -1666,6 +1766,8 @@ async function run(what, ctx, put) {
                 menu: typeof GM_registerMenuCommand === 'function',
             },
             modules: YMCA.modules.map((m) => m.id),
+            entryPoint: document.getElementById('ymca-nav') ? 'navbar'
+                : document.getElementById('ymca-fab') ? 'floating button' : 'none',
             endpoints: {},
             log: YMCA.logger.read().slice(-60),
         };
@@ -1801,7 +1903,50 @@ async function run(what, ctx, put) {
 // ---------- boot ----------
 YMCA.logger = logger;
 
-function mountLauncher() {
+/**
+ * Where YMCA lives in the page.
+ *
+ * The navbar entry is the one to have: it sits with the game's own menus, the
+ * way LSS-Manager does. The floating button is the fallback, and it only shows
+ * when the navbar could not be found — so "no way in" still means "not
+ * running" rather than "the markup moved".
+ */
+const NAV_SELECTORS = [
+    '#navbar-main-collapse > ul',
+    '#navbar-main-collapse ul.navbar-nav',
+    '.navbar-fixed-top .navbar-nav',
+    '.navbar-nav',
+];
+
+function mountNav() {
+    if (document.getElementById('ymca-nav')) return true;
+    let list = null;
+    let used = null;
+    for (const sel of NAV_SELECTORS) {
+        list = document.querySelector(sel);
+        if (list) { used = sel; break; }
+    }
+    if (!list) return false;
+    const li = document.createElement('li');
+    li.id = 'ymca-nav';
+    const a = document.createElement('a');
+    a.href = '#';
+    a.textContent = 'YMCA';
+    a.style.fontWeight = '700';
+    a.style.letterSpacing = '.06em';
+    li.append(a);
+    // On the li, not the anchor: the game's navbar items are padded by their
+    // list item, so a click can land either side of the text.
+    li.addEventListener('click', (e) => {
+        e.preventDefault();
+        openWindow();
+    });
+    list.append(li);
+    logger.info('shell', 'navbar entry placed', used);
+    return true;
+}
+
+function mountFab() {
     if (document.getElementById('ymca-fab') || !document.body) return;
     const btn = document.createElement('button');
     btn.id = 'ymca-fab';
@@ -1810,16 +1955,26 @@ function mountLauncher() {
     btn.title = 'Your Mission Chief Alpha';
     btn.addEventListener('click', () => openWindow());
     document.body.append(btn);
+    logger.warn('shell', 'navbar not found, using the floating button');
+}
+
+function mount() {
+    if (mountNav()) {
+        document.getElementById('ymca-fab')?.remove();
+    } else {
+        mountFab();
+    }
 }
 
 if (typeof GM_registerMenuCommand === 'function') {
+    GM_registerMenuCommand('Open YMCA', () => openWindow());
     for (const mod of YMCA.modules) {
         GM_registerMenuCommand(mod.title, () => openWindow(mod.id));
     }
 }
-mountLauncher();
-document.addEventListener('DOMContentLoaded', mountLauncher);
-setInterval(mountLauncher, 5000);
+mount();
+document.addEventListener('DOMContentLoaded', mount);
+setInterval(mount, 5000);
 
 try {
     const w = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);

@@ -15,7 +15,10 @@ const errs = [];
 pg.on('pageerror', (e) => errs.push(e.message));
 
 await pg.goto('http://localhost:8777/README.md');
-await pg.setContent('<html><body><p>game</p></body></html>');
+await pg.setContent(`<html><body>
+  <nav class="navbar navbar-fixed-top"><div id="navbar-main-collapse">
+    <ul class="nav navbar-nav"><li><a href="#">Buildings</a></li></ul>
+  </div></nav><p>game</p></body></html>`);
 
 await pg.evaluate(() => {
   window.__posts = [];
@@ -99,20 +102,37 @@ await pg.evaluate(() => {
 
 await pg.addScriptTag({ content: script });
 
-// ---- the shell ----
-const fab = pg.locator('#ymca-fab');
-assert.equal(await fab.count(), 1, 'the YMCA launcher was not added');
-assert.equal((await fab.textContent()).trim(), 'YMCA');
-await fab.click();
+// ---- the way in: the navbar, like LSS Manager ----
+const nav = pg.locator('#ymca-nav');
+assert.equal(await nav.count(), 1, 'no entry was added to the game navbar');
+assert.equal(await pg.locator('#ymca-fab').count(), 0,
+  'the floating button should stand down once the navbar entry is placed');
+console.log('entry point       : navbar entry, floating button withdrawn');
+await nav.click();
 await pg.waitForSelector('#ymca-window');
-const mods = await pg.$$eval('#ymca-side button', (b) => b.map((x) => x.dataset.mod));
-console.log('modules           :', JSON.stringify(mods));
-assert.deepEqual(mods, ['pathfinder', 'renamer', 'diagnostics']);
 
-const box = await pg.locator('#ymca-window').boundingBox();
-console.log('window            :', `${Math.round(box.width)}x${Math.round(box.height)} at ${box.x},${box.y}`);
-assert.equal(box.x, 0, 'the window should cover the screen');
-assert.equal(box.width, 1280, 'the window should be full width');
+// ---- the launcher: tiles first ----
+const tiles = await pg.$$eval('.ymca-tile[data-mod]', (b) => b.map((x) => x.dataset.mod));
+console.log('tiles             :', JSON.stringify(tiles));
+assert.deepEqual(tiles, ['pathfinder', 'renamer', 'diagnostics']);
+assert.equal(await pg.locator('#ymca-back').isVisible(), false,
+  'the back button should be hidden on the launcher');
+await pg.screenshot({ path: '/tmp/ymca-tiles.png' });
+
+await pg.click('.ymca-tile[data-mod="pathfinder"]');
+await pg.waitForSelector('#pf-state');
+assert.equal(await pg.locator('#ymca-back').isVisible(), true,
+  'the back button should appear inside a tool');
+
+// Escape steps back to the tiles rather than closing the window.
+await pg.keyboard.press('Escape');
+await pg.waitForTimeout(150);
+assert.equal(await pg.locator('.ymca-tile[data-mod]').count(), 3,
+  'Escape inside a tool should return to the launcher');
+assert.equal(await pg.locator('#ymca-window').count(), 1, 'Escape closed the whole window');
+console.log('escape            : tool \u2192 launcher, not straight out');
+await pg.click('.ymca-tile[data-mod="pathfinder"]');
+await pg.waitForSelector('#pf-state');
 
 // ---- Pathfinder, computed from live game data ----
 await pg.waitForFunction(() => document.querySelector('#pf-state')?.textContent.includes('fire'));
@@ -130,7 +150,8 @@ console.log('police next       :', (await pg.textContent('#pf-next')).replace(/\
 assert.ok((await pg.textContent('#pf-ladder')).includes('Riot'), 'the police path did not switch');
 
 // ---- Renamer ----
-await pg.click('#ymca-side button[data-mod="renamer"]');
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="renamer"]');
 await pg.waitForSelector('#rn-pattern');
 await pg.fill('#rn-pattern', '{building} {type} {x12nn}');
 await pg.click('[data-do="preview"]');
@@ -148,20 +169,42 @@ assert.equal(posts[0].entries.keep_this, 'preserve-me', 'an unrelated field was 
 console.log('rename save       :', JSON.stringify(posts[0].entries));
 
 // ---- Diagnostics ----
-await pg.click('#ymca-side button[data-mod="diagnostics"]');
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="diagnostics"]');
 await pg.waitForSelector('[data-do="report"]');
 await pg.evaluate(() => { navigator.clipboard.writeText = async () => {}; });
 await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.0');
+assert.equal(report.ymca, '0.0.1');
+assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
   'the log did not record what happened');
 assert.ok(!JSON.stringify(report).includes('Central Dispatch'),
   'the problem report must not carry building names');
 console.log('report endpoints  :', JSON.stringify(report.endpoints));
+
+// ---- the interface probe, which is how the styling gets matched ----
+await pg.click('[data-do="ui"]');
+await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('navbar'));
+const probe = JSON.parse(await pg.inputValue('#ymca-diag-out'));
+console.log('probe found       :', JSON.stringify(probe.navbarSelectorsPresent));
+assert.ok(probe.navbarSelectorsPresent.includes('#navbar-main-collapse > ul'));
+assert.equal(probe.navbarEntryPlaced, true);
+assert.equal(probe.usingFloatingButton, false);
+assert.ok(probe.navbar, 'the probe did not read the navbar styles');
+
+// ---- feedback ----
+await pg.evaluate(() => { window.prompt = () => 'the tiles are too small'; });
+await pg.click('[data-do="feedback"]');
+await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('feedback'));
+const fb = JSON.parse(await pg.inputValue('#ymca-diag-out'));
+console.log('feedback          :', JSON.stringify({ feedback: fb.feedback, where: fb.where }));
+assert.equal(fb.feedback, 'the tiles are too small');
+assert.equal(fb.where, 'diagnostics', 'feedback should record which tool was open');
+assert.ok(fb.log.length, 'feedback should carry the log');
 
 console.log('page errors       :', errs.length ? errs : 'none');
 assert.equal(errs.length, 0);

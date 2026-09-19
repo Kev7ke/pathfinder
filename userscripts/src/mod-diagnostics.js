@@ -53,6 +53,8 @@ YMCA.register({
           report carries what YMCA did, what failed, your browser and the game it ran on
           &mdash; and nothing about your account beyond its station and vehicle counts.</p>
         <button class="ymca-btn primary" data-do="report">Copy problem report</button>
+        <button class="ymca-btn" data-do="feedback">Send feedback</button>
+        <button class="ymca-btn" data-do="ui">Copy interface probe</button>
         <button class="ymca-btn" data-do="clearlog">Clear the log</button>
       </div>
 
@@ -110,6 +112,59 @@ async function run(what, ctx, put) {
         return;
     }
 
+    if (what === 'feedback') {
+        const note = prompt('What is wrong, or what would you like YMCA to do?\n\n'
+            + 'Your note is packaged with the version, the page and the last log entries, '
+            + 'and copied to your clipboard. Nothing is sent anywhere by itself.');
+        if (!note) return;
+        put({
+            feedback: note,
+            ymca: YMCA.version,
+            at: new Date().toISOString(),
+            page: location.origin + location.pathname,
+            where: YMCA.lastModule || null,
+            log: YMCA.logger.read().slice(-25),
+        }, 'your feedback');
+        return;
+    }
+
+    if (what === 'ui') {
+        // Whoever styles YMCA cannot open the game. This reports what the game's
+        // own chrome actually looks like, so the window can match it instead of
+        // being guessed at.
+        const pick = (sel, props) => {
+            const el = document.querySelector(sel);
+            if (!el) return 'not on this page';
+            const cs = getComputedStyle(el);
+            return Object.fromEntries(props.map((p) => [p, cs.getPropertyValue(p)]));
+        };
+        const box = ['background-color', 'color', 'border-color', 'border-radius',
+            'font-family', 'font-size'];
+        put({
+            note: 'computed styles of the game\u2019s own chrome, for matching YMCA to it',
+            navbarSelectorsPresent: [
+                '#navbar-main-collapse > ul', '#navbar-main-collapse ul.navbar-nav',
+                '.navbar-fixed-top .navbar-nav', '.navbar-nav', '#navbar-mobile-footer',
+            ].filter((sel) => !!document.querySelector(sel)),
+            navbarEntryPlaced: !!document.getElementById('ymca-nav'),
+            usingFloatingButton: !!document.getElementById('ymca-fab'),
+            bootstrapPresent: !!document.querySelector('.navbar, .panel, .btn-default'),
+            body: pick('body', box),
+            navbar: pick('.navbar', box),
+            navbarLink: pick('.navbar-nav a', ['color', 'font-size', 'padding', 'font-weight']),
+            modal: pick('.modal-content', box),
+            modalHeader: pick('.modal-header', box),
+            panel: pick('.panel', box),
+            panelHeading: pick('.panel-heading', box),
+            buttonDefault: pick('.btn-default', box),
+            buttonPrimary: pick('.btn-primary', box),
+            table: pick('table.table', ['background-color', 'font-size']),
+            openLightboxes: [...document.querySelectorAll('.modal, .lightbox_content')]
+                .map((el) => el.className).slice(0, 5),
+        }, 'the interface probe');
+        return;
+    }
+
     if (what === 'report') {
         const report = {
             ymca: YMCA.version,
@@ -125,6 +180,8 @@ async function run(what, ctx, put) {
                 menu: typeof GM_registerMenuCommand === 'function',
             },
             modules: YMCA.modules.map((m) => m.id),
+            entryPoint: document.getElementById('ymca-nav') ? 'navbar'
+                : document.getElementById('ymca-fab') ? 'floating button' : 'none',
             endpoints: {},
             log: YMCA.logger.read().slice(-60),
         };

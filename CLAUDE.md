@@ -68,9 +68,24 @@ the Pathfinder reads `/einsaetze.json` live, so it can never be stale.
 
 ### The shell
 
-One full-screen window, like the game's own lightboxes. A sidebar lists modules;
-the main area is the module's panel. Escape closes it. A floating **YMCA** button
-sits bottom right and every module also registers a Tampermonkey menu entry.
+A centred lightbox over a dimmed page, the way the game's own popups work. It
+opens on a **launcher of tiles** — one per module — and picking a tile swaps the
+panel for that module, with a **← All tools** button in the title bar.
+
+**Escape steps back, it does not slam the door.** Inside a tool it returns to the
+tiles; on the tiles it closes the window. That is how the game's lightboxes
+behave and people expect it.
+
+**Getting in.** The entry is an item in the game's own navbar, placed the way
+LSS-Manager does it, tried against `#navbar-main-collapse > ul` first and then
+three narrower fallbacks. The floating button only appears when none of them
+matched, and withdraws as soon as the navbar entry lands — so "no way in" still
+means "not running" rather than "the markup moved". Which one was used is in the
+problem report as `entryPoint`, and every module also registers a Tampermonkey
+menu entry.
+
+The click handler sits on the `<li>`, not the `<a>`: the game pads its navbar
+items by the list item, so a click can land either side of the text.
 
 ### Writing a module
 
@@ -106,9 +121,11 @@ panel and is logged — it never takes the window down with it.
 
 1. Write `userscripts/src/mod-<name>.js` with one `YMCA.register` call.
 2. Add it to the `parts` list in `tools/build_ymca.mjs`.
-3. Bump `VERSION` by 0.0.1.
-4. Extend `userscripts/ymca.test.mjs` to open it and assert something real.
-5. `npm run build:ymca && npm test && node userscripts/ymca.test.mjs`.
+3. Give it a tile icon in `ICONS` in `shell.js`, keyed by module id. Without one
+   it falls back to a generic glyph, which is fine but looks unfinished.
+4. Bump `VERSION` by 0.0.1.
+5. Extend `userscripts/ymca.test.mjs` to open its tile and assert something real.
+6. `npm run build:ymca && npm test && node userscripts/ymca.test.mjs`.
 
 ---
 
@@ -119,8 +136,16 @@ close that gap, and **every new module should add whatever button would let a
 question about it be answered with the game's own data.**
 
 - **Copy problem report** — version, page, browser, script manager, which grants
-  are present, the module list, endpoint reachability and the last 60 log
-  entries. Deliberately carries **no** building names or coordinates.
+  are present, how YMCA was reached, the module list, endpoint reachability and
+  the last 60 log entries. Deliberately carries **no** building names or
+  coordinates.
+- **Send feedback** — a typed note packaged with the version, the page, which
+  tool was open and the last 25 log entries. Nothing is transmitted; it lands on
+  the clipboard for the player to paste wherever they like.
+- **Copy interface probe** — the computed styles of the game's own navbar,
+  modal, panel and buttons, plus which navbar selectors exist on this page.
+  **This is how YMCA gets styled to match the game.** Whoever works on the look
+  cannot open the game, so the alternative is guessing at colours.
 - **Download everything** — every endpoint, into one file. This one *does* carry
   the player's name, alliance and building coordinates, so it is described as
   such and is never committed to the repo.

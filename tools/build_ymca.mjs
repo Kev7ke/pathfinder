@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.0';
+export const VERSION = '0.0.1';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -58,7 +58,50 @@ const BOOT = `
 // ---------- boot ----------
 YMCA.logger = logger;
 
-function mountLauncher() {
+/**
+ * Where YMCA lives in the page.
+ *
+ * The navbar entry is the one to have: it sits with the game's own menus, the
+ * way LSS-Manager does. The floating button is the fallback, and it only shows
+ * when the navbar could not be found — so "no way in" still means "not
+ * running" rather than "the markup moved".
+ */
+const NAV_SELECTORS = [
+    '#navbar-main-collapse > ul',
+    '#navbar-main-collapse ul.navbar-nav',
+    '.navbar-fixed-top .navbar-nav',
+    '.navbar-nav',
+];
+
+function mountNav() {
+    if (document.getElementById('ymca-nav')) return true;
+    let list = null;
+    let used = null;
+    for (const sel of NAV_SELECTORS) {
+        list = document.querySelector(sel);
+        if (list) { used = sel; break; }
+    }
+    if (!list) return false;
+    const li = document.createElement('li');
+    li.id = 'ymca-nav';
+    const a = document.createElement('a');
+    a.href = '#';
+    a.textContent = 'YMCA';
+    a.style.fontWeight = '700';
+    a.style.letterSpacing = '.06em';
+    li.append(a);
+    // On the li, not the anchor: the game's navbar items are padded by their
+    // list item, so a click can land either side of the text.
+    li.addEventListener('click', (e) => {
+        e.preventDefault();
+        openWindow();
+    });
+    list.append(li);
+    logger.info('shell', 'navbar entry placed', used);
+    return true;
+}
+
+function mountFab() {
     if (document.getElementById('ymca-fab') || !document.body) return;
     const btn = document.createElement('button');
     btn.id = 'ymca-fab';
@@ -67,16 +110,26 @@ function mountLauncher() {
     btn.title = 'Your Mission Chief Alpha';
     btn.addEventListener('click', () => openWindow());
     document.body.append(btn);
+    logger.warn('shell', 'navbar not found, using the floating button');
+}
+
+function mount() {
+    if (mountNav()) {
+        document.getElementById('ymca-fab')?.remove();
+    } else {
+        mountFab();
+    }
 }
 
 if (typeof GM_registerMenuCommand === 'function') {
+    GM_registerMenuCommand('Open YMCA', () => openWindow());
     for (const mod of YMCA.modules) {
         GM_registerMenuCommand(mod.title, () => openWindow(mod.id));
     }
 }
-mountLauncher();
-document.addEventListener('DOMContentLoaded', mountLauncher);
-setInterval(mountLauncher, 5000);
+mount();
+document.addEventListener('DOMContentLoaded', mount);
+setInterval(mount, 5000);
 
 try {
     const w = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
