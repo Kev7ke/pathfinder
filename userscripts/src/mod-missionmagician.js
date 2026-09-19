@@ -19,17 +19,31 @@
  * and an `input[name="commit"]` submit labelled Dispatch, beside `.alert_next`
  * and `.alert_next_alliance`. `#mission_general_info` holds the header and
  * `#missing_text` the missing-vehicle line, as text with no child elements.
- * `.aao` buttons are present; `#mission_aao_group` is not.
  *
  * That is the safe-write shape already: tick the game's own boxes, submit the
  * game's own form. Nothing has to be hand-built.
  *
- * What it did not settle is what *holds* the checkboxes — the table is neither
- * `#vehicle_show_table_body` nor `table.vehicle_table` — and how a row says
- * which vehicle type it is. Both are needed to match a row against the
- * requirements, which come from /einsaetze.json rather than from reading the
- * page's text. So the capture no longer guesses at container names: it walks up
- * from a checkbox and reports what it passes.
+ * WHERE THAT PAGE LIVES, which was the confusing part. On the big map the
+ * mission window is an iframe, so the address bar still says "/" while the
+ * mission is on screen. YMCA is not locked out of it — the userscript's @match
+ * covers frames, so YMCA boots a second time *inside* that iframe, which is
+ * why the capture that worked reported "/missions/505949001". Reaching across
+ * from the parent is therefore never necessary, and jxn-30/LSS-Scripts does
+ * the same thing: its mission scripts match /missions/* and simply run in the
+ * frame.
+ *
+ * So the rule for this module is: it belongs inside the mission frame. Open
+ * the mission first, then open YMCA — on the big map that means the floating
+ * button, because the frame has no navbar of its own.
+ *
+ * WHAT THE VEHICLE LIST IS CALLED, read out of jxn-30/LSS-Scripts rather than
+ * guessed: `#vehicle_show_table_body_all` holds the rows, a row is
+ * `.vehicle_select_table_tr`, the checkbox is `.vehicle_checkbox` with the id
+ * `vehicle_checkbox_<vehicleId>`, and it carries a plain `vehicle_type_id`
+ * attribute — not a data attribute, which is why the first capture missed it.
+ * The alarm button is `#mission_alarm_btn`. All of that still has to be seen
+ * on a real page before anything ticks a box, which is what the capture below
+ * is for.
  * -------------------------------------------------------------------------- */
 
 YMCA.register({
@@ -44,11 +58,11 @@ YMCA.register({
         const cfg = ctx.store.read('cfg', { enabled: false, showTable: true, confirmBeforeAlarm: true });
 
         el.innerHTML = `
-      <div class="ymca-note warn"><b>Not working yet</b>, but half-known now. The first capture
-        showed the dispatch is a normal form — the game's own checkboxes and its own Dispatch
-        button — so nothing will ever have to be hand-built. What is still missing is what holds
-        those checkboxes and how a row says which vehicle type it is. One more capture, below,
-        and that is answered.</div>
+      <div class="ymca-note warn"><b>Not working yet</b>, but the hard parts are known. The
+        dispatch is a normal form — the game's own checkboxes and its own Dispatch button — so
+        nothing will ever have to be hand-built. And the mission window on the big map is an
+        iframe, which YMCA runs inside rather than reaching into. What is left is to see the
+        vehicle list once on your page. One capture, below.</div>
 
       <div class="ymca-card">
         <b>Settings</b>
@@ -64,13 +78,15 @@ YMCA.register({
 
       <div class="ymca-card">
         <b>The one capture still needed</b>
-        <p class="ymca-sub" style="margin:4px 0 10px">The order matters, because YMCA is a
-          lightbox and clicking a mission navigates away from it:</p>
+        <p class="ymca-sub" style="margin:4px 0 10px">On the big map the mission opens in a frame
+          of its own, and YMCA runs inside that frame as well as outside it. So:</p>
         <ol class="ymca-sub" style="margin:0 0 10px;padding-left:20px">
-          <li>Close this window and click a mission in your list, so the mission itself is on
-            screen — the page with the vehicle table and the alarm button.</li>
-          <li>Open YMCA again from the navbar, <b>on that page</b>, and come back here.</li>
-          <li>Press the button.</li>
+          <li>Close this window and open a mission — ideally one where <b>vehicles are still
+            missing</b>, so there is a full vehicle list to describe.</li>
+          <li>With the mission on screen, open YMCA again. Inside the mission frame there is no
+            navbar, so it is the <b>floating YMCA button</b> you want, not the menu entry.</li>
+          <li>Come back here and press the button. If it says the page was wrong, YMCA was opened
+            from the map rather than from inside the mission.</li>
         </ol>
         <p class="ymca-sub" style="margin:0 0 10px">It copies the <i>structure</i> of that page —
           element names, classes and the shape of the vehicle list — and no mission text,
@@ -78,10 +94,10 @@ YMCA.register({
         <button class="ymca-btn primary" data-do="capture">Capture this mission window</button>
         <span class="ymca-status" id="mm-status"></span>
         <div class="ymca-note warn" id="mm-wrongpage" hidden style="margin-top:10px">
-          <b>That was not a mission page.</b> Nothing was copied, because there was nothing on it
-          worth sending — the capture found none of the mission markup, only the mission list's
-          own category buttons. Do step 1 above first: click a mission so its page is open, and
-          only then open YMCA and press this.</div>
+          <b>That was not the mission frame.</b> Nothing was copied, because there was nothing on
+          this page worth sending — no mission markup, only the mission list's own category
+          buttons. This is YMCA running on the map. Open the mission, then open YMCA with the
+          floating button <i>inside</i> the mission frame, and press this there.</div>
         <textarea id="mm-out" rows="12" readonly style="width:100%;margin-top:10px;
           font-family:ui-monospace,monospace;font-size:11.5px"></textarea>
       </div>`;
@@ -141,8 +157,9 @@ function captureMissionWindow() {
         '.mission_header', '#mission_vehicle_driving', '#vehicle_show_table_body',
         'table.vehicle_table', '#mission_vehicle_amount', '#mission_aao_group',
         'form#vehicle_select', '#vehicle_list',
-        // Not yet looked for.
-        '#mission_help', '.mission_help', '#vehicle_show_table', '.vehicle_select_table',
+        // Named by jxn-30/LSS-Scripts, not yet seen on this player's page.
+        '#vehicle_show_table_body_all', '.vehicle_select_table_tr', '#mission_alarm_btn',
+        '#vehicle_list_step', '.vehicle_checkbox[vehicle_type_id]',
     ];
     const seen = CANDIDATES.filter((sel) => !!document.querySelector(sel));
 
@@ -153,6 +170,8 @@ function captureMissionWindow() {
     const outline = (el) => (el ? { tag: el.tagName.toLowerCase(), id: shapeId(el.id) || undefined, class: classOf(el) || undefined } : null);
 
     const checkbox = document.querySelector('input[name="vehicle_ids[]"], .vehicle_checkbox');
+    const rowsPresent = document.querySelectorAll('.vehicle_select_table_tr').length
+        || document.querySelectorAll('input[name="vehicle_ids[]"]').length;
 
     /* --- the form that actually dispatches ---
      * Its field names are what a safe write needs: everything unrelated has to
@@ -230,6 +249,9 @@ function captureMissionWindow() {
         url: location.pathname.replace(/\d+/g, '#'),
         looksLikeMissionWindow: /\/missions?\//.test(location.pathname)
             || !!document.querySelector('#mission_general_info, #missing_text'),
+        // On the big map this page is an iframe, so saying which one it is beats guessing later.
+        inFrame: window.top !== window.self,
+        vehicleRowsPresent: rowsPresent,
         found: seen,
         missing: CANDIDATES.filter((sel) => !seen.includes(sel)),
         dispatchForm,
@@ -238,9 +260,14 @@ function captureMissionWindow() {
         checkbox: checkbox ? {
             name: checkbox.name,
             class: classOf(checkbox),
-            // Names and types, not values: data-distance is a number about where you are.
-            dataAttributes: Object.entries(checkbox.dataset || {})
-                .map(([k, v]) => `${k}:${/^-?[\d.]+$/.test(v) ? 'number' : 'string'}`),
+            idShape: shapeId(checkbox.id) || undefined,
+            // The first capture only read data-* and so missed vehicle_type_id, which is a
+            // plain attribute. Names and types, not values: data-distance says where you are.
+            attributes: [...checkbox.attributes]
+                .map((a) => `${a.name}:${/^-?[\d.]+$/.test(a.value) ? 'number' : 'string'}`),
+            // The vehicle type is the one value that has to come through, because it is what
+            // matches a row against a requirement from /einsaetze.json.
+            vehicleTypeId: Number(checkbox.getAttribute('vehicle_type_id')) || null,
         } : 'no vehicle checkbox found',
         aao: aaos.length ? {
             count: aaos.length,

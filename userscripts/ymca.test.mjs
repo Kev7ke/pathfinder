@@ -24,10 +24,10 @@ await pg.setContent(`<html><head><style>
   </div></nav><p>game</p>
   <div class="credits_user_total">500.000</div>
   <div id="mission_list">
-    <div id="mission_4711" data-mission-type-id="3" data-mission-id="4711" class="missionSideBarEntry">
+    <div id="mission_4711" mission_id="4711" mission_type_id="3" class="missionSideBarEntry">
       <div id="mission_caption_4711"></div><div id="mission_overview_countdown_4711"></div>
     </div>
-    <div id="mission_4712" data-mission-type-id="1" data-mission-id="4712"></div>
+    <div id="mission_4712" mission_id="4712" mission_type_id="1"></div>
   </div></body></html>`);
 
 await pg.evaluate(() => {
@@ -211,7 +211,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.5');
+assert.equal(report.ymca, '0.0.6');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -247,13 +247,13 @@ assert.equal(fb.where, 'diagnostics', 'feedback should record which tool was ope
 assert.ok(fb.log.length, 'feedback should carry the log');
 
 // ---- the two scaffolds open, and say plainly that they do not work yet ----
-for (const [id, button] of [['missionmagician', 'capture'], ['trackops', 'watch']]) {
-  await pg.click('#ymca-back');
-  await pg.click(`.ymca-tile[data-mod="${id}"]`);
-  await pg.waitForSelector(`[data-do="${button}"]`);
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="missionmagician"]');
+await pg.waitForSelector('[data-do="capture"]');
+{
   const warn = await pg.textContent('.ymca-note.warn');
-  assert.ok(/not (working|counting) yet/i.test(warn), `${id} does not admit it is unfinished`);
-  console.log(`${id.padEnd(18)}: opens, says "${warn.trim().split('.')[0]}"`);
+  assert.ok(/not working yet/i.test(warn), 'missionmagician does not admit it is unfinished');
+  console.log(`missionmagician   : opens, says "${warn.trim().split('.')[0]}"`);
 }
 // MissionMagician's capture must work even with no mission window open.
 await pg.click('#ymca-back');
@@ -283,6 +283,7 @@ await pg.evaluate(() => {
         <tr class="vehicle_row vehicle_type_13" data-vehicle-type-id="13" data-vehicle-id="11">
           <td class="vehicle_select_td">
             <input type="checkbox" name="vehicle_ids[]" class="vehicle_checkbox"
+              id="vehicle_checkbox_11" vehicle_type_id="13"
               data-direct="1" data-distance="3.2" data-equipment-types="[]">
           </td>
           <td class="building_name"><a href="#">FS01</a></td>
@@ -316,62 +317,84 @@ assert.ok(chain.includes('table#vehicle_show_table'),
 assert.equal(cap2.vehicleRow.numericAttrs['data-vehicle-type-id'], 13,
   'the row must give up the vehicle type id, which is how it matches a requirement');
 assert.ok(cap2.vehicleRow.class.includes('vehicle_type_13'));
-assert.ok(cap2.checkbox.dataAttributes.includes('distance:number'),
-  'checkbox data attributes should be reported by name and type, never by value');
+assert.ok(cap2.checkbox.attributes.includes('data-distance:number'),
+  'checkbox attributes should be reported by name and type, never by value');
 assert.ok(!JSON.stringify(cap2.checkbox).includes('3.2'),
   'the distance to your own station is a value, so it must not be carried');
+// vehicle_type_id is a plain attribute, not a data one — that is what the first capture missed.
+assert.equal(cap2.checkbox.vehicleTypeId, 13,
+  'the vehicle type must come through: it is what matches a row against a requirement');
 assert.equal(cap2.aao.count, 1);
 assert.ok(cap2.requirementBlocks.some((b) => b.id === 'missing_text' && !b.hasElementChildren),
   'the missing-vehicle block should be reported as text-only');
 assert.ok(!JSON.stringify(cap2).includes('FS01'), 'no building name may leave in a capture');
 console.log('capture on mission: form, container chain and vehicle type id all named');
 
-// ---- TrackOps: the watcher names what left the list and what the credits did ----
+// ---- TrackOps: hook the game's own missionDelete, the way the game really announces it ----
+// A finished mission does not leave #mission_list — the game adds .mission_deleted to its panel
+// and calls missionDelete(id). That is what is hooked here, and 505... ids are the game's.
+await pg.evaluate(() => {
+  window.__creditsBalance = 500000;
+  window.__missionDeleteCalls = [];
+  window.missionDelete = (id) => { window.__missionDeleteCalls.push(id); };
+  const realFetch = window.fetch;
+  window.fetch = async (url, opts) => {
+    if (String(url) === '/api/credits') {
+      return new Response(JSON.stringify({ credits_user_current: window.__creditsBalance }));
+    }
+    return realFetch(url, opts);
+  };
+  localStorage.removeItem('ymca-trackops-log');
+  // the MissionMagician capture left us on a mission page; the recorder belongs on the map
+  history.replaceState({}, '', '/');
+});
 await pg.click('#ymca-back');
 await pg.click('.ymca-tile[data-mod="trackops"]');
-await pg.waitForSelector('[data-do="watch"]');
-await pg.click('[data-do="watch"]');
+await pg.waitForSelector('[data-do="probe"]');
+await pg.click('[data-do="probe"]');
+await pg.waitForFunction(() => document.querySelector('#to-out')?.value.includes('globals'));
+const hooks = JSON.parse(await pg.inputValue('#to-out'));
+console.log('trackops hooks    :', JSON.stringify(hooks.globals), 'hooked:', hooks.hooked);
+assert.equal(hooks.globals.missionDelete, 'function', 'the game\'s own hook was not seen');
+assert.equal(hooks.hooked, true, 'TrackOps did not wrap missionDelete');
 
-// The game re-sorts its list by removing a row and putting it straight back. That must not
-// read as a finished mission.
-await pg.evaluate(() => {
-  const list = document.getElementById('mission_list');
-  const row = document.getElementById('mission_4712');
-  list.removeChild(row);
-  list.appendChild(row);
+// A mission ends. The game calls its own function; the wrapper must pass it straight through.
+await pg.evaluate(async () => {
+  window.__creditsBalance = 502340;
+  window.missionDelete(4711);
 });
-await pg.waitForTimeout(100);
+await pg.waitForFunction(
+  () => JSON.parse(localStorage.getItem('ymca-trackops-log') || '[]').length > 0,
+  null, { timeout: 8000 });
+assert.deepEqual(await pg.evaluate(() => window.__missionDeleteCalls), [4711],
+  'the game\'s own missionDelete must still run, exactly once');
+const recorded = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-trackops-log')));
+console.log('trackops recorded :', JSON.stringify(recorded));
+assert.equal(recorded[0].type, 3, 'the mission type id must be read off the panel before it goes');
+assert.equal(recorded[0].delta, 2340, 'the payout is the balance difference');
+assert.equal(recorded[0].alone, true, 'one ending at a time is attributable');
 
-// A mission ending: the row goes and stays gone, and the credit counter moves.
-await pg.evaluate(() => {
-  document.getElementById('mission_4711').remove();
-  document.querySelector('.credits_user_total').textContent = '502.340';
-});
-await pg.waitForTimeout(300);
-await pg.click('[data-do="stop"]');
-await pg.waitForFunction(() => document.querySelector('#to-out')?.value.includes('mission ids'));
-const watch = JSON.parse(await pg.inputValue('#to-out'));
-console.log('trackops found    :', JSON.stringify(watch.found));
-console.log('trackops counts   :', JSON.stringify(watch.counts));
-assert.equal(watch.found.missionList, true, 'the watcher did not find the mission list');
-assert.equal(watch.found.creditsSelector, '.credits_user_total',
-  'the watcher did not find the credit counter');
-assert.equal(watch.counts.departures, 2, 'both removals should be recorded');
-assert.equal(watch.counts.resorts, 1, 'the re-sorted row must be marked as having come back');
-assert.equal(watch.pairedWithCredits.length, 1,
-  'exactly one row left for good, so exactly one pairing');
-assert.equal(watch.pairedWithCredits[0].mission, 4711, 'the wrong mission was paired');
-assert.equal(watch.pairedWithCredits[0].creditChangesNearby[0].delta, 2340,
-  'the credit change was not read as a delta');
-assert.ok(!JSON.stringify(watch).includes('502340') && !JSON.stringify(watch).includes('500000'),
-  'the report must carry the change, never the balance');
-const row0 = watch.missionList.departures.find((d) => d.mission === 4711).row;
-console.log('departing row     :', JSON.stringify(row0));
-assert.equal(row0.numericAttrs['data-mission-type-id'], 3,
-  'the row anatomy must carry the numbers that match a mission back to einsaetze.json');
-assert.ok(row0.childIdShapes.includes('mission_caption_#'),
-  'child ids should be reported as shapes, with the numbers taken out');
-console.log('trackops          : re-sort told apart from a finished mission, credits paired');
+// It reads as a table, named from the mission list rather than from the page's text.
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="trackops"]');
+await pg.waitForSelector('#to-table');
+const summary = await pg.$$eval('#to-table tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('trackops table    :', JSON.stringify(summary));
+assert.equal(summary[0][0], 'Forest fire', 'the mission type id was not resolved to its name');
+assert.equal(summary[0][3], '2,340', 'the measured payout is not shown');
+assert.equal(summary[0][4], '9,000', 'the game\'s own listed figure should sit beside it');
+
+// And the export carries the comparison without carrying a balance.
+await pg.click('[data-do="copy"]');
+await pg.waitForFunction(() => document.querySelector('#to-out')?.value.includes('byMissionType'));
+const exported = JSON.parse(await pg.inputValue('#to-out'));
+console.log('trackops export   :', JSON.stringify(exported.byMissionType));
+assert.equal(exported.byMissionType[0].averagePaid, 2340);
+assert.equal(exported.byMissionType[0].listedByGame, 9000);
+assert.ok(!JSON.stringify(exported).includes('502340') && !JSON.stringify(exported).includes('500000'),
+  'the export must never carry a balance');
+console.log('trackops          : the game announces, TrackOps measures, nothing is assumed');
 
 console.log('page errors       :', errs.length ? errs : 'none');
 assert.equal(errs.length, 0);

@@ -104,8 +104,39 @@ Some tools need something from the game that has never been seen from this
 side — the markup of a mission window, how a completed mission is announced.
 **Do not guess a selector that clicks things on the player's behalf.** Ship the
 module with its settings, a plain warning that it does not work yet, and the
-button that collects the missing piece. MissionMagician and TrackOps are both
-in that state on purpose, and each says so in its own first line.
+button that collects the missing piece. MissionMagician is in that state on
+purpose and says so in its own first line.
+
+**When a guess turns out wrong, write down what was wrong in the module's
+header.** TrackOps guessed twice — first that the game polls over HTTP, then
+that a finished mission leaves the mission list — and both are recorded there,
+because the next person to reach for the obvious answer is going to be us.
+
+### How the game actually talks
+
+Three things, learnt the hard way, that anything live has to be built on.
+
+**The game pushes over a socket**, which is already open by the time a
+userscript set to `document-idle` runs. Wrapping `fetch` or `XMLHttpRequest`
+sees nothing at all.
+
+**It announces through its own global functions**, and those are reachable:
+`missionDelete(missionId)` when a mission ends, `missionMarkerAdd(mission)`
+when one appears. **Wrap them, never replace them** — call the original first
+and hand its return value back, so the game behaves exactly as it would
+without YMCA. That is how jxn-30/LSS-Scripts has done it for years, and it is
+how TrackOps counts.
+
+**A finished mission does not leave the mission list.** The game adds the class
+`mission_deleted` to its panel and leaves it there. A panel carries
+`mission_id` and `mission_type_id` as **plain attributes, not `data-`**, and
+`mission_type_id` is the key straight into `/einsaetze.json`.
+
+**On the big map, a mission window is an iframe.** The address bar still says
+`/`. YMCA is not locked out: the `@match` covers frames, so it boots a second
+time inside the mission and a module that belongs there simply runs there. No
+reaching across from the parent, ever. Inside the frame there is no navbar, so
+it is the floating button that opens it.
 
 A capture button takes **structure, not content**: element names, classes,
 request paths, which parts of the page changed. Never mission text, addresses,
