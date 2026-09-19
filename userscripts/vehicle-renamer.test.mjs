@@ -94,6 +94,28 @@ const typeOptions = await pg.$$eval('#pf-type option', o => o.map(x => x.textCon
 console.log('type dropdown     :', JSON.stringify(typeOptions));
 assert.ok(typeOptions.includes('Type 1 Engine (2)'), 'the dropdown still shows numbers');
 
+// The map must survive a round trip: copy it out, wipe it, paste it back.
+const copied = await pg.evaluate(async () => {
+  let captured = null;
+  navigator.clipboard.writeText = async (t) => { captured = t; };
+  document.querySelector('[data-pf="copy-types"]').click();
+  await new Promise(r => setTimeout(r, 100));
+  return captured;
+});
+console.log('copied type map   :', copied && copied.replace(/\s+/g,' '));
+assert.deepEqual(JSON.parse(copied), { '0': 'Type 1 Engine', '28': 'Ambulance' },
+  'the copied type map is not what was entered');
+
+await pg.evaluate(() => {
+  localStorage.removeItem('pf-vehicle-renamer-types');
+  window.prompt = () => '{"0":"Type 1 Engine","28":"Ambulance"}';
+  document.querySelector('[data-pf="paste-types"]').click();
+});
+await pg.waitForTimeout(200);
+const afterPaste = await pg.$$eval('#pf-type option', o => o.map(x => x.textContent));
+console.log('after paste       :', JSON.stringify(afterPaste));
+assert.ok(afterPaste.includes('Type 1 Engine (2)'), 'pasting the map did not restore the names');
+
 await pg.click('[data-pf="preview"]');
 await pg.waitForTimeout(200);
 console.log('preview status    :', await pg.textContent('#pf-status'));

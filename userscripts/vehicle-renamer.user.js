@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief Vehicle Renamer
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      1.3.0
+// @version      1.4.0
 // @description  Bulk-rename your vehicles from a pattern, with a preview before anything is written.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -194,6 +194,8 @@
                 The game only sends a number for standard vehicle types, so the names
                 are yours to set. They are remembered in this browser.
                 <button class="btn btn-xs btn-default" data-pf="fetch-types">Fetch names</button>
+                <button class="btn btn-xs btn-default" data-pf="copy-types">Copy type map</button>
+                <button class="btn btn-xs btn-default" data-pf="paste-types">Paste type map</button>
                 <span class="text-muted">— asks api.lss-manager.de, a third-party service, for the
                 names in your game's language. Optional; you can just type them.</span>
               </p>
@@ -337,6 +339,55 @@
             typeSel.value = keep;
         });
 
+        // The map is worth keeping and sharing: fetched once, it can be pasted
+        // into another browser or sent on to be built into the script.
+        modal.querySelector('[data-pf="copy-types"]').addEventListener('click', (e) => {
+            e.preventDefault();
+            const map = {};
+            for (const id of typeIds) {
+                const info = typeInfo(sample(id));
+                if (info.named) map[id] = info.name;
+            }
+            const text = JSON.stringify(map, null, 2);
+            navigator.clipboard.writeText(text)
+                .then(() => {
+                    status.textContent = `Copied ${Object.keys(map).length} type names.`;
+                })
+                .catch(() => {
+                    previewBox.innerHTML =
+                        `<p class="help-block">Copy this by hand:</p>
+                         <textarea class="form-control" rows="10">${esc(text)}</textarea>`;
+                    status.textContent = 'Clipboard refused — the map is below.';
+                });
+        });
+
+        modal.querySelector('[data-pf="paste-types"]').addEventListener('click', (e) => {
+            e.preventDefault();
+            const raw = prompt('Paste a type map as JSON, e.g. {"0":"Type 1 Engine"}');
+            if (!raw) return;
+            let parsed;
+            try {
+                parsed = JSON.parse(raw);
+            } catch (err) {
+                status.innerHTML = '<span class="text-danger">That is not valid JSON.</span>';
+                return;
+            }
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                status.innerHTML = '<span class="text-danger">Expected an object of id to name.</span>';
+                return;
+            }
+            let added = 0;
+            for (const [id, name] of Object.entries(parsed)) {
+                if (typeof name === 'string' && name.trim()) {
+                    typeNames[String(id)] = name.trim();
+                    added++;
+                }
+            }
+            writeTypeNames(typeNames);
+            renderTypes();
+            status.textContent = `Took ${added} name${added === 1 ? '' : 's'} from the pasted map.`;
+        });
+
         modal.querySelector('[data-pf="fetch-types"]').addEventListener('click', async (e) => {
             e.preventDefault();
             const locale = (() => {
@@ -368,7 +419,8 @@
                 writeTypeNames(typeNames);
                 renderTypes();
                 status.textContent = filled
-                    ? `Filled in ${filled} name${filled === 1 ? '' : 's'}. Check them before renaming.`
+                    ? `Filled in ${filled} name${filled === 1 ? '' : 's'}.`
+                      + ' Check them, then "Copy type map" keeps them for good.'
                     : 'That service knew none of your type ids — type the names instead.';
             } catch (err) {
                 status.innerHTML = `<span class="text-danger">Could not reach the name service`
