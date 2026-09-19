@@ -1,0 +1,12 @@
+{
+  "name": "pathfinder",
+  "version": "1.1.0",
+  "description": "MissionChief build planner — ranks the cheapest way to unlock better-paying missions",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "start": "python3 -m http.server 8000",
+    "build": "python3 tools/build_offline.py"
+  }
+}

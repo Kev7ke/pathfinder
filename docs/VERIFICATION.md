@@ -42,6 +42,7 @@ Confirmed by the player at the build menu or in game. Details in
 | SPAWN-1 | Missions spawn continuously up to the cap; timing looks random. Understaffed stations cause low-credit phases. Player's rule: fill a small station to max vehicles before building the next. |
 | EMS-3 | Hospital beds and specialist departments gate nothing. **Hospitals leave the ladder.** |
 | NAME-1 | Federal Police Station and Federal Police Extension are the same for mission spawn. A standalone station exists with its own building and personnel. |
+| SPEC-3 | A specialised station only stops **spawning** other calls. It still counts as a normal station of its type, still responds to missions, and the mission cap is unchanged. Specialisation is optional and does not affect unlocking, so it is out of the ladder entirely. |
 
 ## Tier A — still open
 
@@ -50,7 +51,6 @@ Confirmed by the player at the build menu or in game. Details in
 | EMS-1 | **How many credits in total land in your account for one completed ambulance call?** | 54 of the 175 EMS-path missions carry no credit value and the mission list shows no number for them. Confirmed so far: transport is free and hospitals gate nothing — neither says what the call *pays*. Until this number exists the EMS ladder runs on 69% of its own path. |
 | SPEC-1 | What specialisations exist, what do they cost, can they be undone? | A specialised station generates only its specialised calls. This is the game's own path mechanism and it is absent from the dataset — more important to the planner than any single price. |
 | SPEC-2 | Does specialising cut total spawn volume, or only redirect it? | Decides whether a path costs income, and by how much. |
-| SPEC-3 | Does a specialised station stop **responding** to other missions, or only stop **spawning** them? | The planner withdraws a specialised station from its base station count entirely. If it still responds to a mission it no longer spawns, every state with specialisations in it is over-costed. |
 | RANGE-1 | How large is a building's range, and does each area need its own copy of an extension? | The planner prices each extension once, globally. If you need one per area, **every extension rung is under-costed by a multiple** — the largest known cost error in the tool. |
 | ALLY-3 | How do alliance missions work: who starts them, how often, is there a cap? | Every participant is paid in full. That is a credit multiplier no purchase on any path competes with. |
 | PERS-1 | Which vehicles need which training, how long is each course, how many seats per classroom? | Unlocking a mission and being able to earn from it are different things, and the second is untracked. |

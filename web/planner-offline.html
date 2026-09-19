@@ -82,8 +82,7 @@ input.num{font-family:var(--mono);text-align:right}
   border:1px solid var(--hair);background:var(--surface);color:var(--ink);border-radius:6px;padding:7px 12px}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 
-.eff{font-family:var(--mono);font-size:11px;color:var(--ok);min-height:14px}
-.extrow{display:grid;grid-template-columns:1fr auto auto auto auto;gap:8px;align-items:end;
+.extrow{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;
   padding:8px 0;border-bottom:1px solid var(--hair-soft)}
 .extrow:last-child{border-bottom:0}
 .extrow .nm{font-size:13px;font-weight:600;align-self:center;min-width:0;overflow-wrap:anywhere}
@@ -92,8 +91,7 @@ input.num{font-family:var(--mono);text-align:right}
 .extrow input{width:64px}
 .extrow select{padding:5px 6px;font-size:12px}
 .extrow .rm{appearance:none;border:0;background:none;cursor:pointer;color:var(--ink-2);font-size:17px;line-height:1;padding:0 2px;align-self:center}
-.extrow.spec{border-left:3px solid var(--chk);padding-left:8px;margin-left:-8px}
-@media (max-width:560px){.extrow{grid-template-columns:1fr auto auto;row-gap:6px}.extrow .nm{grid-column:1/-1}}
+@media (max-width:560px){.extrow{grid-template-columns:1fr auto auto;row-gap:6px}}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--hair-soft);
   border-radius:999px;padding:3px 6px 3px 10px;font-size:12.5px}
@@ -173,11 +171,10 @@ td.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:no
       <div class="card">
         <span class="eyebrow" id="l-yours">What you own</span>
         <div class="owned" style="margin-top:10px">
-          <label><span id="l-fire">Fire stations</span><input class="num" type="number" min="0" id="own-fire" value="0"><span class="eff" id="eff-fire"></span></label>
-          <label><span id="l-ems">Ambulance stations</span><input class="num" type="number" min="0" id="own-ems" value="0"><span class="eff" id="eff-ems"></span></label>
-          <label><span id="l-police">Police stations</span><input class="num" type="number" min="0" id="own-police" value="0"><span class="eff" id="eff-police"></span></label>
+          <label><span id="l-fire">Fire stations</span><input class="num" type="number" min="0" id="own-fire" value="0"></label>
+          <label><span id="l-ems">Ambulance stations</span><input class="num" type="number" min="0" id="own-ems" value="0"></label>
+          <label><span id="l-police">Police stations</span><input class="num" type="number" min="0" id="own-police" value="0"></label>
         </div>
-        <p class="warn" id="overdrawn" hidden></p>
         <div style="margin-top:14px">
           <span class="eyebrow" id="l-ext">Extensions you own</span>
           <input type="search" id="ext-add" style="width:100%;margin-top:6px" placeholder="Search an extension to add…" list="ext-list">
@@ -319,67 +316,45 @@ function emptyState() {
 
 /**
  * How an extension is owned. A plain number is the count of buildings carrying
- * it; the object form adds how many of those are SPECIALISED.
- * @typedef {number | {count: number, specialised?: number}} Owned
+ * it; the object form is accepted so older saved state keeps working.
+ * @typedef {number | {count: number}} Owned
  */
 function ownedCount(entry) {
-  if (entry == null) return { count: 0, specialised: 0, host: null };
-  if (typeof entry === 'number') return { count: Math.max(0, entry), specialised: 0, host: null };
-  const count = Math.max(0, entry.count || 0);
-  return {
-    count,
-    specialised: Math.min(count, Math.max(0, entry.specialised || 0)),
-    host: entry.host || null,
-  };
+  if (entry == null) return { count: 0 };
+  if (typeof entry === 'number') return { count: Math.max(0, entry) };
+  return { count: Math.max(0, entry.count || 0) };
 }
 
 /**
- * An extension sits ON a station, and it counts twice: the building still
- * counts toward its own station type, and the extension counts toward its own
+ * An extension sits ON a station and counts twice: the building still counts
+ * toward its own station type, and the extension counts toward its own
  * requirement. Forestry on a fire station is a fire station AND a Forestry
  * station.
  *
- * A SPECIALISED station is the exception. It can only spawn its specialty's
- * calls, so it leaves its base station pool and counts only as the specialty.
- * Ten fire stations with two specialised into Forestry are eight fire stations
- * and two Forestry stations.
- *
- * Returns the flat state the rest of the algorithm works on, plus what was
- * withdrawn, so the UI can show the player why their station count dropped.
+ * SPECIALISATION does not enter this calculation. It changes only which calls
+ * a station SPAWNS; the building still counts as a normal station of its type
+ * and still responds to missions, and the concurrent mission cap is unchanged.
+ * It is also optional, so it has nothing to do with unlocking missions. A
+ * specialisation counts the same as the extension it specialises into.
  */
-function effectiveState(owned, extHosts = {}) {
+function effectiveState(owned) {
   const out = {
     fire: Math.max(0, owned.fire || 0),
     ems: Math.max(0, owned.ems || 0),
     police: Math.max(0, owned.police || 0),
     ext: {},
   };
-  const withdrawn = { fire: 0, ems: 0, police: 0 };
-  const overdrawn = [];
-
   for (const [name, entry] of Object.entries(owned.ext || {})) {
-    const { count, specialised, host } = ownedCount(entry);
+    const { count } = ownedCount(entry);
     if (count > 0) out.ext[name] = count;
-    if (!specialised) continue;
-    // Which station the extension sits on is the player's to set: it is not the
-    // same question as which missions need it, so it is never derived silently.
-    const on = host || extHosts[name] || 'fire';
-    withdrawn[DEPTS.includes(on) ? on : 'fire'] += specialised;
   }
-
-  for (const dept of DEPTS) {
-    if (withdrawn[dept] > out[dept]) {
-      overdrawn.push({ dept, have: out[dept], specialised: withdrawn[dept] });
-    }
-    out[dept] = Math.max(0, out[dept] - withdrawn[dept]);
-  }
-  return { state: out, withdrawn, overdrawn };
+  return { state: out };
 }
 
 /** Resolve whatever shape the caller passed into the flat state. */
 function resolve(state, opts) {
   if (opts && opts.alreadyEffective) return state;
-  return effectiveState(state, opts?.extensionHosts || opts?.extensionDepartments || {}).state;
+  return effectiveState(state).state;
 }
 
 /** Station and extension requirements this state does not meet yet. */
@@ -646,11 +621,8 @@ const STRINGS = {
     yours: 'What you own',
     fire: 'Fire stations', ems: 'Ambulance stations', police: 'Police stations',
     extensions: 'Extensions you own',
-    extTotal: 'Buildings', extSpec: 'Specialised', extHost: 'Sits on',
-    extHeadHint: 'An extension counts twice: the building still counts as its own station, and the extension counts as itself. A specialised station is the exception — it only spawns its specialty, so it leaves its base station count.',
-    effective: 'counts as', specialisedAway: 'specialised away',
-    hostGuess: 'Station type is a guess from the mission data — correct it if it is wrong.',
-    overdrawn: 'You have marked more stations specialised than you own:',
+    extTotal: 'How many',
+    extHeadHint: 'An extension counts twice: the building still counts as its own station, and the extension counts as itself. Specialisation is not part of this — it only changes which calls a station spawns, so it does not affect what you can unlock. A specialisation counts the same as the extension it specialises into.',
     addExtension: 'Search an extension to add…',
     noExtensions: 'None yet. Search above to add one.',
     stationSize: 'Price growth with',
@@ -702,11 +674,8 @@ const STRINGS = {
     yours: 'Was du besitzt',
     fire: 'Feuerwachen', ems: 'Rettungswachen', police: 'Polizeiwachen',
     extensions: 'Deine Erweiterungen',
-    extTotal: 'Geb\u00e4ude', extSpec: 'Spezialisiert', extHost: 'Sitzt auf',
-    extHeadHint: 'Eine Erweiterung z\u00e4hlt doppelt: das Geb\u00e4ude z\u00e4hlt weiter als seine eigene Wache, und die Erweiterung z\u00e4hlt als sie selbst. Ausnahme ist die Spezialisierung \u2014 sie spawnt nur noch ihre eigenen Eins\u00e4tze und f\u00e4llt damit aus der Basis-Wachenzahl heraus.',
-    effective: 'z\u00e4hlt als', specialisedAway: 'spezialisiert abgezogen',
-    hostGuess: 'Der Wachentyp ist aus den Einsatzdaten geraten \u2014 korrigiere ihn, wenn er falsch ist.',
-    overdrawn: 'Du hast mehr Wachen als spezialisiert markiert, als du besitzt:',
+    extTotal: 'Anzahl',
+    extHeadHint: 'Eine Erweiterung z\u00e4hlt doppelt: das Geb\u00e4ude z\u00e4hlt weiter als seine eigene Wache, und die Erweiterung z\u00e4hlt als sie selbst. Spezialisierung geh\u00f6rt nicht dazu \u2014 sie \u00e4ndert nur, welche Eins\u00e4tze eine Wache spawnt, und hat damit nichts mit dem Freischalten zu tun. Eine Spezialisierung z\u00e4hlt wie die Erweiterung, in die sie spezialisiert ist.',
     addExtension: 'Erweiterung suchen und hinzufügen…',
     noExtensions: 'Noch keine. Oben suchen, um eine hinzuzufügen.',
     stationSize: 'Ausbau rechnen mit',
@@ -810,13 +779,11 @@ function load() {
 function view() {
   const p = prices();
   const opts = { useSmall: ui.useSmall, extensionDepartments: EXT_DEPT };
-  const eff = effectiveState(ui.own, EXT_DEPT);
   const rungs = annotate(ladder(MISSIONS, ui.path, ui.own, p, opts), ui.path);
   const spine = milestones(rungs);
   const target = spine[0] || rungs[0] || null;
   const queue = target ? nextPurchases(target, ui.own, MISSIONS, p, opts) : [];
-  return { prices: p, rungs, spine, target, queue, eff,
-    top: ceiling(MISSIONS, ui.path, ui.own) };
+  return { prices: p, rungs, spine, target, queue, top: ceiling(MISSIONS, ui.path, ui.own) };
 }
 
 function sourcePill(source) {
@@ -943,50 +910,20 @@ function renderPrices() {
   </tr>`).join('');
 }
 
-const DEPT_LABEL = () => ({ fire: t().fire, ems: t().ems, police: t().police });
-
-function renderExtRows(v) {
+function renderExtRows() {
   const s = t();
   const entries = Object.entries(ui.own.ext)
-    .map(([k, e]) => [k, ownedCount(e)])
-    .filter(([, o]) => o.count > 0)
+    .map(([k, e]) => [k, ownedCount(e).count])
+    .filter(([, n]) => n > 0)
     .sort((a, b) => a[0].localeCompare(b[0]));
 
-  $('ext-rows').innerHTML = entries.length ? entries.map(([k, o]) => {
-    const host = o.host || EXT_DEPT[k] || 'fire';
-    const guessed = !o.host;
-    const labels = DEPT_LABEL();
-    return `<div class="extrow${o.specialised ? ' spec' : ''}" data-k="${esc(k)}">
+  $('ext-rows').innerHTML = entries.length ? entries.map(([k, n]) => `
+    <div class="extrow" data-k="${esc(k)}">
       <div class="nm">${esc(k)}</div>
       <label>${s.extTotal}<input class="num" type="number" min="0" data-f="count"
-        value="${o.count}" aria-label="${esc(k)} ${s.extTotal}"></label>
-      <label>${s.extSpec}<input class="num" type="number" min="0" max="${o.count}" data-f="spec"
-        value="${o.specialised}" aria-label="${esc(k)} ${s.extSpec}"></label>
-      <label>${s.extHost}<select data-f="host" aria-label="${esc(k)} ${s.extHost}"
-        title="${guessed ? esc(s.hostGuess) : ''}">
-        ${['fire', 'ems', 'police'].map((d) =>
-          `<option value="${d}"${d === host ? ' selected' : ''}>${esc(labels[d])}</option>`).join('')}
-      </select></label>
+        value="${n}" aria-label="${esc(k)} ${s.extTotal}"></label>
       <button class="rm" data-f="x" aria-label="remove ${esc(k)}">×</button>
-    </div>`;
-  }).join('') : `<p class="hint">${s.noExtensions}</p>`;
-
-  renderEffective(v);
-}
-
-/** What specialisation did to the station counts. Shared by both edit paths. */
-function renderEffective(v) {
-  const s = t();
-  for (const d of ['fire', 'ems', 'police']) {
-    const away = v.eff.withdrawn[d];
-    $('eff-' + d).textContent = away
-      ? `${s.effective} ${v.eff.state[d]} (${away} ${s.specialisedAway})` : '';
-  }
-  const over = v.eff.overdrawn;
-  $('overdrawn').hidden = over.length === 0;
-  $('overdrawn').textContent = over.length
-    ? `${s.overdrawn} ${over.map((o) => `${DEPT_LABEL()[o.dept]} ${o.specialised}/${o.have}`).join(', ')}`
-    : '';
+    </div>`).join('') : `<p class="hint">${s.noExtensions}</p>`;
 }
 
 function applyLanguage() {
@@ -1026,7 +963,7 @@ function render() {
   renderLadder(v);
   renderMissions();
   renderPrices();
-  renderExtRows(v);
+  renderExtRows();
 }
 
 // ---------- events ----------
@@ -1066,12 +1003,7 @@ function wire() {
   $('ext-add').addEventListener('change', (e) => {
     const name = e.target.value.trim();
     if (EXT_NAMES.includes(name)) {
-      const cur = ownedCount(ui.own.ext[name]);
-      ui.own.ext[name] = {
-        count: cur.count + 1,
-        specialised: cur.specialised,
-        host: cur.host || EXT_DEPT[name] || 'fire',
-      };
+      ui.own.ext[name] = { count: ownedCount(ui.own.ext[name]).count + 1 };
       e.target.value = ''; save(); render();
     }
   });
@@ -1081,30 +1013,16 @@ function wire() {
     delete ui.own.ext[e.target.closest('.extrow').dataset.k];
     save(); render();
   });
-  $('ext-rows').addEventListener('input', onExtEdit);
-  $('ext-rows').addEventListener('change', onExtEdit);
-  function onExtEdit(e) {
-    const f = e.target.dataset.f;
-    if (!f || f === 'x') return;
+  $('ext-rows').addEventListener('input', (e) => {
+    if (e.target.dataset.f !== 'count') return;
     const key = e.target.closest('.extrow').dataset.k;
-    const cur = ownedCount(ui.own.ext[key]);
-    const entry = { count: cur.count, specialised: cur.specialised, host: cur.host || EXT_DEPT[key] || 'fire' };
-    if (f === 'count') entry.count = Math.max(0, parseInt(e.target.value, 10) || 0);
-    if (f === 'spec') entry.specialised = Math.max(0, parseInt(e.target.value, 10) || 0);
-    if (f === 'host') entry.host = e.target.value;
-    entry.specialised = Math.min(entry.specialised, entry.count);
-    if (entry.count === 0) delete ui.own.ext[key]; else ui.own.ext[key] = entry;
+    const n = Math.max(0, parseInt(e.target.value, 10) || 0);
+    if (n === 0) delete ui.own.ext[key]; else ui.own.ext[key] = { count: n };
     save();
     const v = view();
     renderPlan(v); renderLadder(v); renderMissions();
-    // A structural change redraws the list; typing a number must not.
-    if (f === 'host' || entry.count === 0) {
-      renderExtRows(v);
-    } else {
-      renderEffective(v);
-      e.target.closest('.extrow').classList.toggle('spec', entry.specialised > 0);
-    }
-  }
+    if (n === 0) renderExtRows();
+  });
 
   $('m-search').addEventListener('input', (e) => { ui.missionTerm = e.target.value.toLowerCase().trim(); renderMissions(); });
   $('pr-search').addEventListener('input', (e) => { ui.priceTerm = e.target.value.toLowerCase().trim(); renderPrices(); });

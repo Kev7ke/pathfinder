@@ -235,82 +235,60 @@ test('the unseeded walk is still available and is a superset', () => {
   for (const r of seeded) assert.ok(names.has(r.mission.index));
 });
 
-// ---- extensions: counted on the building, withdrawn when specialised ----
-
-const HOSTS = { 'Forestry Expansion': 'fire', 'Mountain Rescue Station': 'ems', 'Riot Police Extension': 'police' };
+// ---- extensions: counted on the building, specialisation does not subtract ----
 
 test('an extension counts as itself and leaves the station count alone', () => {
-  const { state, withdrawn } = effectiveState(
-    { fire: 10, ems: 0, police: 0, ext: { 'Forestry Expansion': 3 } }, HOSTS);
-  assert.equal(state.fire, 10, 'a plain extension must not remove the building from its pool');
+  const { state } = effectiveState({ fire: 10, ems: 0, police: 0, ext: { 'Forestry Expansion': 3 } });
+  assert.equal(state.fire, 10);
   assert.equal(state.ext['Forestry Expansion'], 3);
-  assert.equal(withdrawn.fire, 0);
 });
 
-test('a specialised station leaves its base pool but keeps its extension', () => {
-  const { state, withdrawn } = effectiveState(
-    { fire: 10, ems: 0, police: 0, ext: { 'Forestry Expansion': { count: 3, specialised: 2 } } }, HOSTS);
-  assert.equal(state.fire, 8, 'two specialised fire stations should leave the fire pool');
-  assert.equal(state.ext['Forestry Expansion'], 3, 'all three still carry the extension');
-  assert.equal(withdrawn.fire, 2);
-});
-
-test('specialisation is withdrawn from the department the extension sits on', () => {
-  const owned = {
-    fire: 5, ems: 5, police: 5,
-    ext: {
-      'Forestry Expansion': { count: 2, specialised: 2 },
-      'Mountain Rescue Station': { count: 3, specialised: 1 },
-      'Riot Police Extension': { count: 1, specialised: 1 },
-    },
-  };
-  const { state } = effectiveState(owned, HOSTS);
-  assert.deepEqual([state.fire, state.ems, state.police], [3, 4, 4]);
-});
-
-test('more specialised than owned is clamped, not negative, and reported', () => {
-  assert.deepEqual(ownedCount({ count: 2, specialised: 9 }), { count: 2, specialised: 2, host: null });
-  const { state, overdrawn } = effectiveState(
-    { fire: 1, ems: 0, police: 0, ext: { 'Forestry Expansion': { count: 4, specialised: 4 } } }, HOSTS);
-  assert.equal(state.fire, 0, 'station count must not go negative');
-  assert.equal(overdrawn.length, 1);
-  assert.equal(overdrawn[0].dept, 'fire');
+test('a specialised station still counts as a normal station of its type', () => {
+  // Specialisation changes only which calls the station SPAWNS. The building
+  // still counts and still responds, so it must never leave the station count.
+  const plain = effectiveState({ fire: 10, ems: 0, police: 0, ext: { 'Forestry Expansion': { count: 3 } } });
+  const spec = effectiveState({
+    fire: 10, ems: 0, police: 0,
+    ext: { 'Forestry Expansion': { count: 3, specialised: 3, host: 'fire' } },
+  });
+  assert.equal(spec.state.fire, 10, 'specialising must not reduce the fire station count');
+  assert.deepEqual(spec.state, plain.state, 'specialisation must not change the computed state at all');
 });
 
 test('a plain number and the object form mean the same thing', () => {
-  const a = effectiveState({ fire: 4, ems: 0, police: 0, ext: { 'Forestry Expansion': 2 } }, HOSTS);
-  const b = effectiveState({ fire: 4, ems: 0, police: 0, ext: { 'Forestry Expansion': { count: 2 } } }, HOSTS);
+  const a = effectiveState({ fire: 4, ems: 0, police: 0, ext: { 'Forestry Expansion': 2 } });
+  const b = effectiveState({ fire: 4, ems: 0, police: 0, ext: { 'Forestry Expansion': { count: 2 } } });
   assert.deepEqual(a.state, b.state);
 });
 
-test('specialising shrinks what the player can already spawn', () => {
-  const base = { fire: 12, ems: 6, police: 6, ext: { 'Forestry Expansion': { count: 4, specialised: 0 } } };
-  const spec = { fire: 12, ems: 6, police: 6, ext: { 'Forestry Expansion': { count: 4, specialised: 4 } } };
-  const opts = { extensionDepartments: extDept };
-  const before = ceiling(missions, 'F', base, opts);
-  const after = ceiling(missions, 'F', spec, opts);
-  assert.ok(before, 'expected a reachable fire mission');
-  assert.ok(!after || after.credits <= before.credits,
-    'withdrawing four fire stations should not raise the ceiling');
+test('older saved state carrying specialised and host still loads', () => {
+  const { state } = effectiveState({
+    fire: 5, ems: 5, police: 5,
+    ext: {
+      'Forestry Expansion': { count: 2, specialised: 2, host: 'fire' },
+      'Water Police Extension': { count: 1, specialised: 1, host: 'police' },
+    },
+  });
+  assert.deepEqual([state.fire, state.ems, state.police], [5, 5, 5]);
+  assert.equal(state.ext['Forestry Expansion'], 2);
+  assert.equal(state.ext['Water Police Extension'], 1);
 });
 
-test('the ladder reprices when stations are specialised away', () => {
+test('specialising changes neither the ceiling nor the ladder', () => {
   const opts = { extensionDepartments: extDept };
-  const base = { fire: 12, ems: 6, police: 6, ext: { 'Forestry Expansion': { count: 4 } } };
+  const plain = { fire: 12, ems: 6, police: 6, ext: { 'Forestry Expansion': { count: 4 } } };
   const spec = { fire: 12, ems: 6, police: 6, ext: { 'Forestry Expansion': { count: 4, specialised: 4 } } };
-  const a = new Map(ladder(missions, 'F', base, prices, opts).map((r) => [r.mission.index, r.cost]));
+  assert.equal(ceiling(missions, 'F', plain, opts)?.credits, ceiling(missions, 'F', spec, opts)?.credits);
+  const a = ladder(missions, 'F', plain, prices, opts);
   const b = ladder(missions, 'F', spec, prices, opts);
-  let dearer = 0;
-  for (const rung of b) {
-    if (!a.has(rung.mission.index)) continue;
-    assert.ok(rung.cost >= a.get(rung.mission.index),
-      `${rung.mission.name} got cheaper after losing four fire stations`);
-    if (rung.cost > a.get(rung.mission.index)) dearer++;
+  assert.equal(a.length, b.length);
+  for (let i = 0; i < a.length; i++) {
+    assert.equal(a[i].mission.index, b[i].mission.index);
+    assert.equal(a[i].cost, b[i].cost);
   }
-  assert.ok(dearer > 0, 'specialising four fire stations changed no rung cost at all');
 });
 
-test('owning an extension removes it from the shortfall of a rung that needs it', () => {
+test('owning more of an extension lowers the cost of a rung that needs it', () => {
   const opts = { extensionDepartments: extDept };
   const without = ladder(missions, 'F', { fire: 8, ems: 4, police: 4, ext: {} }, prices, opts);
   const target = without.find((r) => 'Forestry Expansion' in r.shortfall.ext);
@@ -321,31 +299,9 @@ test('owning an extension removes it from the shortfall of a rung that needs it'
     { fire: 8, ems: 4, police: 4, ext: { 'Forestry Expansion': need } }, prices, opts);
   const same = withExt.find((r) => r.mission.index === target.mission.index);
   if (same) {
-    assert.ok(!('Forestry Expansion' in same.shortfall.ext),
-      'the owned extension still showed up as missing');
-    assert.ok(same.cost < target.cost, 'owning the extension did not reduce the cost');
+    assert.ok(!('Forestry Expansion' in same.shortfall.ext));
+    assert.ok(same.cost < target.cost);
   }
-});
-
-test('the host station is the player\'s to set and overrides the derived guess', () => {
-  // The derived map puts Water Police Extension on fire, because fire missions
-  // ask for it. The building it actually sits on is a different question.
-  assert.equal(extDept['Water Police Extension'], 'fire');
-  const owned = {
-    fire: 5, ems: 0, police: 5,
-    ext: { 'Water Police Extension': { count: 2, specialised: 2, host: 'police' } },
-  };
-  const { state, withdrawn } = effectiveState(owned, extDept);
-  assert.equal(state.fire, 5, 'the override was ignored and fire was charged');
-  assert.equal(state.police, 3);
-  assert.equal(withdrawn.police, 2);
-});
-
-test('an unknown host falls back rather than throwing', () => {
-  const { state } = effectiveState(
-    { fire: 3, ems: 0, police: 0, ext: { 'Forestry Expansion': { count: 1, specialised: 1, host: 'nonsense' } } },
-    { 'Forestry Expansion': 'fire' });
-  assert.equal(state.fire, 2);
 });
 
 test('a requirement filed under buildings is still priced', () => {

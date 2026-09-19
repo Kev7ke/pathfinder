@@ -1,8 +1,7 @@
 // Pathfinder UI. All computation lives in planner.js; this file only renders.
 import {
   parseMissions, extensionDepartments, ladder, annotate, milestones,
-  nextPurchases, ceiling, unpricedMissions, canSpawn, TRUSTED_SOURCES,
-  effectiveState, ownedCount,
+  nextPurchases, ceiling, unpricedMissions, canSpawn, TRUSTED_SOURCES, ownedCount,
 } from './planner.js';
 import { STRINGS } from './i18n.js';
 
@@ -61,13 +60,11 @@ function load() {
 function view() {
   const p = prices();
   const opts = { useSmall: ui.useSmall, extensionDepartments: EXT_DEPT };
-  const eff = effectiveState(ui.own, EXT_DEPT);
   const rungs = annotate(ladder(MISSIONS, ui.path, ui.own, p, opts), ui.path);
   const spine = milestones(rungs);
   const target = spine[0] || rungs[0] || null;
   const queue = target ? nextPurchases(target, ui.own, MISSIONS, p, opts) : [];
-  return { prices: p, rungs, spine, target, queue, eff,
-    top: ceiling(MISSIONS, ui.path, ui.own) };
+  return { prices: p, rungs, spine, target, queue, top: ceiling(MISSIONS, ui.path, ui.own) };
 }
 
 function sourcePill(source) {
@@ -194,50 +191,20 @@ function renderPrices() {
   </tr>`).join('');
 }
 
-const DEPT_LABEL = () => ({ fire: t().fire, ems: t().ems, police: t().police });
-
-function renderExtRows(v) {
+function renderExtRows() {
   const s = t();
   const entries = Object.entries(ui.own.ext)
-    .map(([k, e]) => [k, ownedCount(e)])
-    .filter(([, o]) => o.count > 0)
+    .map(([k, e]) => [k, ownedCount(e).count])
+    .filter(([, n]) => n > 0)
     .sort((a, b) => a[0].localeCompare(b[0]));
 
-  $('ext-rows').innerHTML = entries.length ? entries.map(([k, o]) => {
-    const host = o.host || EXT_DEPT[k] || 'fire';
-    const guessed = !o.host;
-    const labels = DEPT_LABEL();
-    return `<div class="extrow${o.specialised ? ' spec' : ''}" data-k="${esc(k)}">
+  $('ext-rows').innerHTML = entries.length ? entries.map(([k, n]) => `
+    <div class="extrow" data-k="${esc(k)}">
       <div class="nm">${esc(k)}</div>
       <label>${s.extTotal}<input class="num" type="number" min="0" data-f="count"
-        value="${o.count}" aria-label="${esc(k)} ${s.extTotal}"></label>
-      <label>${s.extSpec}<input class="num" type="number" min="0" max="${o.count}" data-f="spec"
-        value="${o.specialised}" aria-label="${esc(k)} ${s.extSpec}"></label>
-      <label>${s.extHost}<select data-f="host" aria-label="${esc(k)} ${s.extHost}"
-        title="${guessed ? esc(s.hostGuess) : ''}">
-        ${['fire', 'ems', 'police'].map((d) =>
-          `<option value="${d}"${d === host ? ' selected' : ''}>${esc(labels[d])}</option>`).join('')}
-      </select></label>
+        value="${n}" aria-label="${esc(k)} ${s.extTotal}"></label>
       <button class="rm" data-f="x" aria-label="remove ${esc(k)}">×</button>
-    </div>`;
-  }).join('') : `<p class="hint">${s.noExtensions}</p>`;
-
-  renderEffective(v);
-}
-
-/** What specialisation did to the station counts. Shared by both edit paths. */
-function renderEffective(v) {
-  const s = t();
-  for (const d of ['fire', 'ems', 'police']) {
-    const away = v.eff.withdrawn[d];
-    $('eff-' + d).textContent = away
-      ? `${s.effective} ${v.eff.state[d]} (${away} ${s.specialisedAway})` : '';
-  }
-  const over = v.eff.overdrawn;
-  $('overdrawn').hidden = over.length === 0;
-  $('overdrawn').textContent = over.length
-    ? `${s.overdrawn} ${over.map((o) => `${DEPT_LABEL()[o.dept]} ${o.specialised}/${o.have}`).join(', ')}`
-    : '';
+    </div>`).join('') : `<p class="hint">${s.noExtensions}</p>`;
 }
 
 function applyLanguage() {
@@ -277,7 +244,7 @@ function render() {
   renderLadder(v);
   renderMissions();
   renderPrices();
-  renderExtRows(v);
+  renderExtRows();
 }
 
 // ---------- events ----------
@@ -317,12 +284,7 @@ function wire() {
   $('ext-add').addEventListener('change', (e) => {
     const name = e.target.value.trim();
     if (EXT_NAMES.includes(name)) {
-      const cur = ownedCount(ui.own.ext[name]);
-      ui.own.ext[name] = {
-        count: cur.count + 1,
-        specialised: cur.specialised,
-        host: cur.host || EXT_DEPT[name] || 'fire',
-      };
+      ui.own.ext[name] = { count: ownedCount(ui.own.ext[name]).count + 1 };
       e.target.value = ''; save(); render();
     }
   });
@@ -332,30 +294,16 @@ function wire() {
     delete ui.own.ext[e.target.closest('.extrow').dataset.k];
     save(); render();
   });
-  $('ext-rows').addEventListener('input', onExtEdit);
-  $('ext-rows').addEventListener('change', onExtEdit);
-  function onExtEdit(e) {
-    const f = e.target.dataset.f;
-    if (!f || f === 'x') return;
+  $('ext-rows').addEventListener('input', (e) => {
+    if (e.target.dataset.f !== 'count') return;
     const key = e.target.closest('.extrow').dataset.k;
-    const cur = ownedCount(ui.own.ext[key]);
-    const entry = { count: cur.count, specialised: cur.specialised, host: cur.host || EXT_DEPT[key] || 'fire' };
-    if (f === 'count') entry.count = Math.max(0, parseInt(e.target.value, 10) || 0);
-    if (f === 'spec') entry.specialised = Math.max(0, parseInt(e.target.value, 10) || 0);
-    if (f === 'host') entry.host = e.target.value;
-    entry.specialised = Math.min(entry.specialised, entry.count);
-    if (entry.count === 0) delete ui.own.ext[key]; else ui.own.ext[key] = entry;
+    const n = Math.max(0, parseInt(e.target.value, 10) || 0);
+    if (n === 0) delete ui.own.ext[key]; else ui.own.ext[key] = { count: n };
     save();
     const v = view();
     renderPlan(v); renderLadder(v); renderMissions();
-    // A structural change redraws the list; typing a number must not.
-    if (f === 'host' || entry.count === 0) {
-      renderExtRows(v);
-    } else {
-      renderEffective(v);
-      e.target.closest('.extrow').classList.toggle('spec', entry.specialised > 0);
-    }
-  }
+    if (n === 0) renderExtRows();
+  });
 
   $('m-search').addEventListener('input', (e) => { ui.missionTerm = e.target.value.toLowerCase().trim(); renderMissions(); });
   $('pr-search').addEventListener('input', (e) => { ui.priceTerm = e.target.value.toLowerCase().trim(); renderPrices(); });

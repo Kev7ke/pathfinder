@@ -8,17 +8,24 @@ which has different buildings, prices and mechanics). It answers one question:
 
 ## Run it
 
-```
-python3 -m http.server          # from the repo root
-# then open http://localhost:8000/web/
-```
+**The quickest way — no install, no server.** Download `web/planner-offline.html`
+and double-click it. It is one file with the data baked in and it opens straight
+in your browser.
 
-Or double-click `web/planner-offline.html`, a single generated file with the data
-inlined so it works without a server. Rebuild it after editing data or source:
+**From a clone,** if you want to edit prices and keep them in the repo:
 
 ```
-python3 tools/build_offline.py
+git clone -b claude/keen-hawking-g3z0ph https://github.com/Kev7ke/pathfinder.git
+cd pathfinder
+python3 -m http.server 8000        # or: npm start
 ```
+
+Then open **http://localhost:8000/web/**. This version loads `data/*.json` at
+runtime, so a price you correct in the JSON shows up on reload.
+
+Run the tests with `npm test` (or `node --test tests/*.test.mjs`) — 30 of them,
+against the real dataset. Rebuild the single-file version after changing data or
+source with `npm run build` (or `python3 tools/build_offline.py`).
 
 ## Layout
 
@@ -35,7 +42,8 @@ src/
   parse_pdf.py      extracts missions from a print-to-PDF of the mission list
   build_dataset.py  normalises requirements into structured fields
 tests/
-  planner.test.mjs  17 tests against the real dataset — node --test tests/
+  planner.test.mjs  27 tests against the real dataset
+  i18n.test.mjs     both languages load and stay in step
 web/
   index.html            the app
   planner-offline.html  generated single-file build

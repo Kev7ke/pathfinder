@@ -97,8 +97,10 @@ that outside the path — a fifteenth of the return of the rungs on either side.
 
 This is what was missing. Three inputs the planner does not yet have:
 
-- **Specialisation** steers which calls a station generates. This is how a path
-  becomes real instead of aspirational. Blocked on `SPEC-1` / `SPEC-2`.
+- **Specialisation** steers which calls a station generates, without changing
+  what the station counts for or what it can respond to. This is how a path
+  becomes real instead of aspirational — but it is a spawn-mix lever, not an
+  unlock lever. Blocked on `SPEC-1` / `SPEC-2`.
 - **Building range** decides how often an extension must be replicated. The
   planner prices every extension **once, globally**. If each area needs its own,
   every extension rung is under-costed by a multiple. Blocked on `RANGE-1`. This
@@ -142,33 +144,31 @@ fans (4,500,000, 23,000).
 25,000, both prices estimates and both ladder-critical) → industrial tier
 (2,850,000 upward, to 56,500).
 
-## How extensions and specialisation are counted
-
-Added in rev 3, from the player's description of the mechanic.
+## How extensions are counted
 
 An extension sits **on** a station and counts twice: the building still counts
 toward its own station type, and the extension counts toward its own
 requirement. Forestry on a fire station is a fire station *and* a Forestry
-station.
+station. `effectiveState()` in `src/planner.js` does this, and the app takes a
+count per extension.
 
-A **specialised** station is the exception. It can only spawn its specialty's
-calls, so it leaves its base station pool and counts only as the specialty. Ten
-fire stations with two specialised into Forestry are eight fire stations and two
-Forestry stations. `effectiveState()` in `src/planner.js` does this, and the app
-shows the withdrawal beside the station count so a dropping ceiling is never a
-mystery.
+**Specialisation is not part of this calculation, and rev 3 was wrong to make it
+one.** It changes only which calls a station *spawns*. The building still counts
+as a normal station of its type, it still responds to missions, and the
+concurrent mission cap is unchanged. It is also entirely optional and has
+nothing to do with unlocking missions. A specialisation counts the same as the
+extension it specialises into.
 
-Which station an extension sits on is **the player's to set**, defaulted from
-the dataset but never silently. The derived map answers "which missions need this
-extension", which is a different question from "which building does it sit on",
-and it gets several wrong: it files Water Police Extension and Federal Police
-Station under fire, because fire missions ask for them.
+Rev 3 withdrew specialised stations from their base station pool, which made the
+ladder over-cost every state that had specialisations in it — on a test state of
+twelve fire stations with four specialised into Forestry, it reported eight and
+dropped the ceiling from 24,000 to 15,000 for no reason. Removed in rev 4, with
+tests that now assert specialisation changes neither the ceiling nor any rung
+cost. Saved state carrying the old `specialised` and `host` fields still loads;
+those fields are simply ignored.
 
-Still open: does a specialised station stop **responding** to other missions, or
-only stop **spawning** them? The planner assumes it stops counting entirely, per
-the player's description. If it still responds, the withdrawal applies to
-spawning only and the ladder over-costs every state that has specialisations in
-it. That is `SPEC-3` in `VERIFICATION.md`.
+Where specialisation *does* belong is the spawn-mix layer below, which is still
+blocked on `SPEC-1` and `SPEC-2`.
 
 ## Open decision for the player
 

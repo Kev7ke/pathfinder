@@ -56,67 +56,45 @@ export function emptyState() {
 
 /**
  * How an extension is owned. A plain number is the count of buildings carrying
- * it; the object form adds how many of those are SPECIALISED.
- * @typedef {number | {count: number, specialised?: number}} Owned
+ * it; the object form is accepted so older saved state keeps working.
+ * @typedef {number | {count: number}} Owned
  */
 export function ownedCount(entry) {
-  if (entry == null) return { count: 0, specialised: 0, host: null };
-  if (typeof entry === 'number') return { count: Math.max(0, entry), specialised: 0, host: null };
-  const count = Math.max(0, entry.count || 0);
-  return {
-    count,
-    specialised: Math.min(count, Math.max(0, entry.specialised || 0)),
-    host: entry.host || null,
-  };
+  if (entry == null) return { count: 0 };
+  if (typeof entry === 'number') return { count: Math.max(0, entry) };
+  return { count: Math.max(0, entry.count || 0) };
 }
 
 /**
- * An extension sits ON a station, and it counts twice: the building still
- * counts toward its own station type, and the extension counts toward its own
+ * An extension sits ON a station and counts twice: the building still counts
+ * toward its own station type, and the extension counts toward its own
  * requirement. Forestry on a fire station is a fire station AND a Forestry
  * station.
  *
- * A SPECIALISED station is the exception. It can only spawn its specialty's
- * calls, so it leaves its base station pool and counts only as the specialty.
- * Ten fire stations with two specialised into Forestry are eight fire stations
- * and two Forestry stations.
- *
- * Returns the flat state the rest of the algorithm works on, plus what was
- * withdrawn, so the UI can show the player why their station count dropped.
+ * SPECIALISATION does not enter this calculation. It changes only which calls
+ * a station SPAWNS; the building still counts as a normal station of its type
+ * and still responds to missions, and the concurrent mission cap is unchanged.
+ * It is also optional, so it has nothing to do with unlocking missions. A
+ * specialisation counts the same as the extension it specialises into.
  */
-export function effectiveState(owned, extHosts = {}) {
+export function effectiveState(owned) {
   const out = {
     fire: Math.max(0, owned.fire || 0),
     ems: Math.max(0, owned.ems || 0),
     police: Math.max(0, owned.police || 0),
     ext: {},
   };
-  const withdrawn = { fire: 0, ems: 0, police: 0 };
-  const overdrawn = [];
-
   for (const [name, entry] of Object.entries(owned.ext || {})) {
-    const { count, specialised, host } = ownedCount(entry);
+    const { count } = ownedCount(entry);
     if (count > 0) out.ext[name] = count;
-    if (!specialised) continue;
-    // Which station the extension sits on is the player's to set: it is not the
-    // same question as which missions need it, so it is never derived silently.
-    const on = host || extHosts[name] || 'fire';
-    withdrawn[DEPTS.includes(on) ? on : 'fire'] += specialised;
   }
-
-  for (const dept of DEPTS) {
-    if (withdrawn[dept] > out[dept]) {
-      overdrawn.push({ dept, have: out[dept], specialised: withdrawn[dept] });
-    }
-    out[dept] = Math.max(0, out[dept] - withdrawn[dept]);
-  }
-  return { state: out, withdrawn, overdrawn };
+  return { state: out };
 }
 
 /** Resolve whatever shape the caller passed into the flat state. */
 function resolve(state, opts) {
   if (opts && opts.alreadyEffective) return state;
-  return effectiveState(state, opts?.extensionHosts || opts?.extensionDepartments || {}).state;
+  return effectiveState(state).state;
 }
 
 /** Station and extension requirements this state does not meet yet. */
