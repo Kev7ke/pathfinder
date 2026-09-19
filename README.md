@@ -53,12 +53,15 @@ src/
   parse_pdf.py      extracts missions from a print-to-PDF of the mission list
   build_dataset.py  normalises requirements into structured fields
 tests/
-  planner.test.mjs  27 tests against the real dataset
+  planner.test.mjs  the algorithm against the real dataset
   i18n.test.mjs     both languages load and stay in step
   pattern.test.mjs  the renamer's counter and token rules
   import.test.mjs   reading a game export into a planner state
+userscripts/
+  ymca.user.js      GENERATED — the installable tool set
+  src/              its shell and modules
 web/
-  index.html            the app
+  index.html            the same planner outside the game
   planner-offline.html  generated single-file build
   alliance-kit.html     separate, self-contained alliance text kit
 tools/
@@ -74,71 +77,30 @@ docs/
   CORRECTIONS.md    mistakes already made — do not repeat them
 ```
 
-## Tampermonkey script: bulk renaming
+## YMCA — the in-game tool set
 
-`userscripts/vehicle-renamer.user.js` renames **vehicles and stations** from a
-pattern. Install it by opening the raw file with Tampermonkey active:
+`userscripts/ymca.user.js` is a Tampermonkey userscript: a full-screen window
+inside MissionChief with the Pathfinder, the Renamer and Diagnostics in it. More
+modules follow. Install by opening the raw file with Tampermonkey active:
 
-    https://raw.githubusercontent.com/Kev7ke/pathfinder/claude/keen-hawking-g3z0ph/userscripts/vehicle-renamer.user.js
+    https://raw.githubusercontent.com/Kev7ke/pathfinder/claude/keen-hawking-g3z0ph/userscripts/ymca.user.js
 
-It puts a **"Renamer" button in the bottom right of the game**. If that button is
-not there, the script is not running — that is the whole diagnosis. It also
-registers in the Tampermonkey menu and exposes `pfRenamer()` in the console.
+A **YMCA** button sits in the bottom right of the game; each module also gets a
+Tampermonkey menu entry. If that button is missing, the script is not running —
+that is the whole diagnosis.
 
-**Three tabs.** *Vehicles* and *Stations* rename; *Data for Claude* only copies
-small pieces of JSON to the clipboard — vehicle types, station types, the
-dispatch centres and their stations, a `/einsaetze.json` check, and a self-check
-— so nothing has to be typed into a browser console.
+- **Pathfinder** reads your stations and the mission list live from the game, so
+  it is never working from a snapshot.
+- **Renamer** bulk-renames vehicles and stations from a pattern, with a
+  mandatory preview and an undo.
+- **Diagnostics** turns every question about the game into a button that copies
+  or downloads an answer.
 
-**Picking what to rename.** Stations and types are checkbox lists, not
-dropdowns, so any combination works. Choosing a dispatch centre and pressing
-*Select its stations* stamps that centre's stations onto the selection; every
-box stays clickable afterwards, so a station that should be left out is one
-click away and no "except" syntax is needed.
-
-**Pattern placeholders.**
-
-| | |
-|---|---|
-| `{n}` `{nn}` `{nnn}` | counter, padded to as many digits as you write |
-| `{x12nn}` | the same counter, starting at 12 instead of 1 |
-| `{typenn}` | counts per type, running on across stations |
-| `{typex12nn}` | per type, starting at 12 |
-| `{dcnn}` | counts per dispatch centre |
-| `{type}` `{typeid}` | type name, or its numeric id |
-| `{building}` `{dc}` | the station, and the dispatch centre it belongs to |
-| `{id}` `{name}` | the object id, and its current name |
-
-On the vehicles tab `{n}` restarts at each station; on the stations tab it runs
-across the whole selection. Vehicle names are cut to 150 characters, station
-names to 40.
-
-**Safety.** The preview is mandatory and warns before it would write a bare
-`Type <number>`, leave `{dc}` empty, or give the same name to more than one
-object. Every run records the previous names in this browser, so reopening the
-dialog offers the reverse; the backup can also be copied out as JSON. If it
-cannot be saved the run says so rather than implying an undo exists.
-
-It never posts a hand-built request. For each object it fetches its edit page,
-takes the real form out of the response and builds a `FormData` from it, so the
-CSRF token and every other setting travel along untouched; only
-`vehicle[caption]` or `building[name]` is replaced.
-
-**Vehicle type names.** `/api/vehicles` sends a numeric `vehicle_type` and fills
-`vehicle_type_caption` only for custom types, so standard vehicles have no name
-in any data the script can see. Nine names read out of a real en_US fleet ship
-with the script; the dialog lets you name the rest, and a button can fetch them
-from `api.lss-manager.de` over `GM_xmlhttpRequest` (third-party, opt-in, never
-called on its own). Typed names win over the built-in list. To extend that list,
-press **Copy type map** and paste the result into `BUILTIN_TYPE_NAMES`.
-
-Station type names start empty for the same reason — use the *Station types*
-button on the data tab to send them over.
-
-`vehicle-renamer.test.mjs` drives both tabs in a headless browser against a
-stand-in game server and asserts the counters, the dispatch-centre stamp, and
-that both kinds of save keep the CSRF token and unrelated fields.
-`tests/pattern.test.mjs` pins the counter rules without a browser.
+It is generated — never edit `ymca.user.js` by hand. Sources live in
+`userscripts/src/`, and `npm run build:ymca` bundles them together with
+`src/planner.js` so the algorithm exists once rather than twice. `CLAUDE.md` is
+the full contract: how the shell works, how to add a module, and the rules that
+do not change.
 
 ## The one thing to get right
 

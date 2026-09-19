@@ -1,33 +1,188 @@
-# Working on this repo
+# YMCA — Your Mission Chief Alpha
 
-## Talking to the player
+A tool set for **missionchief.com**, built as a Tampermonkey userscript. Think of
+it as an LSS-Manager specialised for MissionChief. It grows one module at a time.
 
-Whenever you tell the player a userscript has a new version, or that they should
-update or reinstall it, **include the install link in the same message**. Never
-say "update it" and leave them to find the link.
+Everything below is the contract for working on this repo. Read it before
+changing anything.
 
-    https://raw.githubusercontent.com/Kev7ke/pathfinder/claude/keen-hawking-g3z0ph/userscripts/vehicle-renamer.user.js
+---
 
-If the branch ever changes, update that link here and in the script's
-`@downloadURL` / `@updateURL` headers, which currently point at the same branch.
+## 1 · Talking to the player
 
-Say plainly when a reinstall is needed rather than an update: Tampermonkey does
-not grant new `@grant` or `@connect` permissions on an in-place update.
+**Whenever you say a new version exists, or that they should update or
+reinstall, put the install link in the same message.** Never say "update it" and
+leave them to find it.
 
-## Ground rules that do not change
+    https://raw.githubusercontent.com/Kev7ke/pathfinder/claude/keen-hawking-g3z0ph/userscripts/ymca.user.js
 
-- MissionChief (missionchief.com), **not** Leitstellenspiel.de. See
-  `docs/CORRECTIONS.md` for what happens when that line blurs.
-- Every price and rule carries a `source`. The player's own build menu and their
-  reports are truth; everything else stays marked. Never quietly upgrade a guess
-  into a fact.
-- Where a question can be answered from `data/missions.json`, compute it rather
-  than searching.
-- Ask before changing the ladder's behaviour — `docs/ALGORITHM.md` explains why
-  it is the way it is.
+If the branch changes, change that link here **and** the `@downloadURL` /
+`@updateURL` in `tools/build_ymca.mjs`, which is where the header lives.
 
-## Checks
+**Say plainly when a reinstall is needed rather than an update.** Tampermonkey
+does not grant new `@grant` or `@connect` permissions on an in-place update, so
+any change to those lines means reinstall.
 
-    npm test                                  # 30 tests, algorithm and i18n
-    node userscripts/vehicle-renamer.test.mjs # needs Playwright and a server on :8777
-    python3 tools/build_offline.py            # rebuild web/planner-offline.html
+The player can do copy and paste, and not much more in a browser. **Anything you
+need from the game must be a button in Diagnostics** that copies or downloads
+it. Never ask them to run something in the console: Chrome blocks pasting there
+until `allow pasting` is typed, which cost a round trip once already.
+
+---
+
+## 2 · Versioning
+
+Starts at **0.0.0** and rises in steps of **0.0.1**. Nothing else. No minor or
+major bumps, no matter how large the change.
+
+The version lives in **one place**: `VERSION` in `tools/build_ymca.mjs`. It flows
+into the userscript header, the window title bar and the problem report. Never
+write a version number anywhere else.
+
+---
+
+## 3 · How YMCA is put together
+
+```
+userscripts/
+  ymca.user.js        GENERATED — never edit, it is overwritten by the build
+  ymca.test.mjs       drives the built file in a headless browser
+  src/
+    shell.js          the window, the module registry, the services
+    pf-core.js        adapts the planner to live game data
+    mod-pathfinder.js
+    mod-renamer.js
+    mod-diagnostics.js
+tools/build_ymca.mjs  the bundler, and the single home of VERSION
+```
+
+**Build it with `npm run build:ymca`.** The build exists so the algorithm is
+never duplicated: `src/planner.js`, `src/import-game.js` and the prerequisite
+mapping in `tools/build_from_game.mjs` are inlined from the same sources the
+tests run against. Change them once and both the static app and the userscript
+follow. A second copy in the userscript would drift, and the drift would be
+silent.
+
+`data/prices.json` is inlined too. The mission list is **not**: inside the game
+the Pathfinder reads `/einsaetze.json` live, so it can never be stale.
+
+### The shell
+
+One full-screen window, like the game's own lightboxes. A sidebar lists modules;
+the main area is the module's panel. Escape closes it. A floating **YMCA** button
+sits bottom right and every module also registers a Tampermonkey menu entry.
+
+### Writing a module
+
+```js
+YMCA.register({
+    id: 'thing',
+    title: 'Thing',
+    tagline: 'One line for the sidebar',
+    description: 'A sentence under the heading.',
+    async mount(el, ctx) { /* render into el */ },
+});
+```
+
+A module renders into the element it is handed and talks to the game only
+through `ctx`. It never touches the shell's chrome. `ctx` gives you:
+
+| | |
+|---|---|
+| `ctx.game(path)` | game JSON, cached per window open and shared between modules |
+| `ctx.rawGame(path)` | the same, uncached — for probing whether an endpoint answers |
+| `ctx.fetchExternal(url)` | cross-origin via `GM_xmlhttpRequest`, so CORS and the page's CSP cannot block it |
+| `ctx.store.read/write` | localStorage namespaced to the module |
+| `ctx.log.info/warn/error` | goes into the rolling log the problem report carries |
+| `ctx.status(text)` | the status line in the title bar |
+| `ctx.clipboard(text, what)` | copy, with the status line as feedback |
+| `ctx.download(name, text)` | hand the player a file |
+| `ctx.esc` `ctx.fmt` `ctx.sleep` | escaping, number formatting, waiting |
+
+Register order is sidebar order. A module that throws in `mount` shows an error
+panel and is logged — it never takes the window down with it.
+
+### Add a module in five steps
+
+1. Write `userscripts/src/mod-<name>.js` with one `YMCA.register` call.
+2. Add it to the `parts` list in `tools/build_ymca.mjs`.
+3. Bump `VERSION` by 0.0.1.
+4. Extend `userscripts/ymca.test.mjs` to open it and assert something real.
+5. `npm run build:ymca && npm test && node userscripts/ymca.test.mjs`.
+
+---
+
+## 4 · Diagnostics is the channel back
+
+The player sees the game; whoever maintains this does not. Diagnostics exists to
+close that gap, and **every new module should add whatever button would let a
+question about it be answered with the game's own data.**
+
+- **Copy problem report** — version, page, browser, script manager, which grants
+  are present, the module list, endpoint reachability and the last 60 log
+  entries. Deliberately carries **no** building names or coordinates.
+- **Download everything** — every endpoint, into one file. This one *does* carry
+  the player's name, alliance and building coordinates, so it is described as
+  such and is never committed to the repo.
+- The rest copy one focused thing: station types, vehicle types, dispatch
+  centres, which endpoints answer.
+
+Every game request goes through `getJSON` in the shell, so every failure is in
+the log without a module having to remember to log it.
+
+---
+
+## 5 · Ground rules that do not change
+
+- MissionChief (missionchief.com), **not** Leitstellenspiel.de. `docs/CORRECTIONS.md`
+  records what happens when that line blurs.
+- **Every price and rule carries a `source`.** The player's own build menu and
+  their reports are truth; everything else stays marked. Never quietly upgrade a
+  guess into a fact. If something is inferred, say so in the code.
+- Where a question can be answered from the data, **compute it** rather than
+  searching or guessing. The prerequisite mapping in `tools/build_from_game.mjs`
+  is the example: derived by matching datasets in both directions with identical
+  counts, after a one-way match produced confident nonsense.
+- **Ask before changing the ladder's behaviour.** `docs/ALGORITHM.md` explains
+  why it is as it is.
+- Anything that writes to the player's account needs a **mandatory preview**, a
+  confirmation, and a **backup that makes it undoable** — and must say so
+  plainly when the backup could not be written.
+- Never post a hand-built form to the game. Fetch the object's own edit page,
+  build `FormData` from the real form, replace one field. That is what keeps the
+  CSRF token and every unrelated setting intact.
+
+---
+
+## 6 · Checks
+
+```
+npm test                          45 tests: algorithm, i18n, pattern rules, import
+npm run build:ymca                rebuild userscripts/ymca.user.js
+node userscripts/ymca.test.mjs    drives the built userscript (Playwright + a server on :8777)
+npm run build                     rebuild web/planner-offline.html
+python3 -m http.server 8777       what the browser tests expect
+```
+
+Run `npm test` and the ymca test before saying anything works. The browser test
+has caught real bugs twice: an empty `form.action` from `DOMParser`, and a
+missing comma in the language file that every algorithm test happily ignored.
+
+---
+
+## 7 · The static planner
+
+`web/index.html` is the same planner outside the game, for working on the data
+without being logged in. It loads `data/*.json` at runtime;
+`python3 tools/build_offline.py` bundles a single file for opening without a
+server. It shares `src/planner.js` with YMCA, so a change there must be checked
+against both.
+
+---
+
+## 8 · Where the data comes from
+
+`data/missions.json` is built from the game's own `/einsaetze.json` by
+`tools/build_from_game.mjs` — not from a printed PDF any more. Refresh it with
+Diagnostics → Download everything, then run that script. `docs/VERIFICATION.md`
+lists what is confirmed, what is still open, and how each answer was reached.

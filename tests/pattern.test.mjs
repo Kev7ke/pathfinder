@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const src = readFileSync('/home/user/pathfinder/userscripts/vehicle-renamer.user.js', 'utf8');
+const src = readFileSync(new URL('../userscripts/src/mod-renamer.js', import.meta.url), 'utf8');
 const grab = (name) => {
   const i = src.indexOf(`function ${name}(`);
   assert.ok(i > 0, `${name} not found`);
@@ -20,8 +20,7 @@ const mod = new Function(`
   const COUNTER_RE = ${COUNTER_RE_SRC};
   ${grab('expandPattern')}
   ${grab('assignIndexes')}
-  ${grab('countersUsed')}
-  return { expandPattern, assignIndexes, countersUsed };
+  return { expandPattern, assignIndexes };
 `)();
 
 const T = { type: 'Quint', typeid: '13', building: 'Downtown Fire', dc: 'Central', id: '7', name: 'Old' };
@@ -75,9 +74,4 @@ test('counters restart per scope key and run on across them', () => {
   const out = mod.assignIndexes(rows, (r) => ({ default: r.station, type: r.type }));
   assert.deepEqual(out.map((o) => o.indexes.default), [0, 1, 0, 1], 'per-station counter');
   assert.deepEqual(out.map((o) => o.indexes.type), [0, 1, 2, 0], 'per-type counter');
-});
-
-test('countersUsed reports the scopes in a pattern', () => {
-  assert.deepEqual([...mod.countersUsed('{nn} {typenn}')].sort(), ['default', 'type']);
-  assert.deepEqual([...mod.countersUsed('{type} {dc}')], []);
 });

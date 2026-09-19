@@ -300,7 +300,8 @@ export function nextPurchases(rung, owned, missions, prices, opts = {}) {
 
   for (const dept of DEPTS) {
     for (let i = 0; i < rung.shortfall.stations[dept]; i++) {
-      items.push({ kind: 'station', dept, label: dept, price: st[dept].price, source: st[dept].source });
+      const label = `${dept === 'ems' ? 'ambulance' : dept} station`;
+      items.push({ kind: 'station', dept, label, price: st[dept].price, source: st[dept].source });
     }
   }
   for (const [key, n] of Object.entries(rung.shortfall.ext)) {

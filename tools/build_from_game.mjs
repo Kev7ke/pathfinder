@@ -139,6 +139,7 @@ export function build(raw) {
     };
 }
 
+// --- CLI ONLY BELOW (the YMCA bundle cuts here) ---
 const input = process.argv[2];
 if (input) {
     const raw = JSON.parse(readFileSync(input, 'utf8'));
