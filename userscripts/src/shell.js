@@ -393,6 +393,33 @@ function openWindow(moduleId) {
     if (wanted) showModule(wanted); else showLauncher();
 }
 
+/**
+ * Run a module's code on the game's own page, outside YMCA's window.
+ *
+ * Almost every module only ever renders into the panel it is handed. A few
+ * belong in the game's own markup instead — MissionMagician sits inside the
+ * mission window the way LSS-Manager's helper does, because a tool you have to
+ * open a lightbox to reach is a tool you stop using. Those get a context
+ * without a mount.
+ *
+ * It runs once the document is ready, and a throw is logged rather than left to
+ * break the game's page.
+ */
+YMCA.inject = function inject(moduleId, fn) {
+    const run = () => {
+        try {
+            fn(context(moduleId));
+        } catch (err) {
+            logger.error(moduleId, 'injection failed', err.message);
+        }
+    };
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', run, { once: true });
+    } else {
+        run();
+    }
+};
+
 /** What a module is handed. Nothing here touches the shell's own chrome. */
 function context(moduleId) {
     return {

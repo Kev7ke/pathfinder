@@ -211,7 +211,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.7');
+assert.equal(report.ymca, '0.0.8');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -251,8 +251,9 @@ await pg.click('#ymca-back');
 await pg.click('.ymca-tile[data-mod="missionmagician"]');
 await pg.waitForSelector('[data-do="capture"]');
 {
-  const warn = await pg.textContent('.ymca-note.warn');
-  assert.ok(/no mission open/i.test(warn), 'missionmagician should say why it has nothing to plan');
+  const warn = await pg.textContent('.ymca-note');
+  assert.ok(/nothing to do here/i.test(warn),
+    'off a mission it should point at the panel in the mission window, not at itself');
   console.log(`missionmagician   : off a mission, says "${warn.trim().split('.')[0]}"`);
 }
 // MissionMagician's capture must work even with no mission window open.
@@ -382,7 +383,100 @@ assert.equal(await pg.evaluate(() => window.__changes), 1,
 // The one thing it must never do.
 assert.equal(await pg.evaluate(() => window.__posts.filter((p) => /alarm/.test(p.url)).length), 0,
   'MissionMagician must never submit the dispatch form');
-console.log('missionmagician   : picks nearest, fires change, never dispatches');
+console.log('missionmagician   : picks fastest, fires change, never dispatches');
+
+// ---- the panel that lives in the game's own mission window ----
+// A separate page, because this is the iframe case: the userscript loads on a page that is
+// already a mission, and must put itself there without anyone opening YMCA.
+const mission = await b.newPage({ viewport: { width: 1100, height: 900 } });
+const missionErrs = [];
+mission.on('pageerror', (e) => missionErrs.push(e.message));
+await mission.goto('http://localhost:8777/README.md');
+await mission.setContent(`<html><body class="dark">
+  <div class="container-fluid" id="iframe-inside-container">
+    <div class="mission_header_info row">
+      <div class="col-md-6" id="mission_general_info" data-mission-type="3"></div>
+    </div>
+    <div class="alert alert-danger alert-missing-vehicles" id="missing_text"></div>
+    <form id="mission-form" action="/missions/506003398/alarm" method="post">
+      <input type="hidden" name="authenticity_token" value="CSRF-XYZ">
+      <table id="vehicle_show_table_all"><tbody id="vehicle_show_table_body_all">
+        <tr class="vehicle_select_table_tr" vehicle_id="21" data-distance="1.1">
+          <td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_21" value="21"
+            name="vehicle_ids[]" fire="1" vehicle_type_id="33" fms="2"></td>
+          <td id="vehicle_sort_21" timevalue="300">05 min.</td>
+        </tr>
+        <tr class="vehicle_select_table_tr" vehicle_id="22" data-distance="3.9">
+          <td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_22" value="22"
+            name="vehicle_ids[]" fire="1" vehicle_type_id="33" fms="2"></td>
+          <td id="vehicle_sort_22" timevalue="90">01 min. 30 sec.</td>
+        </tr>
+      </tbody></table>
+      <input type="submit" name="commit" value="Dispatch" id="alert_btn">
+    </form>
+  </div></body></html>`);
+await mission.evaluate(() => {
+  window.GM_registerMenuCommand = () => {};
+  window.GM_info = { scriptHandler: 'Tampermonkey', version: '5.0' };
+  window.I18n = { locale: 'en_US' };
+  window.__submits = 0;
+  document.getElementById('mission-form').addEventListener('submit', (e) => {
+    window.__submits += 1; e.preventDefault();
+  });
+  window.fetch = async (url) => {
+    if (String(url) === '/einsaetze.json') {
+      return new Response(JSON.stringify([{
+        id: '3', name: 'Forest fire', average_credits: 9000,
+        requirements: { firetrucks: 1 }, prerequisites: {}, chances: {},
+      }]));
+    }
+    throw new Error('HTTP 404');
+  };
+});
+await mission.addScriptTag({ content: script });
+
+// It must be there without anyone opening YMCA.
+await mission.waitForSelector('#ymca-mm-panel .panel-heading');
+assert.equal(await mission.locator('#ymca-window').count(), 0,
+  'the panel must appear without YMCA\'s own window being opened');
+const where = await mission.evaluate(() =>
+  document.getElementById('ymca-mm-panel').nextElementSibling?.id);
+console.log('panel placed      : directly above #' + where);
+assert.equal(where, 'missing_text', 'it belongs above the game\'s own missing-vehicle line');
+const panelRows = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('panel table       :', JSON.stringify(panelRows));
+assert.deepEqual(panelRows, [['Fire engines', '1', '1']]);
+
+// Travel time, not map distance: vehicle 22 is further away but arrives in 90s, not 300s.
+await mission.click('#ymca-mm-panel [data-do="select"]');
+const chosen = await mission.$$eval('.vehicle_checkbox:checked', (b) => b.map((x) => x.value));
+console.log('panel ticked      :', JSON.stringify(chosen), '(22 is 3.9km/90s, 21 is 1.1km/300s)');
+assert.deepEqual(chosen, ['22'],
+  'ordering must follow the travel time the game prints, not how close the dot is');
+assert.equal(await mission.evaluate(() => window.__submits), 0,
+  'the panel must never submit the dispatch form');
+
+// And it re-reads itself when the game fills a travel time in afterwards.
+await mission.evaluate(() => {
+  const tbody = document.getElementById('vehicle_show_table_body_all');
+  const tr = document.createElement('tr');
+  tr.className = 'vehicle_select_table_tr';
+  tr.setAttribute('vehicle_id', '23');
+  tr.setAttribute('data-distance', '0.5');
+  tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_23"
+    value="23" name="vehicle_ids[]" elw="1" vehicle_type_id="3" fms="2"></td>
+    <td id="vehicle_sort_23" timevalue="45">45 sec.</td>`;
+  tbody.append(tr);
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '3');
+});
+await mission.waitForTimeout(900);
+const after = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) => trs.length);
+console.log('panel redrew      :', after, 'requirement rows after the table changed');
+assert.ok(after >= 1, 'the panel should re-read itself when the vehicle table changes');
+console.log('mission panel     :', missionErrs.length ? missionErrs : 'no page errors');
+assert.equal(missionErrs.length, 0);
+await mission.close();
 
 // ---- TrackOps: hook the game's own missionDelete, the way the game really announces it ----
 // A finished mission does not leave #mission_list — the game adds .mission_deleted to its panel

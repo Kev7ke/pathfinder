@@ -104,8 +104,9 @@ Some tools need something from the game that has never been seen from this
 side — the markup of a mission window, how a completed mission is announced.
 **Do not guess a selector that clicks things on the player's behalf.** Ship the
 module with its settings, a plain warning that it does not work yet, and the
-button that collects the missing piece. MissionMagician is in that state on
-purpose and says so in its own first line.
+button that collects the missing piece. MissionMagician was in that state for
+three rounds of captures before it ticked anything, and its capture button is
+still there for a window built differently from the one it was written against.
 
 **When a guess turns out wrong, write down what was wrong in the module's
 header.** TrackOps guessed twice — first that the game polls over HTTP, then
@@ -162,6 +163,14 @@ available.
 counter, water bar and AAO state from `$("body").on("change", ".vehicle_checkbox", …)`.
 Setting `checked` alone shows the player something different from what would
 be sent.
+
+**Order vehicles by travel time, never by distance.** The row's `data-distance`
+is how far the dot is; the fourth cell's `timevalue`, in seconds, is when the
+vehicle actually arrives. They disagree often enough that ordering by distance
+alarms the slower vehicle — which is what the game's own "fastest vehicle"
+appeared to do. `timevalue` is filled in after the page settles, so anything
+reading it has to re-read rather than trust its first look; fall back to
+distance until it is there and **say on screen** that it is doing that.
 
 A capture button takes **structure, not content**: element names, classes,
 request paths, which parts of the page changed. Never mission text, addresses,
@@ -220,6 +229,27 @@ through `ctx`. It never touches the shell's chrome. `ctx` gives you:
 
 Register order is sidebar order. A module that throws in `mount` shows an error
 panel and is logged — it never takes the window down with it.
+
+### A module that belongs in the game's own page
+
+A tool you have to open a lightbox to reach is a tool you stop using, and YMCA's
+window is built before a mission frame has finished loading, so it read an empty
+page until it was reopened. `YMCA.inject(moduleId, fn)` hands a module a `ctx`
+without a mount, once the document is ready, with a throw logged rather than
+left to break the game's page.
+
+```js
+YMCA.inject('missionmagician', (ctx) => {
+    if (!onTheRightPage()) return;
+    mountPanelIntoTheGame(ctx);
+});
+```
+
+**Injected markup uses the game's own Bootstrap classes** — `panel`, `table`,
+`btn`, `label`, `alert` — and never YMCA's role classes, which are scoped to the
+window, and never a colour of its own. That way it follows the game into dark
+mode without knowing anything about it. Watch whatever the game fills in later
+and re-render; do not assume the first look was the whole picture.
 
 ### Add a module in five steps
 

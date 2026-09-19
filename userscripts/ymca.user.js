@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.7
+// @version      0.0.8
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.7',
+    version: '0.0.8',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1074,6 +1074,33 @@ function openWindow(moduleId) {
     const wanted = moduleId && YMCA.modules.find((m) => m.id === moduleId);
     if (wanted) showModule(wanted); else showLauncher();
 }
+
+/**
+ * Run a module's code on the game's own page, outside YMCA's window.
+ *
+ * Almost every module only ever renders into the panel it is handed. A few
+ * belong in the game's own markup instead — MissionMagician sits inside the
+ * mission window the way LSS-Manager's helper does, because a tool you have to
+ * open a lightbox to reach is a tool you stop using. Those get a context
+ * without a mount.
+ *
+ * It runs once the document is ready, and a throw is logged rather than left to
+ * break the game's page.
+ */
+YMCA.inject = function inject(moduleId, fn) {
+    const run = () => {
+        try {
+            fn(context(moduleId));
+        } catch (err) {
+            logger.error(moduleId, 'injection failed', err.message);
+        }
+    };
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', run, { once: true });
+    } else {
+        run();
+    }
+};
 
 /** What a module is handed. Nothing here touches the shell's own chrome. */
 function context(moduleId) {
@@ -1839,7 +1866,7 @@ YMCA.register({
         + 'It never dispatches — you press the game\'s own button.',
 
     async mount(el, ctx) {
-        const cfg = ctx.store.read('cfg', { nearestFirst: true });
+        const cfg = ctx.store.read('cfg', { fastestFirst: true });
         const page = mmReadMissionPage();
 
         if (!page.onMissionPage) {
@@ -1898,15 +1925,32 @@ function mmVehicle(row) {
         const v = box.getAttribute(name);
         return v === null || v === '' ? 0 : Number(v) || 0;
     };
+    /* The travel time, not the distance. The game prints it into the fourth cell
+     * as `timevalue` in seconds once it has worked the route out, and it is the
+     * only honest ordering: a vehicle whose dot sits closer on the map can still
+     * arrive later, which is exactly what "fastest vehicle" got wrong. Until the
+     * game has filled it in the row falls back to distance, and the panel says
+     * when it is doing that. */
+    const timed = row.querySelector('[timevalue]');
+    const seconds = timed ? Number(timed.getAttribute('timevalue')) : NaN;
     return {
         box,
         id: box.value,
         typeId: num('vehicle_type_id'),
+        seconds: Number.isFinite(seconds) ? seconds : null,
         distance: Number(row.getAttribute('data-distance')) || 0,
         water: num('wasser_amount'),
         foam: num('foam_amount_display'),
         has: (flag) => box.getAttribute(flag) === '1',
     };
+}
+
+/** Seconds where the game has them, distance as a stand-in where it has not. */
+function mmOrder(a, b) {
+    if (a.seconds !== null && b.seconds !== null) return a.seconds - b.seconds;
+    if (a.seconds !== null) return -1;
+    if (b.seconds !== null) return 1;
+    return a.distance - b.distance;
 }
 
 /* -------------------------------------------------------------- the planning */
@@ -1934,7 +1978,8 @@ async function mmPlan(page, ctx, cfg) {
     }
 
     const vehicles = page.rows.map(mmVehicle).filter(Boolean);
-    if (cfg.nearestFirst) vehicles.sort((a, b) => a.distance - b.distance);
+    if (cfg.fastestFirst !== false) vehicles.sort(mmOrder);
+    const untimed = vehicles.filter((v) => v.seconds === null).length;
 
     const taken = new Set();
     const lines = [];
@@ -1969,7 +2014,7 @@ async function mmPlan(page, ctx, cfg) {
         }
     }
 
-    return { name, requirements, lines, pick, available: vehicles.length };
+    return { name, requirements, lines, pick, available: vehicles.length, untimed };
 }
 
 /** firetrucks -> Firetrucks, for a requirement with no entry in the map. */
@@ -2025,6 +2070,10 @@ function mmPlanHtml(plan, page, cfg, ctx) {
     const short = plan.lines.filter((l) => !l.unmatched && l.found < l.wanted);
 
     return `
+      <div class="ymca-note"><b>This is also in the mission window itself</b>, above the game's
+        own missing-vehicle line — that is where it is meant to be used, and it keeps itself up to
+        date as the game works out the travel times. This copy is here for when you want it.</div>
+
       <div class="ymca-note"><b>It picks. It does not dispatch.</b> MissionMagician ticks the
         game's own checkboxes and stops there. An alarm cannot be undone, so nothing here writes
         to your account — you look at what is selected and press the game's own Dispatch.</div>
@@ -2051,8 +2100,8 @@ function mmPlanHtml(plan, page, cfg, ctx) {
 
       <div class="ymca-card">
         <b>Pick them</b>
-        <label style="display:block;margin:4px 0"><input type="checkbox" data-cfg="nearestFirst"
-          ${cfg.nearestFirst ? 'checked' : ''}> Nearest first</label>
+        <label style="display:block;margin:4px 0"><input type="checkbox" data-cfg="fastestFirst"
+          ${cfg.fastestFirst !== false ? 'checked' : ''}> Fastest first, by travel time</label>
         <button class="ymca-btn primary" data-do="select">Tick ${plan.pick.length} vehicles</button>
         <button class="ymca-btn" data-do="clear">Untick everything</button>
         <div class="ymca-note" id="mm-done" hidden style="margin-top:10px">Ticked. Check the list,
@@ -2062,17 +2111,19 @@ function mmPlanHtml(plan, page, cfg, ctx) {
 
 function mmOffMissionHtml() {
     return `
-      <div class="ymca-note warn"><b>No mission open.</b> MissionMagician works inside a mission
-        window, which on the big map is a frame of its own.</div>
+      <div class="ymca-note"><b>Nothing to do here.</b> MissionMagician puts itself
+        <b>inside the mission window</b>, above the game's own missing-vehicle line. Open any
+        mission and it is already there — you do not open YMCA for it at all.</div>
 
       <div class="ymca-card">
-        <b>How to get here</b>
-        <ol class="ymca-sub" style="margin:6px 0 0;padding-left:20px">
-          <li>Close this and open a mission.</li>
-          <li>With the mission on screen, open YMCA again — inside the mission frame there is no
-            navbar, so it is the <b>floating YMCA button</b> you want.</li>
-          <li>Open MissionMagician there. It will have read the mission.</li>
-        </ol>
+        <b>What it does there</b>
+        <ul class="ymca-sub" style="margin:6px 0 0;padding-left:20px">
+          <li>Lists what the mission needs, from the game's own mission list, against what is in
+            range — and keeps the list current as the game works out the travel times.</li>
+          <li>One button ticks the vehicles that match, <b>fastest first by travel time</b>, not by
+            how close the dot looks on the map.</li>
+          <li>It never presses Dispatch. That stays yours.</li>
+        </ul>
       </div>
 
       <div class="ymca-card">
@@ -2274,6 +2325,166 @@ function captureMissionWindow() {
                 hasElementChildren: e.children.length > 0,
             })),
     };
+}
+
+/* ======================================================================
+ * The panel in the game's own mission window.
+ *
+ * A tool you have to open a lightbox to reach is a tool you stop using, and
+ * the lightbox has the further problem that YMCA's window is built before the
+ * mission frame has finished loading — so it read an empty page unless you
+ * reloaded it. Living in the window solves both: it is there when the mission
+ * is, and it re-reads itself as the game fills the table in.
+ *
+ * This is the one place a module writes markup outside its own panel, so it
+ * writes **no colours of its own**. Everything is the game's own Bootstrap —
+ * `panel`, `table`, `btn`, `label` — which means it follows the game into dark
+ * mode without YMCA having to know anything about it.
+ * ====================================================================== */
+
+const MM_PANEL_ID = 'ymca-mm-panel';
+
+/* The game fills travel times in after the page settles and appends rows when
+ * "load missing vehicles" is used, so the panel re-reads rather than assuming
+ * the first look was the whole picture. */
+const MM_REDRAW_MS = 400;
+
+YMCA.inject('missionmagician', (ctx) => {
+    if (!mmReadMissionPage().onMissionPage) return;
+    mmMountPanel(ctx);
+});
+
+function mmMountPanel(ctx) {
+    if (document.getElementById(MM_PANEL_ID)) return;
+
+    const panel = document.createElement('div');
+    panel.id = MM_PANEL_ID;
+    panel.className = 'panel panel-default';
+    panel.innerHTML = '<div class="panel-body"><i>YMCA is reading this mission…</i></div>';
+
+    /* First content, under the mission's own header: the game's missing-vehicle
+     * alert is exactly where "what this needs" belongs, so the panel goes above
+     * it. Failing that, at the top of the frame. */
+    const before = document.getElementById('missing_text');
+    if (before) before.parentNode.insertBefore(panel, before);
+    else document.getElementById('iframe-inside-container')?.prepend(panel);
+
+    let timer = null;
+    const draw = async () => {
+        const page = mmReadMissionPage();
+        if (!page.onMissionPage) return;
+        const cfg = ctx.store.read('cfg', { fastestFirst: true });
+        const plan = await mmPlan(page, ctx, cfg);
+        panel.dataset.pick = plan.pick.map((v) => v.id).join(',');
+        panel.innerHTML = mmGamePanelHtml(plan, cfg, ctx);
+    };
+    const redraw = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { draw(); }, MM_REDRAW_MS);
+    };
+
+    panel.addEventListener('click', (e) => {
+        if (e.target.closest('[data-do="select"]')) {
+            const ids = (panel.dataset.pick || '').split(',').filter(Boolean);
+            const n = mmSelectIds(ids);
+            ctx.log.info('ticked vehicles', `${n} in the mission window`);
+            const done = panel.querySelector('#mm-panel-done');
+            if (done) done.hidden = false;
+        } else if (e.target.closest('[data-do="clear"]')) {
+            mmClear();
+            const done = panel.querySelector('#mm-panel-done');
+            if (done) done.hidden = true;
+        }
+    });
+
+    panel.addEventListener('change', (e) => {
+        if (e.target.dataset.cfg !== 'fastestFirst') return;
+        const cfg = ctx.store.read('cfg', { fastestFirst: true });
+        cfg.fastestFirst = e.target.checked;
+        ctx.store.write('cfg', cfg);
+        draw();
+    });
+
+    const body = document.getElementById('vehicle_show_table_body_all');
+    if (body) {
+        // childList for rows arriving, attributes for the travel times landing.
+        new MutationObserver(redraw).observe(body, {
+            childList: true, subtree: true, attributes: true, attributeFilter: ['timevalue'],
+        });
+    }
+    draw();
+    ctx.log.info('panel placed in the mission window');
+}
+
+/** Tick by id, so the panel survives the game re-sorting its own table. */
+function mmSelectIds(ids) {
+    let n = 0;
+    for (const id of ids) {
+        const box = document.getElementById(`vehicle_checkbox_${id}`);
+        if (!box || box.checked) continue;
+        box.checked = true;
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+        n += 1;
+    }
+    return n;
+}
+
+/**
+ * The panel, in the game's own clothes.
+ *
+ * No colour is chosen here. `label-success` and `label-danger` are the game's,
+ * so a met requirement and a short one read the same as everywhere else in it.
+ */
+function mmGamePanelHtml(plan, cfg, ctx) {
+    if (!plan.requirements) {
+        return `<div class="panel-body"><b>YMCA</b> — this mission type is not in the game's own
+      mission list, so there is nothing to work from.</div>`;
+    }
+
+    const rows = plan.lines.map((l) => {
+        const cell = l.unmatched
+            ? '<span class="label label-warning">not matched yet</span>'
+            : `<span class="label label-${l.found >= l.wanted ? 'success' : 'danger'}">${
+                ctx.fmt(l.found)}${l.unit ? ` ${l.unit}` : ''}</span>`;
+        return `<tr><td>${ctx.esc(l.label)}</td>
+      <td class="text-right">${ctx.fmt(l.wanted)}${l.unit ? ` ${l.unit}` : ''}</td>
+      <td class="text-right">${cell}</td></tr>`;
+    }).join('');
+
+    const short = plan.lines.filter((l) => !l.unmatched && l.found < l.wanted);
+    const unmatched = plan.lines.filter((l) => l.unmatched);
+
+    return `
+    <div class="panel-heading">
+      <b>YMCA</b> — what this mission needs
+      ${plan.name ? `<small> · ${ctx.esc(plan.name)}</small>` : ''}
+    </div>
+    <div class="panel-body">
+      <table class="table table-condensed table-striped" style="margin-bottom:8px">
+        <thead><tr><th>Needs</th><th class="text-right">Wanted</th>
+          <th class="text-right">Picked</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+
+      ${short.length ? `<div class="alert alert-warning" style="padding:6px 10px">
+        <b>Not enough in range:</b> ${short.map((l) => ctx.esc(l.label)).join(', ')}.
+        Widen the distance with the game's own km buttons.</div>` : ''}
+
+      ${unmatched.length ? `<div class="alert alert-warning" style="padding:6px 10px">
+        <b>Left alone:</b> ${unmatched.map((l) => ctx.esc(l.label)).join(', ')} — which vehicle
+        attribute means this has not been established, and a guess would tick the wrong one.</div>` : ''}
+
+      <button type="button" class="btn btn-success btn-sm" data-do="select">
+        Tick ${plan.pick.length} vehicles</button>
+      <button type="button" class="btn btn-default btn-sm" data-do="clear">Untick all</button>
+      <label style="font-weight:normal;margin:0 0 0 10px">
+        <input type="checkbox" data-cfg="fastestFirst" ${cfg.fastestFirst !== false ? 'checked' : ''}>
+        Fastest first, by travel time</label>
+      ${plan.untimed ? `<small class="text-muted"> · ${plan.untimed} of ${plan.available}
+        have no travel time yet, ordered by distance until the game works them out</small>` : ''}
+      <div class="alert alert-info" id="mm-panel-done" hidden style="padding:6px 10px;margin:8px 0 0">
+        Ticked. Check the list, then press <b>Dispatch</b> — YMCA will not press it for you.</div>
+    </div>`;
 }
 
 /* --------------------------------------------------------------------------
