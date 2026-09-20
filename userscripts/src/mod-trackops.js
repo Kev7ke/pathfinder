@@ -101,12 +101,21 @@ YMCA.register({
           ${cfg.recording ? 'checked' : ''}> Keep recording</label>
       </div>
 
-      <div class="ymca-note warn"><b>The payout reading does not work, and is no longer
-        shown.</b> Pairing a mission ending with the next rise in your balance cannot tell that
-        rise apart from a daily task reward, an alliance payment or anything else that lands in
-        the same few seconds. It read a 320-credit call at 3,716. The deltas are still recorded
-        and still in the export, marked for what they are, but nothing here averages them and
-        nothing uses them.</div>
+      <div class="ymca-card">
+        <b>What missions actually paid</b>
+        <p class="ymca-sub" style="margin:4px 0 10px">Read from the game's own credits ledger,
+          where every line says what it was for. A mission's payout is the line named after the
+          mission; a daily task is named as one and left out.</p>
+        <button class="ymca-btn primary" data-do="ledger">Read the credits ledger</button>
+        <button class="ymca-btn" data-do="ledger-copy">Copy it</button>
+        <span class="ymca-status" id="to-ledger-status"></span>
+        <div id="to-ledger"></div>
+      </div>
+
+      <div class="ymca-note"><b>Counting endings is what this does.</b> Pairing an ending with
+        the next rise in your balance could not tell that rise apart from a daily task reward, so
+        that reading is gone — it put a 320-credit call at 3,716. The ledger above answers the
+        same question by reading what the game wrote down.</div>
 
       ${rows.length ? `
       <div class="ymca-card">
@@ -152,7 +161,33 @@ YMCA.register({
 
         el.addEventListener('click', (e) => {
             const out = el.querySelector('#to-out');
-            if (e.target.closest('[data-do="copy"]')) {
+            if (e.target.closest('[data-do="ledger"]') || e.target.closest('[data-do="ledger-copy"]')) {
+                const copy = !!e.target.closest('[data-do="ledger-copy"]');
+                const status = el.querySelector('#to-ledger-status');
+                status.textContent = 'Reading…';
+                toReadLedger().then(({ path, rows }) => {
+                    const sum = toSummariseLedger(rows);
+                    status.textContent = `${sum.lines} lines from ${path}.`;
+                    el.querySelector('#to-ledger').innerHTML = toLedgerHtml(sum, ctx);
+                    ctx.log.info('read the credits ledger', `${sum.lines} lines, ${sum.missions.length} kinds`);
+                    if (copy) {
+                        ctx.clipboard(JSON.stringify({
+                            note: 'mission names and credit amounts from the game\'s own ledger',
+                            ymca: YMCA.version,
+                            lines: sum.lines,
+                            patientIncome: sum.patients,
+                            ignoredLines: sum.ignored,
+                            byMission: sum.missions.map((m) => ({
+                                name: m.name, runs: m.runs, average: m.average,
+                                low: m.low, high: m.high,
+                            })),
+                        }, null, 1), 'the ledger');
+                    }
+                }).catch((err) => {
+                    status.textContent = `Could not read it: ${err.message}`;
+                    ctx.log.warn('credits ledger unreadable', err.message);
+                });
+            } else if (e.target.closest('[data-do="copy"]')) {
                 const text = JSON.stringify(toExport(log, listed), null, 1);
                 out.value = text;
                 ctx.clipboard(text, 'what was measured');
@@ -216,6 +251,28 @@ function toSummarise(log, listed) {
         .sort((a, b) => b.runs - a.runs);
 }
 
+/** The ledger, as a table: what each mission paid, and how much it varied. */
+function toLedgerHtml(sum, ctx) {
+    if (!sum.missions.length && !sum.patients.lines) {
+        return '<p class="ymca-dim">The ledger answered, but nothing in it was a mission.</p>';
+    }
+    return `
+    ${sum.patients.lines ? `<p style="margin:10px 0 4px"><b>${ctx.fmt(sum.patients.total)}</b>
+      <span class="ymca-dim">from ${sum.patients.lines} patient treatment and transport lines
+      &mdash; income the mission list does not carry at all.</span></p>` : ''}
+    <table style="margin-top:8px">
+      <thead><tr><th class="ymca-num">Run</th><th>Mission</th><th class="ymca-num">Average</th>
+        <th class="ymca-num">Lowest</th><th class="ymca-num">Highest</th></tr></thead>
+      <tbody>${sum.missions.slice(0, 60).map((m) => `<tr>
+        <td class="ymca-num">${m.runs}</td><td>${ctx.esc(m.name)}</td>
+        <td class="ymca-num">${ctx.fmt(m.average)}</td>
+        <td class="ymca-num ymca-dim">${ctx.fmt(m.low)}</td>
+        <td class="ymca-num ymca-dim">${ctx.fmt(m.high)}</td></tr>`).join('')}</tbody>
+    </table>
+    <p class="ymca-sub" style="margin-top:8px">${sum.ignored} lines left out as not a mission.
+      This is one page of the ledger &mdash; the game keeps many.</p>`;
+}
+
 /**
  * What goes back for the planner's sake.
  *
@@ -274,6 +331,102 @@ function toProbe() {
         missionListPresent: !!document.getElementById('mission_list'),
         deletedPanelsOnPage: document.querySelectorAll('.mission_deleted').length,
         recorded: toRead(TO_LOG_KEY, []).length,
+    };
+}
+
+/* ------------------------------------------------------- the credits ledger */
+
+/**
+ * The game keeps a ledger, and it names every line.
+ *
+ *     +575   Patient Treatment and Transport   20 Sep 00:45
+ *     +649   Child swallows cleaning supply    20 Sep 00:44
+ *     +13.500 Completed task "Treat 6 patients"
+ *     -5.000 Vehicle bought
+ *
+ * Which is the thing the balance-watching could never be: each amount already
+ * says what it was for. A mission's payout is the line named after the mission,
+ * a daily task is named as one and thrown away, and "Patient Treatment" and
+ * "Patient Treatment and Transport" are their own income — the figure the
+ * ambulance path was missing.
+ *
+ * Amounts use a dot for thousands, so every character that is not a digit or a
+ * sign is dropped before reading it.
+ */
+const TO_LEDGER_PATHS = ['/credits/overview', '/credits'];
+
+/** Lines that are not a mission being paid for. Matched loosely and on purpose. */
+const TO_NOT_A_MISSION = [
+    /completed task/i, /\btask\b/i, /bought/i, /constructed/i, /built/i,
+    /sold/i, /sale/i, /coins?/i, /alliance (deposit|withdraw)/i, /daily/i,
+    /schooling|education|course/i, /extension/i, /expansion/i, /upgrade/i,
+];
+
+/** Income that belongs to the ambulance service rather than to a mission name. */
+const TO_PATIENT_LINES = /^patient (treatment|transport)/i;
+
+async function toReadLedger() {
+    let lastError = null;
+    for (const path of TO_LEDGER_PATHS) {
+        try {
+            const res = await fetch(path, { credentials: 'same-origin' });
+            if (!res.ok) { lastError = `HTTP ${res.status}`; continue; }
+            const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+            const rows = [...doc.querySelectorAll('table tbody tr')].map((tr) => {
+                const cells = tr.querySelectorAll('td');
+                if (cells.length < 3) return null;
+                const amount = Number(cells[0].textContent.replace(/[^\d-]/g, ''))
+                    * (/-/.test(cells[0].textContent) ? -1 : 1);
+                const what = cells[1].textContent.trim();
+                if (!Number.isFinite(amount) || !what) return null;
+                return { amount, what, at: cells[2].textContent.trim() };
+            }).filter(Boolean);
+            if (rows.length) return { path, rows };
+            lastError = 'the page answered but carried no rows';
+        } catch (err) {
+            lastError = err.message;
+        }
+    }
+    throw new Error(lastError || 'no credits page answered');
+}
+
+/**
+ * What the ledger says, grouped by what each line was for.
+ *
+ * Nothing is inferred here: a line is only counted as a mission's payout if the
+ * line is named after that mission. What is left over is reported as such
+ * rather than spread across the missions around it.
+ */
+function toSummariseLedger(rows) {
+    const missions = new Map();
+    const patients = { lines: 0, total: 0 };
+    let ignored = 0;
+    let spent = 0;
+
+    for (const row of rows) {
+        if (row.amount < 0) { spent += -row.amount; continue; }
+        if (TO_PATIENT_LINES.test(row.what)) {
+            patients.lines += 1;
+            patients.total += row.amount;
+            continue;
+        }
+        if (TO_NOT_A_MISSION.some((re) => re.test(row.what))) { ignored += 1; continue; }
+        const seen = missions.get(row.what) || { name: row.what, runs: 0, total: 0, low: Infinity, high: 0 };
+        seen.runs += 1;
+        seen.total += row.amount;
+        seen.low = Math.min(seen.low, row.amount);
+        seen.high = Math.max(seen.high, row.amount);
+        missions.set(row.what, seen);
+    }
+
+    return {
+        missions: [...missions.values()]
+            .map((m) => Object.assign(m, { average: Math.round(m.total / m.runs) }))
+            .sort((a, b) => b.runs - a.runs || b.total - a.total),
+        patients,
+        ignored,
+        spent,
+        lines: rows.length,
     };
 }
 

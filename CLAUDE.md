@@ -157,6 +157,24 @@ time inside the mission and a module that belongs there simply runs there. No
 reaching across from the parent, ever. Inside the frame there is no navbar, so
 it is the floating button that opens it.
 
+**The game keeps a ledger and names every line.** `/credits/overview` is a
+table of amount, description and date: `+575 Patient Treatment and Transport`,
+`+1.450 Bar Fight`, `+13.500 Completed task "Treat 6 patients"`, `-5.000 Vehicle
+bought`. A mission's payout is the line named after the mission, so nothing has
+to be paired with anything. This is where per-mission credits come from, and it
+is also the only place the **ambulance service's own income** appears —
+"Patient Treatment" and "Patient Treatment and Transport" are not in the mission
+list at all. Amounts use a dot for thousands.
+
+**`/einsaetze.json` only lists missions this player can generate.** An alliance
+mission from somebody else's building is absent, and so is anything the account
+has not unlocked. Every mission window links to the answer anyway:
+`#mission_help` → `/einsaetze/<type>`, a plain table of
+`Required Firetrucks | 5`. Lowercasing a label and joining it with underscores
+gives the key `/einsaetze.json` already uses, so it is the same vocabulary read
+from a second place. `Required … Stations` is a precondition for generating the
+mission, not something to send.
+
 **Patients are not in `requirements`.** They are `additional.possible_patient`
 in the mission catalogue, and the window states the real number three ways:
 `#patient_missing_requirements` ("1x We need: Ambulance"), which only renders
@@ -319,6 +337,15 @@ YMCA.inject('missionmagician', (ctx) => {
     mountPanelIntoTheGame(ctx);
 });
 ```
+
+**Colour the cells, not the table.** Bootstrap's own table styling and the
+game's dark theme both set a background on `td` and `th`, so a background on the
+`<table>` sits behind them and nothing shows.
+
+**A render that awaits anything needs a token.** Two draws can be in flight at
+once — the catalogue, then a mission's requirements page — and the slower, older
+one can land last and put a stale plan on screen. Take a number before the first
+await and drop the render if it is no longer the newest.
 
 **Injected markup uses the game's own Bootstrap classes** — `panel`, `table`,
 `btn`, `label`, `alert` — and never YMCA's role classes, which are scoped to the

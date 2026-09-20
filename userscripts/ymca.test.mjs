@@ -213,7 +213,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.15');
+assert.equal(report.ymca, '0.0.16');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -466,10 +466,16 @@ const panelRows = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
 console.log('panel table       :', JSON.stringify(panelRows));
 assert.deepEqual(panelRows, [['1', '\u2013', '0', '0', 'Fire engines']],
   'covered is what is committed, and nothing is committed before a box is ticked');
-const tintBefore = await mission.evaluate(() =>
-  document.querySelector('#ymca-mm-panel .mm-table').style.backgroundColor);
-console.log('tint short        :', tintBefore);
-assert.equal(tintBefore, 'rgb(231, 76, 60)', 'red while something is still missing');
+const paint = () => mission.evaluate(() => {
+  const t = document.querySelector('#ymca-mm-panel .mm-table');
+  const td = t.querySelector('tbody td');
+  return { cls: t.className, cell: getComputedStyle(td).backgroundColor };
+});
+const before = await paint();
+console.log('paint short       :', JSON.stringify(before));
+assert.ok(before.cls.includes('mm-short'), 'red while something is still missing');
+assert.equal(before.cell, 'rgb(231, 76, 60)',
+  'the cells must carry the colour — the table\'s own background sits behind them');
 
 // Travel time, not map distance: vehicle 22 is further away but arrives in 90s, not 300s.
 await mission.click('#ymca-mm-panel [data-do="select"]');
@@ -478,12 +484,12 @@ console.log('panel ticked      :', JSON.stringify(chosen), '(22 is 3.9km/90s, 21
 // Ticking moves Covered, with no redraw, and turns the table green once nothing is missing.
 const afterTick = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
-const tintAfter = await mission.evaluate(() =>
-  document.querySelector('#ymca-mm-panel .mm-table').style.backgroundColor);
-console.log('after ticking     :', JSON.stringify(afterTick), tintAfter);
+const tintAfter = await paint();
+console.log('after ticking     :', JSON.stringify(afterTick), JSON.stringify(tintAfter));
 assert.equal(afterTick[0][2], '1', 'the Ticked column shows what was ticked');
 assert.equal(afterTick[0][3], '1', 'and Covered is There plus Ticked');
-assert.equal(tintAfter, 'rgb(0, 188, 140)', 'green once every requirement is covered');
+assert.ok(tintAfter.cls.includes('mm-ok'), 'green once every requirement is covered');
+assert.equal(tintAfter.cell, 'rgb(0, 188, 140)', 'and the cells carry it');
 // And unticking by hand takes it straight back, without YMCA being told.
 await mission.evaluate(() => {
   const box = document.querySelector('.vehicle_checkbox:checked');
@@ -493,11 +499,10 @@ await mission.evaluate(() => {
 await mission.waitForTimeout(150);
 const afterUntick = await mission.$$eval('#ymca-mm-panel tbody tr td:nth-child(4)',
   (tds) => tds.map((t) => t.textContent.trim()));
-const tintBack = await mission.evaluate(() =>
-  document.querySelector('#ymca-mm-panel .mm-table').style.backgroundColor);
-console.log('after unticking   :', JSON.stringify(afterUntick), tintBack);
+const tintBack = await paint();
+console.log('after unticking   :', JSON.stringify(afterUntick), JSON.stringify(tintBack));
 assert.equal(afterUntick[0], '0', 'unticking by hand must drop the count again');
-assert.equal(tintBack, 'rgb(231, 76, 60)', 'and turn the table red again');
+assert.ok(tintBack.cls.includes('mm-short'), 'and turn the table red again');
 await mission.click('#ymca-mm-panel [data-do="select"]');
 assert.deepEqual(chosen, ['22'],
   'ordering must follow the travel time the game prints, not how close the dot is');
@@ -718,6 +723,54 @@ assert.ok(mixed.includes('72'), 'the Rescue Engine is taken before a second Quin
 assert.ok(!(mixed.includes('71') && mixed.includes('77')),
   'both Quints must not go while a Rescue Engine is standing there');
 
+// ---- an alliance mission: not in the catalogue, read from its requirements page ----
+// /einsaetze.json only carries missions this player can generate, so an alliance call started
+// from somebody else's building is absent. The window links to the answer; this is that page.
+await mission.evaluate(() => {
+  document.getElementById('mission_vehicle_at_mission')?.remove();
+  window.__catalogue = [];                       // the catalogue knows nothing about type 16
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  localStorage.removeItem('ymca-missionmagician-mm-help-16');
+  const help = `<html><body><h1>Campside - Gas Canister Explosion</h1><table>
+    <tr><td>Average credits</td><td>10600</td></tr>
+    <tr><td>Required Fire Stations</td><td>14</td></tr>
+    <tr><td>Required Firetrucks</td><td>2</td></tr>
+    <tr><td>Required Platform Trucks</td><td>1</td></tr>
+    <tr><td>Required Hovercraft Wranglers</td><td>1</td></tr>
+    <tr><td>Max. Patients</td><td>3</td></tr></table></body></html>`;
+  const realFetch = window.fetch;
+  window.fetch = async (url, opts) => {
+    if (String(url).startsWith('/einsaetze/16')) {
+      return new Response(help, { headers: { 'content-type': 'text/html' } });
+    }
+    return realFetch(url, opts);
+  };
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '16');
+  const a = document.createElement('a');
+  a.id = 'mission_help';
+  a.setAttribute('href', '/einsaetze/16?mission_id=506114091');
+  document.getElementById('col_right').append(a);
+  document.getElementById('vehicle_show_table_body_all').innerHTML = '';
+});
+await mission.waitForTimeout(1400);
+const alliance = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('alliance mission  :', JSON.stringify(alliance));
+assert.ok(alliance.some((r) => /Fire engines/.test(r[4]) && r[0] === '2'),
+  'a mission absent from the catalogue must still be read, from its own requirements page');
+assert.ok(alliance.some((r) => /Platform trucks/.test(r[4])), 'and its other vehicle lines with it');
+assert.ok(alliance.some((r) => /Ambulances/.test(r[4])),
+  'Max. Patients on that page is a patient count like any other');
+assert.ok(!alliance.some((r) => /stations/i.test(r[4])),
+  'required stations are a precondition for generating the mission, not something to send');
+assert.ok(alliance.some((r) => /Hovercraft wranglers/i.test(r[4])),
+  'a label with no known key is named rather than dropped');
+const remembered = await mission.evaluate(() =>
+  JSON.parse(localStorage.getItem('ymca-missionmagician-unmatched') || '[]').map((e) => e.key));
+console.log('unmatched keys    :', JSON.stringify(remembered.slice(-3)));
+assert.ok(remembered.includes('hovercraft_wranglers'),
+  'and carried into the report so it can be added');
+
 // ---- Cancel unused: the overlap has to be re-checked, not assumed ----
 // A Quint on scene covers the ladder and an engine at once. Counting per requirement says the
 // engines are over-supplied and the Quint can go; checking again after taking it away says no.
@@ -896,6 +949,45 @@ assert.deepEqual(both.map((e) => e.delta), [1000, 200],
 assert.deepEqual(both.map((e) => e.alone), [false, false],
   'two endings waiting together means neither payout is attributable');
 console.log('trackops          : the game announces, TrackOps measures, nothing is assumed');
+
+// ---- the credits ledger, which names every line it pays ----
+// This is the page the balance-watching could never be: each amount says what it was for.
+await pg.evaluate(() => {
+  const realFetch = window.fetch;
+  const ledger = `<html><body><table><tbody>
+    <tr><td class="text-success">+575</td><td>Patient Treatment and Transport</td><td>20 Sep 00:45</td></tr>
+    <tr><td class="text-success">+250</td><td>Patient Treatment</td><td>20 Sep 00:44</td></tr>
+    <tr><td class="text-success">+13.500</td><td>Completed task "Treat 6 patients"</td><td>20 Sep 00:44</td></tr>
+    <tr><td class="text-danger">-5.000</td><td>Vehicle bought</td><td>20 Sep 00:39</td></tr>
+    <tr><td class="text-success">+1.450</td><td>Bar Fight</td><td>20 Sep 00:39</td></tr>
+    <tr><td class="text-success">+1.250</td><td>Bar Fight</td><td>20 Sep 00:38</td></tr>
+    <tr><td class="text-success">+3.510</td><td>Large Field Fire</td><td>20 Sep 00:32</td></tr>
+  </tbody></table></body></html>`;
+  window.fetch = async (url, opts) => {
+    if (String(url).startsWith('/credits')) {
+      return new Response(ledger, { headers: { 'content-type': 'text/html' } });
+    }
+    return realFetch(url, opts);
+  };
+});
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="trackops"]');
+await pg.waitForSelector('[data-do="ledger-copy"]');
+await pg.click('[data-do="ledger-copy"]');
+await pg.waitForFunction(() => document.querySelector('#to-ledger table'));
+const ledgerRows = await pg.$$eval('#to-ledger tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('ledger            :', JSON.stringify(ledgerRows));
+assert.deepEqual(ledgerRows[0], ['2', 'Bar Fight', '1,350', '1,250', '1,450'],
+  'two Bar Fights average to 1,350, and the spread is shown rather than hidden');
+assert.ok(ledgerRows.some((r) => r[1] === 'Large Field Fire' && r[2] === '3,510'));
+assert.ok(!ledgerRows.some((r) => /Completed task|bought/i.test(r[1])),
+  'a daily task and a purchase are not a mission being paid for');
+const patientLine = await pg.textContent('#to-ledger');
+console.log('patient income    :', patientLine.replace(/\s+/g, ' ').trim().slice(0, 90));
+assert.ok(/825/.test(patientLine),
+  'patient treatment and transport is its own income, and the mission list does not carry it');
+console.log('ledger            : every line says what it was for, so nothing has to be guessed');
 
 console.log('page errors       :', errs.length ? errs : 'none');
 assert.equal(errs.length, 0);
