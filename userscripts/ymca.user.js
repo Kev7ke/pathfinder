@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.21
+// @version      0.0.22
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.21',
+    version: '0.0.22',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -4396,11 +4396,15 @@ YMCA.register({
         <p class="ymca-sub" style="margin:4px 0 10px"><b>Vehicle types</b> is the one to send when
           a vehicle YMCA does not know turns up: nothing can be counted by a type it cannot name.
           It carries ids, names and what each type can do, and nothing about your account.<br>
+          <b>What they can do</b> reads one vehicle of each type you own and takes the capability
+          flags off it, so a type does not have to wait until it happens to be in range of a
+          mission. Ids and flags only.<br>
           <b>Download everything</b> is for rebuilding the dataset. That one carries your player
           name, your alliance and your building coordinates, so share it only where you are happy
           to.</p>
         <button class="ymca-btn primary" data-do="export-all">Download everything</button>
         <button class="ymca-btn" data-do="vehicles">Vehicle types</button>
+        <button class="ymca-btn" data-do="capabilities">What they can do</button>
         <button class="ymca-btn" data-do="missions">Mission list only</button>
       </div>
 
@@ -4594,6 +4598,12 @@ async function run(what, ctx, put) {
         return;
     }
 
+    if (what === 'capabilities') {
+        ctx.status('Reading one vehicle of each type you own…');
+        put(await vehicleCapabilities(ctx), 'what your vehicles can do');
+        return;
+    }
+
     if (what === 'dispatch') {
         const B = await ctx.game('/api/buildings');
         const centres = B.filter((b) => B.some((x) => x.leitstelle_building_id === b.id));
@@ -4781,6 +4791,116 @@ function moduleStore(moduleId) {
     }
 
     return null;
+}
+
+/**
+ * What each type you own can actually do, without waiting for a mission.
+ *
+ * The buy page names every type in the game but says nothing about what one
+ * covers, and the capability flags only ever appear on a `.vehicle_checkbox` —
+ * which means waiting until a vehicle of that type happens to be in range of an
+ * open mission. That is fine for a fleet of ten and useless for the game's 106.
+ *
+ * A vehicle's own page is the same vehicle without the mission, so it is asked
+ * directly: one vehicle per type you own, its page fetched, and every attribute
+ * the game set to "1" taken off whatever element carries `vehicle_type_id`.
+ *
+ * Nothing is guessed. Where a page carries no such element the type is reported
+ * as unanswered, with the element names and classes that page did have — so a
+ * page built differently can be read next time rather than argued about. No
+ * captions, no addresses, no building names: attribute and class names only.
+ */
+const CAP_NOT_A_FLAG = new Set([
+    'fms', 'checked', 'disabled', 'value', 'name', 'type', 'id', 'class',
+    'vehicle_type_id', 'direct', 'distance', 'tabindex', 'custom_',
+]);
+
+async function vehicleCapabilities(ctx) {
+    const vehicles = await ctx.game('/api/vehicles');
+    if (!Array.isArray(vehicles) || !vehicles.length) {
+        return { note: 'no vehicles on this account, so there is nothing to read', types: {} };
+    }
+
+    /* One of each type: two vehicles of a type carry the same flags, and the
+     * point is to ask the game as few times as possible. */
+    const oneEach = new Map();
+    for (const v of vehicles) {
+        const t = String(v.vehicle_type ?? '');
+        if (t && !oneEach.has(t)) oneEach.set(t, v.id);
+    }
+
+    const found = {};
+    const unanswered = [];
+    let shape = null;
+
+    for (const [typeId, vehicleId] of oneEach) {
+        try {
+            const res = await fetch(`/vehicles/${vehicleId}`, { credentials: 'same-origin' });
+            if (!res.ok) { unanswered.push({ typeId, why: `HTTP ${res.status}` }); continue; }
+            const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+
+            const flags = new Set();
+            for (const el of doc.querySelectorAll('[vehicle_type_id]')) {
+                for (const attr of el.attributes) {
+                    if (attr.value !== '1') continue;
+                    const n = attr.name.toLowerCase();
+                    if (CAP_NOT_A_FLAG.has(n) || !/^[a-z][a-z0-9_]*$/.test(n)) continue;
+                    flags.add(n);
+                }
+            }
+            if (flags.size) {
+                found[typeId] = [...flags].sort();
+            } else {
+                unanswered.push({ typeId, why: 'no element on that page carries vehicle_type_id' });
+                /* Once only, and structure alone: the ids and classes of what the
+                 * page is built from, so the next read knows where to look. */
+                if (!shape) {
+                    shape = {
+                        elementsWithId: [...doc.querySelectorAll('[id]')]
+                            .map((el) => `${el.tagName.toLowerCase()}#${el.id}`).slice(0, 40),
+                        formActions: [...doc.querySelectorAll('form')]
+                            .map((f) => (f.getAttribute('action') || '').replace(/\d+/g, '#')),
+                        tablesAndPanels: [...doc.querySelectorAll('table, .panel, .well')]
+                            .map((el) => `${el.tagName.toLowerCase()}.${el.className}`.trim())
+                            .slice(0, 20),
+                    };
+                }
+            }
+        } catch (err) {
+            unanswered.push({ typeId, why: err.message });
+        }
+        await ctx.sleep(150);
+    }
+
+    /* Into the store every module reads, merged under what a mission window
+     * taught — a selection table is the same game saying the same thing, and
+     * neither overrides the other unless it has more to say. */
+    let written = 0;
+    try {
+        const key = 'ymca-missionmagician-types';
+        const learnt = JSON.parse(localStorage.getItem(key)) || {};
+        for (const [typeId, caps] of Object.entries(found)) {
+            const had = learnt[typeId];
+            const before = Array.isArray(had) ? { caps: had, name: null } : had;
+            if (before && (before.caps || []).length >= caps.length) continue;
+            learnt[typeId] = { caps, name: before?.name || null };
+            written += 1;
+        }
+        localStorage.setItem(key, JSON.stringify(learnt));
+    } catch (e) { /* private window: the copy below still carries it */ }
+
+    return {
+        note: 'capability flags per vehicle type, read from each vehicle\'s own page in your '
+            + 'game. Type ids and flag names only — nothing about the vehicles themselves.',
+        ymca: YMCA.version,
+        typesYouOwn: oneEach.size,
+        typesAnswered: Object.keys(found).length,
+        newToThisBrowser: written,
+        capabilitiesByType: found,
+        unanswered,
+        /* Present only when nothing could be read, and then it is what says why. */
+        pageShapeWhereNothingWasFound: shape,
+    };
 }
 
 /**

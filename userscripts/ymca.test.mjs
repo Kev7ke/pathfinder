@@ -141,6 +141,18 @@ await pg.evaluate(() => {
       return new Response(`<html><body>${b && b.building_type === 5 ? police : fire}</body></html>`,
         { headers: { 'content-type': 'text/html' } });
     }
+    // A vehicle's own page. Type 13 carries its flags the way a mission window does; type 10's
+    // page is built without them, which is the case that has to report itself rather than fail.
+    m = url.match(/^\/vehicles\/(\d+)$/);
+    if (m) {
+      const v = vehicles.find((x) => x.id === Number(m[1]));
+      const body = v && v.vehicle_type === 13
+        ? `<div vehicle_type_id="13" fire="1" dlk="1" fms="2" custom_="1"></div>`
+        : `<div class="panel panel-default"><table class="table"></table></div>
+           <form action="/vehicles/${m[1]}/move"></form>`;
+      return new Response(`<html><body><div id="vehicle-main">${body}</div></body></html>`,
+        { headers: { 'content-type': 'text/html' } });
+    }
     m = url.match(/^\/buildings\/(\d+)\/edit$/);
     if (m) {
       const bl = buildings.find((x) => x.id === Number(m[1]));
@@ -289,6 +301,28 @@ assert.equal(als.category, 'Ambulance', 'the tab a vehicle sits in is the game\'
 assert.equal(als.requiredExtension, 'Ambulance Extension',
   'and what it needs before it can be stationed');
 assert.equal(fleet.types.find((t) => t.id === 13).longName, 'Quint Fire Truck');
+// ---- what a type can do, without waiting for it to be in range of a mission ----
+// The buy page names every type and says nothing about what one covers; the flags live on a
+// .vehicle_checkbox, which means waiting for a mission. A vehicle's own page is the same vehicle
+// without the mission, so it is asked directly — one per type owned.
+await pg.click('[data-do="capabilities"]');
+await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('typesAnswered'));
+const caps = JSON.parse(await pg.inputValue('#ymca-diag-out'));
+console.log('capabilities      :', JSON.stringify(caps.capabilitiesByType),
+  'unanswered:', JSON.stringify(caps.unanswered.map((u) => u.typeId)));
+assert.deepEqual(caps.capabilitiesByType['13'], ['dlk', 'fire'],
+  'the flags come off the vehicle\'s own page, and fms and custom_ are not flags');
+assert.deepEqual(caps.unanswered.map((u) => u.typeId), ['10'],
+  'a page built without them says so rather than reporting the type as covering nothing');
+assert.ok(caps.pageShapeWhereNothingWasFound.elementsWithId.includes('div#vehicle-main'),
+  'and hands back what that page is built from, so the next read knows where to look');
+assert.ok(!JSON.stringify(caps).includes('Old A'), 'no vehicle name may leave in this one');
+// It lands where MissionMagician reads it, so the type is known before a mission asks.
+const taught = await pg.evaluate(() =>
+  JSON.parse(localStorage.getItem('ymca-missionmagician-types') || '{}')['13']);
+console.log('taught            :', JSON.stringify(taught));
+assert.deepEqual(taught.caps, ['dlk', 'fire'], 'a sweep teaches the same store a mission does');
+
 console.log('not in dataset    :', JSON.stringify(fleet.missingFromDataset));
 assert.deepEqual(fleet.missingFromDataset, [901],
   'a type the repo does not carry is named, so it can be added without comparing two lists');

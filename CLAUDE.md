@@ -531,8 +531,21 @@ sell the same ones.
 **The buy page names a type; it does not say what the type covers.** So an entry
 in `data/vehicle-types.json` may carry a name and no `capabilities`, and that is
 not the same as covering nothing: MissionMagician leaves a vehicle of such a
-type alone rather than judging it. Capabilities only ever come from a mission
-window's selection table, where the flags sit on the checkbox.
+type alone rather than judging it.
+
+**A vehicle's own page is the same vehicle without the mission.**
+`/vehicles/<id>` is asked directly by **Diagnostics → What they can do**: one
+vehicle per type owned, and every attribute the game set to `1` on an element
+carrying `vehicle_type_id` is a flag. That is what fills a fleet in one press
+instead of waiting for each type to happen to be in range of an open mission.
+Where a page carries no such element the type is reported as unanswered, with
+the ids and classes that page *did* have, so the next read knows where to look.
+
+**Missing capabilities do not stop a vehicle being sent.** In a mission window
+the flags come off each checkbox, so picking and ticking works for every vehicle
+in the game whatever the dataset holds. The dataset answers a narrower
+question — what a vehicle *already at the mission* covers, where there is no
+checkbox to read — and that is what the "There" column and Cancel Unused need.
 
 **An empty flag set is unknown, not nothing.** It used to mean the vehicle
 carried none of the handful of flags a requirement named, which is how a HazMat
