@@ -1388,8 +1388,10 @@ function mmClaimFollowUp(missionId, on) {
 
 /** The mission this window is, for the claim above. */
 function mmMissionId() {
+    const help = document.getElementById('mission_help')?.getAttribute('href') || '';
     return (/\/missions\/(\d+)/.exec(location.pathname) || [])[1]
         || document.getElementById('mission_general_info')?.getAttribute('mission_id')
+        || (/mission_id=(\d+)/.exec(help) || [])[1]
         || null;
 }
 
@@ -1445,8 +1447,16 @@ function mmMountPanel(ctx) {
         const cfg = ctx.store.read('cfg', { fastestFirst: true });
         /* Another mission holding follow-up means its tab is not opened here
          * either: the guard is on what gets read, not only on the switch. */
-        const held = mmFollowUpClaim();
-        const claimedElsewhere = held && String(held.mission) !== String(mmMissionId())
+        const here = mmMissionId();
+        let held = mmFollowUpClaim();
+        /* Locked and still on, arriving at a mission nobody is holding: this one
+         * takes it. That is what carries the lock through `Dispatch and Next`,
+         * which loads the next mission into the same frame. */
+        if (cfg.followUp === true && !held && here) {
+            mmClaimFollowUp(here, true);
+            held = mmFollowUpClaim();
+        }
+        const claimedElsewhere = held && String(held.mission) !== String(here)
             ? held.mission : null;
         const page = mmReadMissionPage(cfg.followUp === true && !claimedElsewhere);
         if (!page.onMissionPage) return;
@@ -1538,10 +1548,17 @@ function mmMountPanel(ctx) {
      * anyway — the lock is what makes it stay on. */
     const dispatchOff = () => {
         const c = ctx.store.read('cfg', {});
-        if (!c.followUp || c.followUpLocked) return;
+        if (!c.followUp) return;
+        /* The claim goes back whether or not the switch does. This mission has
+         * sent what it was going to send, so it is no longer pulling — and
+         * `Dispatch and Next` loads the next mission into this same frame, which
+         * would otherwise open on a switch its own predecessor was still
+         * holding shut. The lock decides whether follow-up stays on; it never
+         * decides who owns it. */
+        mmClaimFollowUp(mmMissionId(), false);
+        if (c.followUpLocked) { redraw(); return; }
         c.followUp = false;
         ctx.store.write('cfg', c);
-        mmClaimFollowUp(mmMissionId(), false);
         ctx.log.info('follow-up', 'switched off after dispatching');
         redraw();
     };

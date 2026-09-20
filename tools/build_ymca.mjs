@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.23';
+export const VERSION = '0.0.24';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -172,6 +172,7 @@ function build() {
         read('userscripts/src/mod-stepops.js'),
         read('userscripts/src/mod-renamer.js').replace('__VEHICLE_TYPES__', vehicleTypes),
         read('userscripts/src/mod-missionmagician.js').replace('__VEHICLE_TYPES__', vehicleTypes),
+        read('userscripts/src/mod-recruitroom.js'),
         read('userscripts/src/mod-trackops.js'),
         read('userscripts/src/mod-diagnostics.js')
             .replace('__VEHICLE_TYPE_IDS__',

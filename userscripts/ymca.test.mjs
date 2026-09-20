@@ -102,7 +102,16 @@ await pg.evaluate(() => {
     }
     m = url.match(/^\/buildings\/(\d+)$/);
     if (m) {
-      return new Response(`<html><body><a href="/buildings/${m[1]}/vehicles/new">Buy vehicle</a>
+      // The real page: Personnel is a <dt> whose <dd> carries the count, and the station heads
+      // itself with its own artwork. Building 4 is written without a count, which must read as
+      // unknown rather than as zero.
+      const id = Number(m[1]);
+      const staff = id === 4 ? '' : '<dt><strong>Personnel:</strong></dt><dd>16 Employees'
+        + `<a class="btn btn-default btn-xs" href="/buildings/${id}/hire">Hire new people</a></dd>`;
+      return new Response(`<html><body>
+        <img class="pull-right" src="/images/building_fire.png" alt="Building fire">
+        <a href="/buildings/${m[1]}/vehicles/new">Buy vehicle</a>
+        <dl><dt><strong>Vehicles:</strong></dt><dd>3 of 3</dd>${staff}</dl>
         </body></html>`, { headers: { 'content-type': 'text/html' } });
     }
     m = url.match(/^\/buildings\/(\d+)\/vehicles\/new/);
@@ -184,7 +193,7 @@ await pg.waitForSelector('#ymca-window');
 const tiles = await pg.$$eval('.ymca-tile[data-mod]', (b) => b.map((x) => x.dataset.mod));
 console.log('tiles             :', JSON.stringify(tiles));
 assert.deepEqual(tiles,
-  ['stepops', 'renamer', 'missionmagician', 'trackops', 'diagnostics']);
+  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'trackops', 'diagnostics']);
 assert.equal(await pg.locator('#ymca-back').isVisible(), false,
   'the back button should be hidden on the launcher');
 await pg.screenshot({ path: '/tmp/ymca-tiles.png' });
@@ -1098,6 +1107,13 @@ for (const sel of ['.alert_next', '.alert_next_alliance', '#mission_alarm_btn'])
 const kept = await followUpAfter('.alert_next', true);
 console.log('follow-up locked  :', JSON.stringify(kept));
 assert.equal(kept, true, 'unless the lock beside the switch says to keep it on');
+// And the claim goes back either way. Dispatch and Next loads the next mission into this same
+// frame, so a claim left behind would open it on a switch its predecessor was holding shut.
+const claimAfter = await mission.evaluate(() =>
+  localStorage.getItem('ymca-missionmagician-followUpClaim'));
+console.log('claim after locked:', JSON.stringify(claimAfter));
+assert.ok(!claimAfter || !JSON.parse(claimAfter).mission,
+  'dispatching hands the claim back, locked or not — this mission has sent what it is sending');
 
 // ---- Cancel unused: the overlap has to be re-checked, not assumed ----
 // A Quint on scene covers the ladder and an engine at once. Counting per requirement says the
@@ -1318,6 +1334,37 @@ console.log('patient income    :', patientLine.replace(/\s+/g, ' ').trim().slice
 assert.ok(/825/.test(patientLine),
   'patient treatment and transport is its own income, and the mission list does not carry it');
 console.log('ledger            : every line says what it was for, so nothing has to be guessed');
+
+// ---- RecruitRoom: every station's hiring on one screen, and it hires nothing ----
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="recruitroom"]');
+await pg.waitForSelector('#rr-table');
+// Rows fill one at a time, so wait for the last of them rather than the first.
+await pg.waitForFunction(() => [...document.querySelectorAll('#rr-table .rr-staff')]
+  .every((c) => !c.textContent.includes('\u2026')));
+const rooms = await pg.$$eval('#rr-table tbody tr', (trs) => trs.map((tr) => ({
+  name: tr.cells[1].textContent.trim(),
+  crew: tr.cells[2].textContent.trim(),
+  art: !!tr.querySelector('img'),
+  links: [...tr.querySelectorAll('a')].map((a) => a.getAttribute('href')),
+})));
+console.log('recruitroom       :', JSON.stringify(rooms.map((r) => [r.name, r.crew, r.art])));
+assert.ok(!rooms.some((r) => /Central Dispatch/.test(r.name)),
+  'a dispatch center employs nobody, so it is not a row here');
+assert.ok(rooms.every((r) => r.art), 'each station carries the artwork its own page heads with');
+assert.equal(rooms.find((r) => /FS01/.test(r.name)).crew, '16',
+  'the crew count is read from the station page, not guessed at');
+assert.equal(rooms.find((r) => /AS01/.test(r.name)).crew, '\u2013',
+  'a page that does not state one reads as unknown, never as zero');
+console.log('recruit links     :', JSON.stringify(rooms[0].links));
+assert.deepEqual(rooms[0].links.slice(0, 3).map((h) => h.replace(/\d+/g, '#')),
+  ['/buildings/#/hire_do/#', '/buildings/#/hire_do/#', '/buildings/#/hire_do/#'],
+  'the buttons are the game\'s own recruit links, one per length');
+// It must never press them: spent credits do not come back, so there is no undo to offer.
+const posted = await pg.evaluate(() => window.__posts.length);
+await pg.waitForTimeout(400);
+assert.equal(await pg.evaluate(() => window.__posts.length), posted,
+  'RecruitRoom writes nothing — the click that costs credits stays the player\'s');
 
 // ---- whose mission was it, and when ----
 // missionDelete says a mission ended, not that you were in it. An alliance call somebody else

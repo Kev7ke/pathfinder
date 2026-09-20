@@ -53,6 +53,7 @@ userscripts/
     mod-stepops.js
     mod-renamer.js
     mod-missionmagician.js
+    mod-recruitroom.js
     mod-trackops.js
     mod-diagnostics.js
 tools/build_ymca.mjs  the bundler, and the single home of VERSION
@@ -229,6 +230,13 @@ read-here row are not mistaken for each other. The match is only ever made
 against a flag some vehicle *in that table* actually carries, so nothing is
 invented: a key with no answer in the page stays unmatched and says so.
 
+**A vehicle at a mission carries its type and nothing else.** The row is
+`tr[id^="vehicle_row"]`, and `vehicle_type_id` sits on the `<img>` inside its
+cell, not on the row or the cell — the cells themselves carry only `sortvalue`,
+`rowspan` and `class`, and the controls are `a.btn-backalarm-ajax`. So the
+capability flags are **not** there, and looking up what a vehicle already at the
+mission covers really does need the dataset. That question is closed.
+
 **There is no page that states what an unowned type covers.** The flags are
 written per vehicle *instance*, onto that vehicle's checkbox and its own page.
 The buy page lists all 106 types with crew, patient transport and required
@@ -239,6 +247,18 @@ the dataset grows from what players actually have, and the open question —
 whether an at-mission row carries the flags itself, which would end the need for
 it — rides in MissionMagician's report as `tablesNotSeenYet`.
 
+**A station page states its own crew.** `Personnel:` is a `<dt>` whose `<dd>`
+reads "16 Employees", the station heads itself with `img.pull-right`, and
+hiring is `/buildings/<id>/hire` with the game's own buttons at
+`/buildings/<id>/hire_do/1|2|3` for credits and `…/hire_do/coins` for coins.
+`/api/buildings` does not carry the count, so RecruitRoom reads each page. It
+renders the game's links and presses none of them: credits spent on people do
+not come back, and where there is no undo YMCA does not write.
+
+**The extensions tab names the vehicles each extension unlocks**, by name, in
+`.allowed-vehicle-types` — which is where the branch a type belongs to is
+stated by the game rather than inferred from a buy-page tab.
+
 **Follow-up belongs to one mission at a time.** It pulls vehicles off whatever
 they are doing, so armed on two missions each takes the other's and the
 appliances spend the call driving between them. The mission that armed it is
@@ -246,6 +266,13 @@ written down; while a different mission holds it the switch is shut here and
 says which one has it. The claim is released by that mission switching off or
 dispatching, and by a timeout, so a window closed without dispatching cannot
 hold it for ever.
+
+**Dispatching hands the claim back whether or not the switch stays on.**
+`Dispatch and Next` loads the next mission into the same frame, so a claim kept
+past the alarm opens that mission on a switch its own predecessor is holding
+shut — follow-up off and un-turnable-on. The lock decides whether follow-up
+stays on; it never decides who owns it. A locked switch arriving at a mission
+nobody holds takes the claim itself, which is what carries the lock through.
 
 **One height, whatever the mission asks for.** A panel that grows with the
 requirement count moves the buttons under the cursor between one mission and the
