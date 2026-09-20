@@ -54,13 +54,33 @@ function sfCounts() {
     return counts;
 }
 
+/**
+ * The picker's own look.
+ *
+ * A `<select>` is a native control and the game's `.btn-default` is white on
+ * white in the probe, which between them made it unreadable — dark, light, and
+ * worse again with an option highlighted. So it wears the browser's own form
+ * pair, `Field` on `FieldText`, which is always legible against itself and
+ * follows whatever theme the page is in. That is not a colour of YMCA's own:
+ * it is the one the system uses for every other dropdown on the machine.
+ */
+const SF_LOOK = `#${SF_PICK_ID}{color-scheme:light dark;background-color:Field;color:FieldText;
+  border:1px solid;border-color:rgba(128,128,128,.6);border-radius:3px;
+  font:inherit;font-size:12px;line-height:1.4;padding:1px 4px;max-width:160px;height:auto}
+#${SF_PICK_ID} option{background-color:Field;color:FieldText}`;
+
 function sfCss(centre) {
-    if (!centre) return '';
-    /* Hide, never show: the game's own search is the other half of this and a
-     * forced `display` would override it. */
-    return `${SF_LIST} > li[leitstelle_building_id]`
-        + `:not([leitstelle_building_id="${centre}"])`
-        + `:not(#building_list_${centre}){display:none !important}`;
+    if (!centre) return SF_LOOK;
+    return `${SF_LOOK}
+/* Hide, never show: the game's own station search is the other half of this,
+   and a forced display would override it rather than add up with it. */
+${SF_LIST} > li[leitstelle_building_id]:not([leitstelle_building_id="${centre}"])`
+        + `:not(#building_list_${centre}){display:none !important}
+/* The centre you picked belongs at the top of its own list. A flex column and
+   one order is all that takes, and it survives every redraw because it is
+   keyed on the id the game writes itself. */
+${SF_LIST}{display:flex;flex-direction:column}
+${SF_LIST} > li#building_list_${centre}{order:-1}`;
 }
 
 function sfApply(ctx) {
@@ -92,8 +112,6 @@ function sfMount(ctx) {
     const cfg = sfCfg(ctx);
     const pick = document.createElement('select');
     pick.id = SF_PICK_ID;
-    pick.className = 'btn btn-xs btn-default';
-    pick.style.maxWidth = '150px';
     pick.innerHTML = `<option value="">All dispatch centres</option>
     ${centres.map((c) => `<option value="${esc(c.id)}"${c.id === cfg.centre ? ' selected' : ''}
       >${esc(c.name)}${counts[c.id] ? ` (${counts[c.id]})` : ''}</option>`).join('')}`;

@@ -27,6 +27,48 @@
  * ------------------------------------------------------------------------ */
 
 const SE_STYLE_ID = 'ymca-shuteye';
+const SE_BUTTON_ID = 'ymca-shuteye-btn';
+
+/** The three states the game paints a mission panel in. */
+const SE_STATES = ['red', 'yellow', 'green'];
+
+/**
+ * THE GRADIENT CAME OFF WITH THE BOX.
+ *
+ * `display: contents` is what lets the heading's children lay out in the panel,
+ * and the price is the heading's own box — its gradient, its text colour and
+ * its bottom rule all go with it, which left a flat white strip where the
+ * game had something worth looking at. Worse, the gradient is how a panel says
+ * red, yellow or green, so losing it lost the state as well.
+ *
+ * So it is read back off the game, the way the palette in the shell was:
+ * `getComputedStyle` on one heading of each state, moved onto the panel itself.
+ * Nothing is invented and the three colours keep meaning what they meant. A
+ * state that is not on screen right now is simply not sampled this time, and
+ * what was learnt before is remembered — so after a few page loads all three
+ * are known, and a game update repaints them without anybody editing a hex.
+ */
+function seSample(ctx) {
+    const looks = ctx.store.read('looks', {});
+    let changed = false;
+    for (const state of SE_STATES) {
+        const head = document.querySelector(`.panel.mission_panel_${state} > .panel-heading`);
+        if (!head) continue;
+        const cs = getComputedStyle(head);
+        const look = {
+            color: cs.color,
+            background: cs.backgroundColor,
+            image: cs.backgroundImage,
+            border: `${cs.borderBottomWidth} ${cs.borderBottomStyle} ${cs.borderBottomColor}`,
+        };
+        if (JSON.stringify(looks[state]) !== JSON.stringify(look)) {
+            looks[state] = look;
+            changed = true;
+        }
+    }
+    if (changed) ctx.store.write('looks', looks);
+    return looks;
+}
 
 /** What can be put back, by the id the game gives it. */
 const SE_PARTS = [
@@ -62,7 +104,7 @@ function seCfg(ctx) {
  * The address is a second sentence inside the name and goes by default — it is
  * what made the name unreadable in the space left.
  */
-function seCss(cfg) {
+function seCss(cfg, looks) {
     const P = '.panel[id^="mission_panel_"]';
     const col = `${P} .panel-body .col-xs-11`;
     const bar = `${col} > div[id^="mission_bar_outer_"]`;
@@ -87,24 +129,83 @@ function seCss(cfg) {
             + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
             `${bar}{order:5;flex:0 0 ${width}%;margin:0;height:14px}`);
         if (back.length) rules.push(`${back.join(',')}{flex:1 1 100%;order:10}`);
+
+        /* The heading's own look, put back on the panel now that the heading
+         * has no box of its own to wear it. */
+        for (const state of SE_STATES) {
+            const look = looks?.[state];
+            if (!look) continue;
+            rules.push(`${P}.mission_panel_${state}{background-color:${look.background};`
+                + `background-image:${look.image};color:${look.color};`
+                + `border-bottom:${look.border}}`);
+        }
     }
     return rules.join('\n');
 }
 
 /** Write the rule, or take it away. Both are one element. */
 function seApply(ctx) {
-    const on = YMCA.isOn('shuteye');
+    const cfg = seCfg(ctx);
+    /* Two switches, and they mean different things: ElementFriend decides
+     * whether ShutEye is part of this install at all, and the button on the
+     * map decides whether it is folded right now. The first one gates the
+     * second, so switching it off takes the button with it. */
+    const available = YMCA.isOn('shuteye');
+    const folded = available && cfg.on !== false;
+
     let style = document.getElementById(SE_STYLE_ID);
-    if (!on) {
-        style?.remove();
-        return;
+    if (!folded) style?.remove();
+    else {
+        if (!style) {
+            style = document.createElement('style');
+            style.id = SE_STYLE_ID;
+            (document.head || document.documentElement).append(style);
+        }
+        // Sampled before the rule lands, so it reads the game and not itself.
+        style.textContent = seCss(cfg, seSample(ctx));
     }
-    if (!style) {
-        style = document.createElement('style');
-        style.id = SE_STYLE_ID;
-        (document.head || document.documentElement).append(style);
-    }
-    style.textContent = seCss(seCfg(ctx));
+
+    if (!available) document.getElementById(SE_BUTTON_ID)?.remove();
+    sePaintButton(ctx);
+}
+
+/**
+ * The button, among the game's own mission filters.
+ *
+ * `#missions-panel-main` is the row that holds Emergency, Patient transports
+ * and the rest, so a switch for how that list reads belongs in it rather than
+ * two clicks away in a lightbox. It uses the game's own button classes, green
+ * for on and plain for off, exactly as the filters beside it do.
+ */
+function seMountButton(ctx) {
+    if (!YMCA.isOn('shuteye')) return false;
+    if (document.getElementById(SE_BUTTON_ID)) return true;
+    const row = document.getElementById('missions-panel-main');
+    if (!row) return false;
+
+    const btn = document.createElement('a');
+    btn.id = SE_BUTTON_ID;
+    btn.setAttribute('role', 'button');
+    btn.href = '';
+    btn.title = 'ShutEye — fold the mission list into one line';
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        ctx.store.write('cfg', { ...seCfg(ctx), on: seCfg(ctx).on === false });
+        seApply(ctx);
+        ctx.log.info(`folded ${seCfg(ctx).on === false ? 'off' : 'on'} from the map`);
+    });
+    row.append(btn);
+    sePaintButton(ctx);
+    return true;
+}
+
+function sePaintButton(ctx) {
+    const btn = document.getElementById(SE_BUTTON_ID);
+    if (!btn) return;
+    const on = seCfg(ctx).on !== false;
+    btn.className = `btn btn-xs mission_selection ${on ? 'btn-success' : 'btn-default'}`;
+    btn.innerHTML = `<span class="glyphicon glyphicon-eye-${on ? 'close' : 'open'}"></span>
+    ShutEye`;
 }
 
 YMCA.inject('shuteye', (ctx) => {
@@ -113,7 +214,9 @@ YMCA.inject('shuteye', (ctx) => {
      * next person reading the page. */
     if (window.top !== window.self) return true;
     seApply(ctx);
-    return true;
+    /* The rule is written straight away; the button waits for the row that
+     * holds the game's own filters, which arrives with the mission list. */
+    return seMountButton(ctx);
 });
 
 YMCA.register({
@@ -139,6 +242,15 @@ YMCA.register({
       <div class="ymca-note">The artwork and the progress bar always stay. Everything else is
         hidden unless you put it back here &mdash; that way round, a panel the game starts
         drawing next month is quiet without anybody having to notice it.</div>
+      <div class="ymca-card">
+        <b>Folded right now</b>
+        <label style="display:block;margin-top:7px"><input type="checkbox" data-part="on"
+          ${seCfg(ctx).on !== false ? 'checked' : ''}> Fold the mission list</label>
+        <p class="ymca-dim" style="margin:6px 0 0;font-size:12px">The same switch sits on the map
+          itself, with the game&rsquo;s own Emergency and Patient transport filters, so it can be
+          turned off for a moment without opening this.</p>
+      </div>
+
       <div class="ymca-card">
         <b>The one line</b>
         <label style="display:block;margin-top:7px"><input type="checkbox" data-part="line"

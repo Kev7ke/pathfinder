@@ -1470,6 +1470,17 @@ assert.equal(await pg.locator('.ymca-switch[data-sw="shuteye"] input').isChecked
 
 // A mission panel, shaped the way the game builds one.
 await pg.evaluate(() => {
+  const filters = document.createElement('div');
+  filters.id = 'missions-panel-main';
+  filters.className = 'missions-panel-main';
+  filters.innerHTML = '<a id="mission_select_emergency" class="btn btn-xs btn-success">7/16</a>';
+  document.body.append(filters);
+  // The game paints the heading, not the panel, and it paints it per state.
+  const paint = document.createElement('style');
+  paint.textContent = `.mission_panel_red > .panel-heading{
+    background-color: rgb(217, 83, 79); background-image: linear-gradient(rgb(217,83,79),
+    rgb(201,48,44)); color: rgb(255, 255, 255); border-bottom: 1px solid rgb(150, 30, 26)}`;
+  document.head.append(paint);
   const panel = document.createElement('div');
   panel.id = 'mission_panel_506247649';
   panel.className = 'panel panel-default mission_panel_red';
@@ -1517,6 +1528,35 @@ assert.equal(line.panel, 'flex', 'the panel itself becomes the row');
 assert.equal(line.heading, 'contents', 'the heading gives up its box so its children join it');
 assert.equal(line.address, 'none', 'the address is what made the name unreadable');
 assert.ok(line.sameRow, 'Dispatch and the progress bar end up on the same line');
+
+// display:contents takes the heading's box away, and its gradient with it. It is read back off
+// the game per state rather than written here, so red still means red.
+const look = await pg.evaluate(() => {
+  const cs = getComputedStyle(document.getElementById('mission_panel_506247649'));
+  return { bg: cs.backgroundColor, image: cs.backgroundImage };
+});
+console.log('panel look        :', JSON.stringify(look));
+assert.equal(look.bg, 'rgb(217, 83, 79)', 'the heading\'s own colour moves onto the panel');
+assert.ok(look.image.includes('linear-gradient'), 'and so does its gradient');
+assert.deepEqual(
+  await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-shuteye-looks')).red.color),
+  'rgb(255, 255, 255)', 'what was sampled is remembered, so a state off screen keeps its look');
+
+// The same switch on the map, among the game's own mission filters.
+const btn = '#missions-panel-main #ymca-shuteye-btn';
+assert.equal(await pg.locator(btn).count(), 1, 'the button sits with the game\'s own filters');
+assert.ok((await pg.getAttribute(btn, 'class')).includes('btn-success'), 'green while folded');
+// YMCA's own window is a lightbox over the page, so the click goes to the element directly.
+const press = () => pg.evaluate((sel) => document.querySelector(sel).click(), btn);
+await press();
+await pg.waitForTimeout(150);
+console.log('folded off        :', JSON.stringify(await seen()));
+assert.equal((await seen()).length, 5, 'the button unfolds without touching the ElementFriend switch');
+assert.ok((await pg.getAttribute(btn, 'class')).includes('btn-default'), 'and goes plain');
+await press();
+await pg.waitForTimeout(150);
+assert.deepEqual(await seen(), ['mission_bar_outer_506247649'], 'and folds again');
+console.log('map button        : folds and unfolds');
 assert.notEqual(await pg.evaluate(() =>
   getComputedStyle(document.querySelector('#mission_panel_506247649 .col-xs-1 img')).display),
 'none', 'the artwork is in the other column and is never hidden');
@@ -1567,6 +1607,20 @@ await pg.waitForTimeout(150);
 console.log('centre NY         :', JSON.stringify(await stations()));
 assert.deepEqual(await stations(), ['NY', 'FS01', 'AS01'],
   'the centre itself stays, and only the stations that answer to it');
+const top = await pg.evaluate(() => {
+  const li = document.getElementById('building_list_11');
+  return {
+    order: getComputedStyle(li).order,
+    first: [...document.querySelectorAll('#building_list > li')]
+      .filter((x) => getComputedStyle(x).display !== 'none')
+      .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0]
+      .getAttribute('search_attribute'),
+  };
+});
+console.log('centre on top     :', JSON.stringify(top));
+assert.equal(top.order, '-1', 'the chosen centre is ordered above its own stations');
+assert.equal(top.first, 'NY', 'and really sits there');
+
 await pg.selectOption('#ymca-sf-pick', '');
 await pg.waitForTimeout(150);
 assert.equal((await stations()).length, 5, 'and all of them come back');
@@ -1654,6 +1708,17 @@ console.log('limited           : the five nearest, 30.00 km dropped');
 await pg.selectOption('#hf-limit', '0');
 await pg.waitForTimeout(150);
 
+// The range is a ceiling on whatever column is being sorted by — the page names it, the player
+// names the number, so neither is guessed and it works for price as well as for distance.
+await pg.fill('#hf-max', '10');
+await pg.waitForTimeout(200);
+console.log('at most 10        :', JSON.stringify(await order()));
+assert.deepEqual(await order(), ['St Anne', 'County'],
+  'nothing further than 10 — no ambulance sent on a world tour');
+await pg.fill('#hf-max', '');
+await pg.waitForTimeout(200);
+assert.equal((await order()).length, 6, 'and an empty box is no ceiling at all');
+
 // Clicking a destination arms the jump. HighFive never prevents that click — so the test has
 // to, or the browser really would navigate away to the game's own transport page.
 await pg.evaluate(() => {
@@ -1703,6 +1768,25 @@ for (const [branch, dest] of [['patient', '41'], ['gefangener', '7'], ['patient'
   console.log('after a pick      :', `/${branch}/${dest} \u2192`, new URL(picked.url()).search);
   assert.equal(pickedErrs.length, 0, `${branch} page threw`);
   await picked.close();
+}
+
+// And when the page names no next vehicle, a second later it presses Escape — which is how the
+// player closes the game's own lightbox, and the only thing here that has been seen from this
+// side. No function of the game's is called by name.
+{
+  const last = await b.newPage({ viewport: { width: 1100, height: 900 } });
+  await last.goto('http://localhost:8777/README.md');
+  await last.setContent('<html><body><div class="alert alert-success">Assigned</div></body></html>');
+  await last.evaluate(() => {
+    history.replaceState({}, '', '/vehicles/15079874/patient/41');
+    window.__escapes = [];
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.__escapes.push(1); });
+  });
+  await last.addScriptTag({ content: script });
+  await last.waitForFunction(() => window.__escapes.length > 0, { timeout: 8000 });
+  console.log('nothing left      : Escape pressed, window closes');
+  assert.match(last.url(), /\/patient\/41$/, 'and it went nowhere, because there was nowhere to go');
+  await last.close();
 }
 
 console.log('page errors       :', errs.length ? errs.slice(0, 3) : 'none');

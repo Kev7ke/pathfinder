@@ -219,11 +219,22 @@ of its cells read as a number and they are not all the same. A column nobody has
 heard of sorts just as well, and a game update that adds one needs no change
 here.
 
-**The range filter is sort plus a limit.** "Sort by distance" and "show the
-first 10" is a range, and it works for price or free beds without a second
-control. `hospital_max_distance`, `hospital_max_price` and `hospital_own` sit on
+**The range is a ceiling on the column being sorted by**, not a distance this
+knows the units of. Sort by distance and "at most 20" is twenty of whatever that
+column counts in; sort by price and it is a price. The page names the column and
+the player names the number, so neither is guessed — and a row whose cell cannot
+be read is never hidden by it. "Show the first 10" is the other half of the same
+idea. `hospital_max_distance`, `hospital_max_price` and `hospital_own` sit on
 the vehicle in `/api/vehicles`, which is where the game keeps its own version of
 that setting.
+
+**Nothing left to do is a page that did not move.** A second on the pick page
+with no navigation is the game saying there is no next transport — the button it
+would have put there is not there. Escape is what the player would press, so
+Escape is what is pressed, on the top document as well because the vehicle
+window is a frame inside the map's own lightbox. **No function of the game's is
+called by name**: nothing here has seen one, and a wrong guess would be a dead
+button rather than an honest one.
 
 **A dot before exactly three digits is a thousand; anything else is a decimal
 point.** `2.79` is a distance and `1.450` is a thousand and a half, and both
@@ -485,6 +496,23 @@ in the grandparent — heading, body, the row and both columns step out, the pan
 becomes the flex row, and `order` lines them up. Anything put back takes
 `flex: 1 1 100%` so it gets its own line rather than squeezing the name.
 
+**`display: contents` takes the gradient with the box.** The heading's
+background, its text colour and its bottom rule are its own, and giving up its
+box gives them up — which left a flat white strip where the game had something
+worth looking at, and lost the red/yellow/green that says how a mission is
+going. So it is read back off the game the way the shell's palette was:
+`getComputedStyle` on one heading **of each state**, moved onto the panel
+itself. A state that is not on screen is simply not sampled this time and what
+was learnt before is remembered, so after a few page loads all three are known
+and a game update repaints them without anybody editing a hex.
+
+**Two switches mean two different things.** ElementFriend decides whether
+ShutEye is part of this install; the button in `#missions-panel-main` — the row
+holding the game's own Emergency and Patient transport filters — decides whether
+it is folded right now. The first gates the second, so switching it off takes
+the button with it. A switch for how a list reads belongs beside that list, not
+two clicks away in a lightbox.
+
 **A name is cut with an ellipsis, not after a set number of words.** A word
 count leaves a ragged right edge, and the thing beside it — the progress bar —
 is what wants a predictable width. The address is a second sentence inside the
@@ -524,6 +552,18 @@ to.** A row is `li#building_list_<id>` carrying `building_type_id` and
 `"null"`. So StationFascination groups by reading, and `/api/buildings` is never
 asked. The game filters that list by *kind* of building and never by region,
 which is the gap.
+
+**The one you picked belongs at the top.** A flex column on the list and
+`order: -1` on the chosen centre is all that takes, and it survives every redraw
+because it is keyed on the id the game writes itself.
+
+**A native control needs the system's own colours, not the game's button
+classes.** A `<select>` wearing `.btn-default` was unreadable — that class came
+back white on white in the probe, and an option highlighted made it worse. It
+wears `Field` on `FieldText` instead, with `color-scheme: light dark`: the pair
+the browser uses for every other dropdown on the machine, always legible against
+itself, and following whatever theme the page is in. That is not a colour of
+YMCA's own.
 
 **A filter that only hides can be combined with the game's own.** The game's
 station search marks rows with `building-filtered-by-search`; a rule that forced

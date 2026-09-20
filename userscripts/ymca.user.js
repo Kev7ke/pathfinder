@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.37
+// @version      0.0.38
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.37',
+    version: '0.0.38',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -5756,6 +5756,9 @@ function hfPanel(el, ctx) {
       <b>After you pick</b>
       <label style="display:block;margin-top:6px;font-weight:400;cursor:pointer">
         <input type="checkbox" data-cfg="advance"> Go straight to the next transport</label>
+      <label style="display:block;margin-top:6px;font-weight:400;cursor:pointer">
+        <input type="checkbox" data-cfg="closeWhenDone"> Close the window when there is nothing
+        left</label>
       <p class="ymca-dim" style="margin:6px 0 0;font-size:12px">The game works out which vehicle
         is next and links to it; this follows that link once you have picked. It never picks for
         you and never repeats your click \u2014 assigning a hospital cannot be undone.</p>
@@ -5824,11 +5827,12 @@ function hfPanel(el, ctx) {
         : 'no column read as a number'}.`
         : 'No transport page seen yet. Open a vehicle that is transporting.';
 
-    const advance = el.querySelector('[data-cfg="advance"]');
-    advance.checked = hfCfg(ctx).advance !== false;
-    advance.addEventListener('change', () => {
-        ctx.store.write('cfg', { ...hfCfg(ctx), advance: advance.checked });
-        ctx.status(advance.checked ? 'It will move you on.' : 'It will stay put.');
+    el.querySelectorAll('[data-cfg]').forEach((box) => {
+        box.checked = hfCfg(ctx)[box.dataset.cfg] !== false;
+        box.addEventListener('change', () => {
+            ctx.store.write('cfg', { ...hfCfg(ctx), [box.dataset.cfg]: box.checked });
+            ctx.status(box.checked ? 'On.' : 'Off.');
+        });
     });
 
     el.addEventListener('click', async (e) => {
@@ -6006,6 +6010,16 @@ function hfApply(ctx, cfg) {
             let hide = false;
             if (cfg.who === 'own' && own) hide = !own.has(tr);
             if (cfg.who === 'alliance' && alliance) hide = !alliance.has(tr);
+            /* THE RANGE IS A CEILING ON THE COLUMN BEING SORTED BY, not a
+             * distance this knows the units of. Sort by distance and "at most
+             * 20" is twenty of whatever that column counts in; sort by price
+             * and it is a price. The page names the column and the player
+             * names the number, so neither has to be guessed — and a row whose
+             * cell cannot be read is never hidden by it. */
+            if (!hide && column && cfg.max > 0) {
+                const value = hfNum(tr.cells[column.index]?.textContent);
+                if (value !== null && value > cfg.max) hide = true;
+            }
             if (!hide && cfg.limit && shown >= cfg.limit) hide = true;
             tr.style.display = hide ? 'none' : '';
             if (!hide) shown += 1;
@@ -6060,6 +6074,11 @@ function hfOnPickPage(ctx) {
       <label style="font-weight:400;margin:0;cursor:pointer">
         <input type="checkbox" id="hf-down" ${cfg.sortDown ? 'checked' : ''}> biggest first</label>`
         : '<span style="opacity:.75">No column in this table reads as a number.</span>'}
+      ${columns.length ? `<label style="font-weight:400;margin:0">At most
+        <input type="number" id="hf-max" min="0" step="1" style="width:74px"
+          value="${cfg.max > 0 ? Number(cfg.max) : ''}" placeholder="any"
+          ${cfg.sortBy ? '' : 'disabled title="pick a column to sort by first"'}>
+        <span style="opacity:.75">${ctx.esc(cfg.sortBy || '\u2014')}</span></label>` : ''}
       <label style="font-weight:400;margin:0">Show
         <select id="hf-limit" class="input-sm">
           ${[0, 5, 10, 20, 40].map((n) => `<option value="${n}"${n === (cfg.limit || 0)
@@ -6086,16 +6105,33 @@ function hfOnPickPage(ctx) {
         sortBy: bar.querySelector('#hf-sort')?.value || '',
         sortDown: !!bar.querySelector('#hf-down')?.checked,
         limit: Number(bar.querySelector('#hf-limit').value) || 0,
+        max: Number(bar.querySelector('#hf-max')?.value) || 0,
         who: bar.querySelector('#hf-who')?.value || 'all',
     });
     const redraw = () => {
         const now = read();
         ctx.store.write('cfg', now);
+        /* The ceiling belongs to whichever column is being sorted by, so it
+         * follows the sort rather than being fixed when the bar was drawn —
+         * a box that stays greyed out after you pick a column is a box that
+         * looks broken. */
+        const max = bar.querySelector('#hf-max');
+        if (max) {
+            max.disabled = !now.sortBy;
+            max.title = now.sortBy ? '' : 'pick a column to sort by first';
+            max.nextElementSibling.textContent = now.sortBy || '\u2014';
+        }
         const shown = hfApply(ctx, now);
         bar.querySelector('#hf-count').textContent = shown < total
             ? `${shown} of ${total} shown` : '';
     };
     bar.addEventListener('change', redraw);
+    // A number field only fires `change` when it loses focus, and a range you
+    // have to click away from to see is a range nobody trusts.
+    bar.addEventListener('input', (e) => {
+        if (e.target.id !== 'hf-max') return;
+        redraw();
+    });
     redraw();
 
     document.addEventListener('click', (e) => {
@@ -6136,6 +6172,35 @@ function hfOnPickPage(ctx) {
  * "Leave without transport" is the same path with a negative hospital id, so it
  * moves on the same way.
  */
+/**
+ * Nothing left to do: close the window.
+ *
+ * A second on the pick page with no navigation is the game saying there is no
+ * next transport — the button it would have put there is not there. Escape is
+ * what the player would press, so Escape is what is pressed, on the top
+ * document as well because the vehicle window is a frame inside the map's own
+ * lightbox. No function of the game's is called by name: nothing here has seen
+ * one, and a wrong guess would be a dead button rather than an honest one.
+ */
+function hfCloseWindow(ctx) {
+    if (!HF_PICKED.test(location.pathname)) return;   // something moved us on after all
+    const press = (doc) => {
+        for (const type of ['keydown', 'keyup']) {
+            doc.dispatchEvent(new KeyboardEvent(type, {
+                key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
+                bubbles: true, cancelable: true,
+            }));
+        }
+    };
+    try {
+        if (window.top !== window.self) press(window.top.document);
+    } catch (e) { /* a frame from somewhere else is not ours to close */ }
+    press(document);
+    ctx.log.info('nothing left in status 5, pressed Escape');
+}
+
+const HF_CLOSE_AFTER = 1000;
+
 function hfAfterPick(ctx) {
     if (!HF_PICKED.test(location.pathname)) return false;
     const next = document.querySelector(HF_NEXT);
@@ -6153,6 +6218,9 @@ function hfAfterPick(ctx) {
     }
     if (!href) {
         ctx.log.info('picked, and this page names no next vehicle');
+        if (hfCfg(ctx).closeWhenDone !== false) {
+            setTimeout(() => hfCloseWindow(ctx), HF_CLOSE_AFTER);
+        }
         return true;
     }
     if (new URL(href, location.origin).pathname === location.pathname) return true;
@@ -6305,6 +6373,48 @@ YMCA.register({
  * ------------------------------------------------------------------------ */
 
 const SE_STYLE_ID = 'ymca-shuteye';
+const SE_BUTTON_ID = 'ymca-shuteye-btn';
+
+/** The three states the game paints a mission panel in. */
+const SE_STATES = ['red', 'yellow', 'green'];
+
+/**
+ * THE GRADIENT CAME OFF WITH THE BOX.
+ *
+ * `display: contents` is what lets the heading's children lay out in the panel,
+ * and the price is the heading's own box — its gradient, its text colour and
+ * its bottom rule all go with it, which left a flat white strip where the
+ * game had something worth looking at. Worse, the gradient is how a panel says
+ * red, yellow or green, so losing it lost the state as well.
+ *
+ * So it is read back off the game, the way the palette in the shell was:
+ * `getComputedStyle` on one heading of each state, moved onto the panel itself.
+ * Nothing is invented and the three colours keep meaning what they meant. A
+ * state that is not on screen right now is simply not sampled this time, and
+ * what was learnt before is remembered — so after a few page loads all three
+ * are known, and a game update repaints them without anybody editing a hex.
+ */
+function seSample(ctx) {
+    const looks = ctx.store.read('looks', {});
+    let changed = false;
+    for (const state of SE_STATES) {
+        const head = document.querySelector(`.panel.mission_panel_${state} > .panel-heading`);
+        if (!head) continue;
+        const cs = getComputedStyle(head);
+        const look = {
+            color: cs.color,
+            background: cs.backgroundColor,
+            image: cs.backgroundImage,
+            border: `${cs.borderBottomWidth} ${cs.borderBottomStyle} ${cs.borderBottomColor}`,
+        };
+        if (JSON.stringify(looks[state]) !== JSON.stringify(look)) {
+            looks[state] = look;
+            changed = true;
+        }
+    }
+    if (changed) ctx.store.write('looks', looks);
+    return looks;
+}
 
 /** What can be put back, by the id the game gives it. */
 const SE_PARTS = [
@@ -6340,7 +6450,7 @@ function seCfg(ctx) {
  * The address is a second sentence inside the name and goes by default — it is
  * what made the name unreadable in the space left.
  */
-function seCss(cfg) {
+function seCss(cfg, looks) {
     const P = '.panel[id^="mission_panel_"]';
     const col = `${P} .panel-body .col-xs-11`;
     const bar = `${col} > div[id^="mission_bar_outer_"]`;
@@ -6365,24 +6475,83 @@ function seCss(cfg) {
             + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
             `${bar}{order:5;flex:0 0 ${width}%;margin:0;height:14px}`);
         if (back.length) rules.push(`${back.join(',')}{flex:1 1 100%;order:10}`);
+
+        /* The heading's own look, put back on the panel now that the heading
+         * has no box of its own to wear it. */
+        for (const state of SE_STATES) {
+            const look = looks?.[state];
+            if (!look) continue;
+            rules.push(`${P}.mission_panel_${state}{background-color:${look.background};`
+                + `background-image:${look.image};color:${look.color};`
+                + `border-bottom:${look.border}}`);
+        }
     }
     return rules.join('\n');
 }
 
 /** Write the rule, or take it away. Both are one element. */
 function seApply(ctx) {
-    const on = YMCA.isOn('shuteye');
+    const cfg = seCfg(ctx);
+    /* Two switches, and they mean different things: ElementFriend decides
+     * whether ShutEye is part of this install at all, and the button on the
+     * map decides whether it is folded right now. The first one gates the
+     * second, so switching it off takes the button with it. */
+    const available = YMCA.isOn('shuteye');
+    const folded = available && cfg.on !== false;
+
     let style = document.getElementById(SE_STYLE_ID);
-    if (!on) {
-        style?.remove();
-        return;
+    if (!folded) style?.remove();
+    else {
+        if (!style) {
+            style = document.createElement('style');
+            style.id = SE_STYLE_ID;
+            (document.head || document.documentElement).append(style);
+        }
+        // Sampled before the rule lands, so it reads the game and not itself.
+        style.textContent = seCss(cfg, seSample(ctx));
     }
-    if (!style) {
-        style = document.createElement('style');
-        style.id = SE_STYLE_ID;
-        (document.head || document.documentElement).append(style);
-    }
-    style.textContent = seCss(seCfg(ctx));
+
+    if (!available) document.getElementById(SE_BUTTON_ID)?.remove();
+    sePaintButton(ctx);
+}
+
+/**
+ * The button, among the game's own mission filters.
+ *
+ * `#missions-panel-main` is the row that holds Emergency, Patient transports
+ * and the rest, so a switch for how that list reads belongs in it rather than
+ * two clicks away in a lightbox. It uses the game's own button classes, green
+ * for on and plain for off, exactly as the filters beside it do.
+ */
+function seMountButton(ctx) {
+    if (!YMCA.isOn('shuteye')) return false;
+    if (document.getElementById(SE_BUTTON_ID)) return true;
+    const row = document.getElementById('missions-panel-main');
+    if (!row) return false;
+
+    const btn = document.createElement('a');
+    btn.id = SE_BUTTON_ID;
+    btn.setAttribute('role', 'button');
+    btn.href = '';
+    btn.title = 'ShutEye — fold the mission list into one line';
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        ctx.store.write('cfg', { ...seCfg(ctx), on: seCfg(ctx).on === false });
+        seApply(ctx);
+        ctx.log.info(`folded ${seCfg(ctx).on === false ? 'off' : 'on'} from the map`);
+    });
+    row.append(btn);
+    sePaintButton(ctx);
+    return true;
+}
+
+function sePaintButton(ctx) {
+    const btn = document.getElementById(SE_BUTTON_ID);
+    if (!btn) return;
+    const on = seCfg(ctx).on !== false;
+    btn.className = `btn btn-xs mission_selection ${on ? 'btn-success' : 'btn-default'}`;
+    btn.innerHTML = `<span class="glyphicon glyphicon-eye-${on ? 'close' : 'open'}"></span>
+    ShutEye`;
 }
 
 YMCA.inject('shuteye', (ctx) => {
@@ -6391,7 +6560,9 @@ YMCA.inject('shuteye', (ctx) => {
      * next person reading the page. */
     if (window.top !== window.self) return true;
     seApply(ctx);
-    return true;
+    /* The rule is written straight away; the button waits for the row that
+     * holds the game's own filters, which arrives with the mission list. */
+    return seMountButton(ctx);
 });
 
 YMCA.register({
@@ -6417,6 +6588,15 @@ YMCA.register({
       <div class="ymca-note">The artwork and the progress bar always stay. Everything else is
         hidden unless you put it back here &mdash; that way round, a panel the game starts
         drawing next month is quiet without anybody having to notice it.</div>
+      <div class="ymca-card">
+        <b>Folded right now</b>
+        <label style="display:block;margin-top:7px"><input type="checkbox" data-part="on"
+          ${seCfg(ctx).on !== false ? 'checked' : ''}> Fold the mission list</label>
+        <p class="ymca-dim" style="margin:6px 0 0;font-size:12px">The same switch sits on the map
+          itself, with the game&rsquo;s own Emergency and Patient transport filters, so it can be
+          turned off for a moment without opening this.</p>
+      </div>
+
       <div class="ymca-card">
         <b>The one line</b>
         <label style="display:block;margin-top:7px"><input type="checkbox" data-part="line"
@@ -6515,13 +6695,33 @@ function sfCounts() {
     return counts;
 }
 
+/**
+ * The picker's own look.
+ *
+ * A `<select>` is a native control and the game's `.btn-default` is white on
+ * white in the probe, which between them made it unreadable — dark, light, and
+ * worse again with an option highlighted. So it wears the browser's own form
+ * pair, `Field` on `FieldText`, which is always legible against itself and
+ * follows whatever theme the page is in. That is not a colour of YMCA's own:
+ * it is the one the system uses for every other dropdown on the machine.
+ */
+const SF_LOOK = `#${SF_PICK_ID}{color-scheme:light dark;background-color:Field;color:FieldText;
+  border:1px solid;border-color:rgba(128,128,128,.6);border-radius:3px;
+  font:inherit;font-size:12px;line-height:1.4;padding:1px 4px;max-width:160px;height:auto}
+#${SF_PICK_ID} option{background-color:Field;color:FieldText}`;
+
 function sfCss(centre) {
-    if (!centre) return '';
-    /* Hide, never show: the game's own search is the other half of this and a
-     * forced `display` would override it. */
-    return `${SF_LIST} > li[leitstelle_building_id]`
-        + `:not([leitstelle_building_id="${centre}"])`
-        + `:not(#building_list_${centre}){display:none !important}`;
+    if (!centre) return SF_LOOK;
+    return `${SF_LOOK}
+/* Hide, never show: the game's own station search is the other half of this,
+   and a forced display would override it rather than add up with it. */
+${SF_LIST} > li[leitstelle_building_id]:not([leitstelle_building_id="${centre}"])`
+        + `:not(#building_list_${centre}){display:none !important}
+/* The centre you picked belongs at the top of its own list. A flex column and
+   one order is all that takes, and it survives every redraw because it is
+   keyed on the id the game writes itself. */
+${SF_LIST}{display:flex;flex-direction:column}
+${SF_LIST} > li#building_list_${centre}{order:-1}`;
 }
 
 function sfApply(ctx) {
@@ -6553,8 +6753,6 @@ function sfMount(ctx) {
     const cfg = sfCfg(ctx);
     const pick = document.createElement('select');
     pick.id = SF_PICK_ID;
-    pick.className = 'btn btn-xs btn-default';
-    pick.style.maxWidth = '150px';
     pick.innerHTML = `<option value="">All dispatch centres</option>
     ${centres.map((c) => `<option value="${esc(c.id)}"${c.id === cfg.centre ? ' selected' : ''}
       >${esc(c.name)}${counts[c.id] ? ` (${counts[c.id]})` : ''}</option>`).join('')}`;

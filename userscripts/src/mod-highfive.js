@@ -236,6 +236,9 @@ function hfPanel(el, ctx) {
       <b>After you pick</b>
       <label style="display:block;margin-top:6px;font-weight:400;cursor:pointer">
         <input type="checkbox" data-cfg="advance"> Go straight to the next transport</label>
+      <label style="display:block;margin-top:6px;font-weight:400;cursor:pointer">
+        <input type="checkbox" data-cfg="closeWhenDone"> Close the window when there is nothing
+        left</label>
       <p class="ymca-dim" style="margin:6px 0 0;font-size:12px">The game works out which vehicle
         is next and links to it; this follows that link once you have picked. It never picks for
         you and never repeats your click \u2014 assigning a hospital cannot be undone.</p>
@@ -304,11 +307,12 @@ function hfPanel(el, ctx) {
         : 'no column read as a number'}.`
         : 'No transport page seen yet. Open a vehicle that is transporting.';
 
-    const advance = el.querySelector('[data-cfg="advance"]');
-    advance.checked = hfCfg(ctx).advance !== false;
-    advance.addEventListener('change', () => {
-        ctx.store.write('cfg', { ...hfCfg(ctx), advance: advance.checked });
-        ctx.status(advance.checked ? 'It will move you on.' : 'It will stay put.');
+    el.querySelectorAll('[data-cfg]').forEach((box) => {
+        box.checked = hfCfg(ctx)[box.dataset.cfg] !== false;
+        box.addEventListener('change', () => {
+            ctx.store.write('cfg', { ...hfCfg(ctx), [box.dataset.cfg]: box.checked });
+            ctx.status(box.checked ? 'On.' : 'Off.');
+        });
     });
 
     el.addEventListener('click', async (e) => {
@@ -486,6 +490,16 @@ function hfApply(ctx, cfg) {
             let hide = false;
             if (cfg.who === 'own' && own) hide = !own.has(tr);
             if (cfg.who === 'alliance' && alliance) hide = !alliance.has(tr);
+            /* THE RANGE IS A CEILING ON THE COLUMN BEING SORTED BY, not a
+             * distance this knows the units of. Sort by distance and "at most
+             * 20" is twenty of whatever that column counts in; sort by price
+             * and it is a price. The page names the column and the player
+             * names the number, so neither has to be guessed — and a row whose
+             * cell cannot be read is never hidden by it. */
+            if (!hide && column && cfg.max > 0) {
+                const value = hfNum(tr.cells[column.index]?.textContent);
+                if (value !== null && value > cfg.max) hide = true;
+            }
             if (!hide && cfg.limit && shown >= cfg.limit) hide = true;
             tr.style.display = hide ? 'none' : '';
             if (!hide) shown += 1;
@@ -540,6 +554,11 @@ function hfOnPickPage(ctx) {
       <label style="font-weight:400;margin:0;cursor:pointer">
         <input type="checkbox" id="hf-down" ${cfg.sortDown ? 'checked' : ''}> biggest first</label>`
         : '<span style="opacity:.75">No column in this table reads as a number.</span>'}
+      ${columns.length ? `<label style="font-weight:400;margin:0">At most
+        <input type="number" id="hf-max" min="0" step="1" style="width:74px"
+          value="${cfg.max > 0 ? Number(cfg.max) : ''}" placeholder="any"
+          ${cfg.sortBy ? '' : 'disabled title="pick a column to sort by first"'}>
+        <span style="opacity:.75">${ctx.esc(cfg.sortBy || '\u2014')}</span></label>` : ''}
       <label style="font-weight:400;margin:0">Show
         <select id="hf-limit" class="input-sm">
           ${[0, 5, 10, 20, 40].map((n) => `<option value="${n}"${n === (cfg.limit || 0)
@@ -566,16 +585,33 @@ function hfOnPickPage(ctx) {
         sortBy: bar.querySelector('#hf-sort')?.value || '',
         sortDown: !!bar.querySelector('#hf-down')?.checked,
         limit: Number(bar.querySelector('#hf-limit').value) || 0,
+        max: Number(bar.querySelector('#hf-max')?.value) || 0,
         who: bar.querySelector('#hf-who')?.value || 'all',
     });
     const redraw = () => {
         const now = read();
         ctx.store.write('cfg', now);
+        /* The ceiling belongs to whichever column is being sorted by, so it
+         * follows the sort rather than being fixed when the bar was drawn —
+         * a box that stays greyed out after you pick a column is a box that
+         * looks broken. */
+        const max = bar.querySelector('#hf-max');
+        if (max) {
+            max.disabled = !now.sortBy;
+            max.title = now.sortBy ? '' : 'pick a column to sort by first';
+            max.nextElementSibling.textContent = now.sortBy || '\u2014';
+        }
         const shown = hfApply(ctx, now);
         bar.querySelector('#hf-count').textContent = shown < total
             ? `${shown} of ${total} shown` : '';
     };
     bar.addEventListener('change', redraw);
+    // A number field only fires `change` when it loses focus, and a range you
+    // have to click away from to see is a range nobody trusts.
+    bar.addEventListener('input', (e) => {
+        if (e.target.id !== 'hf-max') return;
+        redraw();
+    });
     redraw();
 
     document.addEventListener('click', (e) => {
@@ -616,6 +652,35 @@ function hfOnPickPage(ctx) {
  * "Leave without transport" is the same path with a negative hospital id, so it
  * moves on the same way.
  */
+/**
+ * Nothing left to do: close the window.
+ *
+ * A second on the pick page with no navigation is the game saying there is no
+ * next transport — the button it would have put there is not there. Escape is
+ * what the player would press, so Escape is what is pressed, on the top
+ * document as well because the vehicle window is a frame inside the map's own
+ * lightbox. No function of the game's is called by name: nothing here has seen
+ * one, and a wrong guess would be a dead button rather than an honest one.
+ */
+function hfCloseWindow(ctx) {
+    if (!HF_PICKED.test(location.pathname)) return;   // something moved us on after all
+    const press = (doc) => {
+        for (const type of ['keydown', 'keyup']) {
+            doc.dispatchEvent(new KeyboardEvent(type, {
+                key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
+                bubbles: true, cancelable: true,
+            }));
+        }
+    };
+    try {
+        if (window.top !== window.self) press(window.top.document);
+    } catch (e) { /* a frame from somewhere else is not ours to close */ }
+    press(document);
+    ctx.log.info('nothing left in status 5, pressed Escape');
+}
+
+const HF_CLOSE_AFTER = 1000;
+
 function hfAfterPick(ctx) {
     if (!HF_PICKED.test(location.pathname)) return false;
     const next = document.querySelector(HF_NEXT);
@@ -633,6 +698,9 @@ function hfAfterPick(ctx) {
     }
     if (!href) {
         ctx.log.info('picked, and this page names no next vehicle');
+        if (hfCfg(ctx).closeWhenDone !== false) {
+            setTimeout(() => hfCloseWindow(ctx), HF_CLOSE_AFTER);
+        }
         return true;
     }
     if (new URL(href, location.origin).pathname === location.pathname) return true;
