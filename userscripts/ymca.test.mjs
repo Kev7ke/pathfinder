@@ -883,6 +883,86 @@ console.log('unmatched keys    :', JSON.stringify(remembered.slice(-3)));
 assert.ok(remembered.includes('hovercraft_wranglers'),
   'and carried into the report so it can be added');
 
+// ---- a requirement nothing maps, answered by the page's own vocabulary ----
+// The game names the same capability twice: `hazmat_vehicles` in the requirements, and an
+// attribute of that name on the checkbox of every vehicle that satisfies it. Where the two line
+// up the row is filled without anybody adding a mapping — and only ever against a flag a vehicle
+// in this very table actually carries, which is why the Hovercraft Wrangler above stays unmatched.
+await mission.evaluate(() => {
+  localStorage.removeItem('ymca-missionmagician-mm-help-17');
+  const help = `<html><body><h1>Chemical spill</h1><table>
+    <tr><td>Required Firetrucks</td><td>1</td></tr>
+    <tr><td>Required Hazmat Vehicles</td><td>2</td></tr></table></body></html>`;
+  const realFetch = window.fetch;
+  window.fetch = async (url, opts) => {
+    if (String(url).startsWith('/einsaetze/17')) {
+      return new Response(help, { headers: { 'content-type': 'text/html' } });
+    }
+    return realFetch(url, opts);
+  };
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '17');
+  document.getElementById('mission_help').setAttribute('href', '/einsaetze/17');
+  const row = (id, secs, attrs) => `<tr class="vehicle_select_table_tr" vehicle_id="${id}"
+    data-distance="1"><td><input type="checkbox" class="vehicle_checkbox"
+    id="vehicle_checkbox_${id}" value="${id}" name="vehicle_ids[]" ${attrs} fms="2"></td>
+    <td id="vehicle_sort_${id}" timevalue="${secs}">x</td></tr>`;
+  document.getElementById('vehicle_show_table_body_all').innerHTML = [
+    row(80, 10, 'vehicle_type_id="9" hazmat="1"'),
+    row(81, 20, 'vehicle_type_id="9" hazmat="1"'),
+    row(82, 30, 'vehicle_type_id="33" fire="1"'),
+  ].join('');
+});
+await mission.waitForTimeout(1400);
+const hazmat = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('hazmat row        :', JSON.stringify(hazmat));
+const haz = hazmat.find((r) => /Hazmat vehicles/i.test(r[4]));
+assert.ok(haz, 'a requirement nothing maps is still a row, not a shrug');
+assert.equal(haz[0], '2', 'and it wants what the page said it wants');
+assert.ok(/read from the page/.test(haz[4]),
+  'the panel says this one was read off the checkboxes rather than mapped here');
+const hazTick = await mission.textContent('#ymca-mm-panel [data-do="select"]');
+console.log('hazmat tick       :', hazTick.trim());
+assert.ok(/Tick 3 vehicles/.test(hazTick),
+  'two HazMats and an engine: a vehicle YMCA has never heard of is dispatched like any other');
+await mission.click('#ymca-mm-panel [data-do="select"]');
+const hazTicked = await mission.evaluate(() =>
+  [...document.querySelectorAll('.vehicle_checkbox:checked')].map((b) => b.value).sort());
+console.log('hazmat ticked     :', JSON.stringify(hazTicked));
+assert.deepEqual(hazTicked, ['80', '81', '82'], 'and it is the game\'s own boxes that get ticked');
+
+// ---- follow-up switches off however the mission was dispatched ----
+// Only one of the game's five dispatch controls submits the form. Dispatch and Next, the alliance
+// one that shares as it goes, and both navbar buttons are <a href="#"> that post by themselves,
+// so watching the submit left follow-up on through every one of them.
+await mission.evaluate(() => {
+  const bar = document.createElement('div');
+  bar.innerHTML = `<a class="alert_next" href="#">Dispatch and Next</a>
+    <a class="alert_next_alliance" href="#">Dispatch, share and next</a>
+    <a id="mission_alarm_btn" href="#">Dispatch</a>`;
+  document.body.append(bar);
+});
+const followUpAfter = async (selector, locked) => {
+  await mission.evaluate(([sel, lock]) => {
+    const key = 'ymca-missionmagician-cfg';
+    const cfg = JSON.parse(localStorage.getItem(key) || '{}');
+    cfg.followUp = true;
+    cfg.followUpLocked = lock;
+    localStorage.setItem(key, JSON.stringify(cfg));
+    document.querySelector(sel).click();
+  }, [selector, locked]);
+  return mission.evaluate(() =>
+    JSON.parse(localStorage.getItem('ymca-missionmagician-cfg') || '{}').followUp);
+};
+for (const sel of ['.alert_next', '.alert_next_alliance', '#mission_alarm_btn']) {
+  const still = await followUpAfter(sel, false);
+  console.log('follow-up after   :', sel, '->', JSON.stringify(still));
+  assert.equal(still, false, `${sel} dispatches, so follow-up must fall out with it`);
+}
+const kept = await followUpAfter('.alert_next', true);
+console.log('follow-up locked  :', JSON.stringify(kept));
+assert.equal(kept, true, 'unless the lock beside the switch says to keep it on');
+
 // ---- Cancel unused: the overlap has to be re-checked, not assumed ----
 // A Quint on scene covers the ladder and an engine at once. Counting per requirement says the
 // engines are over-supplied and the Quint can go; checking again after taking it away says no.

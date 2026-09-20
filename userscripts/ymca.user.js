@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.19
+// @version      0.0.20
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.19',
+    version: '0.0.20',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2061,6 +2061,20 @@ const MM_ICONS = {
     // Foam: bubbles.
     foam: '<circle cx="6.5" cy="12" r="3.5"/><circle cx="13" cy="13" r="2.5"/>'
         + '<circle cx="11" cy="6.5" r="2.5"/>',
+    // HazMat: the trefoil, the way a placard wears it.
+    hazard: '<path d="M10 2.5 18 16.5H2z"/><path d="M10 7.5v4"/><circle cx="10" cy="14" r=".6"/>',
+    // Water rescue: a wave.
+    wave: '<path d="M2 12c2-2 3.3-2 5 0s3 2 5 0 3.3-2 5 0"/>'
+        + '<path d="M2 7c2-2 3.3-2 5 0s3 2 5 0 3.3-2 5 0"/>',
+    // A tow hook.
+    hook: '<path d="M10 2v7"/><path d="M10 9a4 4 0 1 0 4 4"/><path d="M6 2h8"/>',
+    // Light and power: a bolt.
+    bolt: '<path d="M11 2 4 11h5l-1 7 7-9h-5z"/>',
+    // A trailer or a container: a box on the ground.
+    box: '<rect x="2.5" y="5" width="15" height="8" rx="1"/><circle cx="6" cy="16" r="1.6"/>'
+        + '<circle cx="14" cy="16" r="1.6"/>',
+    // Wildland: a tree.
+    tree: '<path d="M10 2 5 9h10z"/><path d="M10 6.5 4 14h12z"/><path d="M10 14v4"/>',
 };
 
 function mmIcon(name) {
@@ -2071,9 +2085,88 @@ function mmIcon(name) {
     style="vertical-align:-1px;margin-left:5px;opacity:.75">${path}</svg>`;
 }
 
-/** Every flag any requirement can ask for, so only those are worth remembering. */
-const MM_FLAGS = [...new Set(Object.values(MM_REQUIREMENTS)
+/** Every flag the requirements above ask for by name. */
+const MM_NAMED_FLAGS = [...new Set(Object.values(MM_REQUIREMENTS)
     .flatMap((r) => r.anyOf || [r.flag]))];
+
+/**
+ * Attributes on a vehicle's checkbox that are not capabilities.
+ *
+ * Everything else the game sets to "1" is one: `fire`, `dlk`, `rw`,
+ * `any_rtw`, `water_damage_pump`, `crew_carrier_or_fire_engine`. The game
+ * writes the whole set on the element, so the vocabulary is read from the page
+ * rather than kept in a list here — which is what lets a vehicle YMCA has never
+ * heard of still be counted and sent.
+ */
+const MM_NOT_A_FLAG = new Set([
+    'fms', 'checked', 'disabled', 'value', 'name', 'type', 'id', 'class',
+    'vehicle_type_id', 'direct', 'distance', 'wasser_amount', 'foam_amount_display',
+    'custom_', 'equipmenttypes', 'tabindex',
+]);
+
+/** Every capability the game put on this checkbox, whatever YMCA makes of it. */
+function mmFlagsOn(box) {
+    const flags = [];
+    for (const attr of box.attributes) {
+        if (attr.value !== '1') continue;
+        const n = attr.name.toLowerCase();
+        if (MM_NOT_A_FLAG.has(n) || !/^[a-z][a-z0-9_]*$/.test(n)) continue;
+        flags.push(n);
+    }
+    return flags;
+}
+
+/**
+ * A requirement the table can answer even though nothing here maps it.
+ *
+ * The game names the same thing twice: `requirements` calls it
+ * `hazmat_vehicles`, and the checkbox of a vehicle that satisfies it carries an
+ * attribute of its own name. Where those two line up, the requirement is
+ * matched — read off the page, not guessed at, and only ever against a flag
+ * some vehicle in this very table actually carries. The `oneof_…` family says
+ * its alternatives out loud, so it is split on `_or_` and each part looked up
+ * the same way.
+ *
+ * Nothing is invented: if no candidate is in the vocabulary the requirement
+ * stays unmatched and the panel says so, exactly as before.
+ */
+function mmDeriveRule(key, vocab) {
+    const has = (n) => vocab.has(n);
+    const trim = (n) => n.replace(/s$/, '');
+    const shorten = (n) => n.replace(/_(vehicles?|trucks?|cars?|units?|engines?)$/, '');
+
+    if (key.startsWith('oneof_')) {
+        const body = key.slice('oneof_'.length);
+        if (has(body)) return { flag: body, derived: body };
+        const parts = body.split('_or_');
+        const flags = parts.map((part) =>
+            [part, trim(part), shorten(part)].find(has)).filter(Boolean);
+        if (parts.length > 1 && flags.length === parts.length) {
+            return { anyOf: [...new Set(flags)], derived: flags.join(' or ') };
+        }
+        return null;
+    }
+
+    const flag = [key, trim(key), shorten(key), shorten(trim(key))].find(has);
+    return flag ? { flag, derived: flag } : null;
+}
+
+/** Which requirement an icon suits, by what the key says it is. */
+const MM_ICON_WORDS = [
+    [/hazmat|gefahrgut|decon/, 'hazard'], [/foam/, 'foam'], [/water|tanker|pump|flood/, 'drop'],
+    [/ladder|platform|aerial|tiller/, 'ladder'], [/rescue|extricat/, 'arm'],
+    [/ambulance|patient|ems|medic/, 'cross'], [/air|breath/, 'wind'],
+    [/police|patrol|swat|k9|riot|fbi|sheriff|prisoner/, 'shield'],
+    [/chief|command|supervisor|investigat/, 'star'], [/boat|marine|coastal|lifeguard/, 'wave'],
+    [/tow|wrecker|crane/, 'hook'], [/light|generator|power/, 'bolt'],
+    [/trailer|container|equipment|hooklift/, 'box'], [/dozer|wildland|brush|crew/, 'tree'],
+    [/fire|engine|pumper|arff/, 'flame'],
+];
+
+function mmIconFor(key, label) {
+    const text = `${key} ${label || ''}`.toLowerCase();
+    return (MM_ICON_WORDS.find(([re]) => re.test(text)) || [, 'star'])[1];
+}
 
 /** Does this vehicle answer the requirement — one flag, or any of several? */
 function mmMeets(v, rule) {
@@ -2128,12 +2221,13 @@ function mmKnownTypes() {
     }
     /* What this game taught wins: the player's own server is the truth here.
      *
-     * An empty set is not an answer. MM_FLAGS only holds the flags the
-     * requirements YMCA knows about ask for, so a HazMat came back with no
-     * capabilities at all — it carries flags nothing here reads yet. Storing
-     * that as "covers nothing" would let Cancel Unused send a HazMat home from
-     * a HazMat call. Unknown is the safe reading, and leaving the vehicle alone
-     * is what unknown already does. */
+     * An empty set is not an answer. It used to mean the vehicle carried none
+     * of the handful of flags a requirement named, which is how a HazMat came
+     * back with no capabilities at all; the whole set is read now, so an empty
+     * one means the checkbox was read before the game had written to it.
+     * Either way, storing it as "covers nothing" would let Cancel Unused send a
+     * HazMat home from a HazMat call. Unknown is the safe reading, and leaving
+     * the vehicle alone is what unknown already does. */
     for (const [id, t] of Object.entries(learnt)) {
         const caps = Array.isArray(t) ? t : (t.caps || []);
         if (caps.length) known[id] = caps;
@@ -2151,7 +2245,7 @@ function mmLearnTypes(vehicles) {
     for (const v of vehicles) {
         if (!v.typeId) continue;
         const had = learnt[v.typeId];
-        const caps = MM_FLAGS.filter((f) => v.has(f));
+        const caps = v.flags;
         // Older stores kept a bare array of flags; keep reading those.
         const before = Array.isArray(had) ? { caps: had, name: null } : had;
         if (before && before.name && before.caps.join('|') === caps.join('|')) continue;
@@ -2382,6 +2476,9 @@ function mmVehicle(row) {
         distance: Number(row.getAttribute('data-distance')) || 0,
         water: num('wasser_amount'),
         foam: num('foam_amount_display'),
+        /* Everything the game flagged, so a requirement nothing here maps can
+         * still be answered from the page's own vocabulary. */
+        flags: mmFlagsOn(box),
         has: (flag) => box.getAttribute(flag) === '1',
     };
 }
@@ -2438,8 +2535,17 @@ function mmAllocate(needs, vehicles) {
      * ask for. A Quint is worth keeping back even on a mission with no ladder
      * line at all, because the next one will have one. Judging versatility
      * against this mission's needs alone makes a Quint and a pumper look
-     * identical, and then the nearer Quint goes. */
-    const capsOf = new Map(vehicles.map((v) => [v.id, MM_FLAGS.filter((f) => v.has(f))]));
+     * identical, and then the nearer Quint goes.
+     *
+     * Judged on the flags a requirement can ask for — the ones named above plus
+     * whatever this mission's own requirements turned out to want. Not every
+     * attribute on the checkbox: the game also writes composites like
+     * `road_rescue_or_fire_engine`, and counting those would rank a vehicle by
+     * how many ways the game has of describing it. */
+    const judged = new Set([...MM_NAMED_FLAGS,
+        ...needs.flatMap((n) => n.rule.anyOf || [n.rule.flag])]);
+    const capsOf = new Map(vehicles.map((v) =>
+        [v.id, [...judged].filter((f) => v.has(f))]));
     const kindOf = (v) => capsOf.get(v.id).join('|');
 
     const picked = [];
@@ -2556,9 +2662,23 @@ async function mmPlan(page, ctx, cfg) {
             else wants.push(['patients', perPatient]);
         }
 
+        /* What this table can answer, in the game's own words. Every flag on
+         * every checkbox here, whether or not a requirement above names it. */
+        const vocab = new Set(vehicles.flatMap((v) => v.flags));
+
         const needs = [];
         for (const [key, wanted] of wants) {
-            const rule = MM_REQUIREMENTS[key];
+            let rule = MM_REQUIREMENTS[key];
+            if (!rule) {
+                const found = mmDeriveRule(key, vocab);
+                if (found) {
+                    const label = mmPretty(key);
+                    rule = {
+                        ...found, label, icon: mmIconFor(key, label),
+                        source: `the game flags ${found.derived} on the vehicles that answer it`,
+                    };
+                }
+            }
             if (!rule) {
                 lines.push({ key, label: mmPretty(key), wanted, found: null, unmatched: true });
                 mmRememberUnmatched(key, page.missionType);
@@ -2580,6 +2700,7 @@ async function mmPlan(page, ctx, cfg) {
             lines.push({
                 key: n.key, label: n.rule.label, icon: n.rule.icon, wanted: n.wanted,
                 rule: n.rule, onScene: n.onScene, found: n.onScene,
+                derived: n.rule.derived || null,
             });
         }
 
@@ -3147,14 +3268,34 @@ function mmMountPanel(ctx) {
      * Its own writes are skipped, or rendering would trigger another render. */
     /* Follow-up takes vehicles off other missions, so it is a decision for one
      * alarm rather than a setting. It switches itself off once the alarm goes,
-     * unless the lock beside it says otherwise. */
-    document.getElementById('mission-form')?.addEventListener('submit', () => {
+     * unless the lock beside it says otherwise.
+     *
+     * Only one of the game's five ways to dispatch submits the form. `Dispatch`
+     * is `input[name="commit"]` inside `#mission-form`; `Dispatch and Next`
+     * (`.alert_next`), the alliance one that shares as it goes
+     * (`.alert_next_alliance`) and both navbar buttons (`#mission_alarm_btn`,
+     * `#mission_alarm_btn_mobile`) are all `<a href="#">` that post by
+     * themselves. Watching the submit alone left follow-up on through every
+     * one of them.
+     *
+     * The click is only listened to, never taken over: the capture phase runs
+     * before the game's own handler and nothing here touches the event, so the
+     * dispatch goes exactly as it would. Switching off is the safe direction
+     * anyway — the lock is what makes it stay on. */
+    const dispatchOff = () => {
         const c = ctx.store.read('cfg', {});
-        if (c.followUp && !c.followUpLocked) {
-            c.followUp = false;
-            ctx.store.write('cfg', c);
-        }
-    });
+        if (!c.followUp || c.followUpLocked) return;
+        c.followUp = false;
+        ctx.store.write('cfg', c);
+        ctx.log.info('follow-up', 'switched off after dispatching');
+        redraw();
+    };
+    const MM_DISPATCH = '#mission-form input[name="commit"], .alert_next, .alert_next_alliance,'
+        + ' #mission_alarm_btn, #mission_alarm_btn_mobile';
+    document.addEventListener('click', (e) => {
+        if (e.target?.closest?.(MM_DISPATCH)) dispatchOff();
+    }, true);
+    document.getElementById('mission-form')?.addEventListener('submit', dispatchOff);
 
     /* The game fires change on every box it ticks, its dispatch orders included,
      * so this catches the player's clicks and YMCA's alike. */
@@ -3379,7 +3520,11 @@ function mmGamePanelHtml(plan, cfg, ctx) {
       <td>${ctx.esc(l.label)}${mmIcon(l.icon)}${
     l.key === 'patients' && plan.patients
         ? `<small> &middot; ${plan.patients.count} patient${
-            plan.patients.count > 1 ? 's' : ''}</small>` : ''}</td></tr>`;
+            plan.patients.count > 1 ? 's' : ''}</small>` : ''}${
+    /* Nothing here maps this one; the flag was read off the checkboxes in this
+     * very table. It counts the same, and it says which it is. */
+    l.derived ? `<small title="matched on the game's own ${ctx.esc(l.derived)} flag,
+        read from this table"> &middot; read from the page</small>` : ''}</td></tr>`;
     }).join('');
 
     const unmatched = plan.lines.filter((l) => l.unmatched);

@@ -200,6 +200,32 @@ and answers a different question.
 (`oneof_fire_engine_or_rescue_or_ladder`), so they are read rather than guessed:
 any vehicle with any one of those flags satisfies them.
 
+**A checkbox carries its whole capability set, and the game names a capability
+the same way twice.** A requirement called `hazmat_vehicles` is answered by
+vehicles whose checkbox carries `hazmat`. So the vocabulary is read off the page
+rather than kept in a list: every attribute set to `1` is a flag — `fire`,
+`dlk`, `rw`, `any_rtw`, `water_damage_pump`, and composites the game writes for
+itself like `road_rescue_or_fire_engine` and `ktw_or_rtw`.
+
+That is what lets a vehicle YMCA has never heard of be counted and sent. Where a
+requirement key matches an observed flag — as itself, without its plural, or
+without a `_vehicles` / `_trucks` / `_cars` / `_units` ending — the row fills
+itself, and the panel says **read from the page** so a matched-here row and a
+read-here row are not mistaken for each other. The match is only ever made
+against a flag some vehicle *in that table* actually carries, so nothing is
+invented: a key with no answer in the page stays unmatched and says so.
+
+**Versatility is still judged on the named flags**, not on every attribute. The
+composites mean the game has several ways of describing the same vehicle, and
+counting them would rank a vehicle by how talkative the game is about it.
+
+**Only one of the five dispatch controls submits the form.** `Dispatch` is
+`input[name="commit"]` inside `#mission-form`; `Dispatch and Next`
+(`.alert_next`), the alliance one that shares as it goes
+(`.alert_next_alliance`) and both navbar buttons (`#mission_alarm_btn`,
+`#mission_alarm_btn_mobile`) are `<a href="#">` that post by themselves. Anything
+that has to know a mission was dispatched watches all five.
+
 **Inside a mission**, `#mission-form` posts to `/missions/<id>/alarm`,
 `#vehicle_show_table_body_all` holds the rows, a row is
 `.vehicle_select_table_tr`, and the checkbox `.vehicle_checkbox` carries
@@ -494,12 +520,13 @@ not the same as covering nothing: MissionMagician leaves a vehicle of such a
 type alone rather than judging it. Capabilities only ever come from a mission
 window's selection table, where the flags sit on the checkbox.
 
-**An empty flag set is unknown, not nothing.** `MM_FLAGS` is built from the
-requirements YMCA already knows, so a type whose checkbox carries only flags
-nothing here reads yet comes back with no capabilities at all — a HazMat is the
-real case. Stored as "covers nothing", it would let Cancel Unused send a HazMat
-home from a HazMat call. Unknown is the safe reading, and leaving the vehicle
-alone is what unknown already does.
+**An empty flag set is unknown, not nothing.** It used to mean the vehicle
+carried none of the handful of flags a requirement named, which is how a HazMat
+came back with no capabilities at all; the whole set is read now, so an empty one
+means the checkbox was read before the game had written to it. Either way,
+stored as "covers nothing" it would let Cancel Unused send a HazMat home from a
+HazMat call. Unknown is the safe reading, and leaving the vehicle alone is what
+unknown already does.
 
 **A dispatch center, a fire academy and a prison have no buy page.** That is the
 building, not a breakage, so they are reported separately from a page that
