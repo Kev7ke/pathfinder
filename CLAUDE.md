@@ -123,7 +123,7 @@ Two fields on a module, and no others:
 | | |
 |---|---|
 | `optional: true` | carries a switch, and is listed in ElementFriend |
-| `defaultOn` | what it is before anybody has touched it — **on** for anything that shipped before the switchboard, because an update that hides tools somebody was using is an update that broke; off for anything that does not work yet |
+| `defaultOn` | what it is before anybody has touched it. **On** for anything that works: an update that hides a tool somebody was using is an update that broke, and a tool shipped switched off is a tool nobody finds. Off only while it genuinely does nothing yet — and the day it starts working, that flips |
 | `mainTile: false` | never in the launcher. An **element tile**: its work happens in the game's own pages, so a tile on the front would open a panel that does nothing |
 | `settings(el, ctx)` | rendered when its element tile is opened. `ctx` is `YMCA.contextFor(mod.id)`, so what it writes lands in the **module's own** namespace and the module reads it back without knowing ElementFriend exists |
 
@@ -173,12 +173,30 @@ The jump is one-shot, it expires after thirty seconds, and it checks the landing
 page first: if the game already went to the vehicle it was going to send you to,
 it does nothing rather than skipping one.
 
-**What is missing is the range filter.** Which cell of that table carries the
-distance cannot be found by name — 35 destinations came back with `rowClasses:
-{}`, not one row carrying a class — so the capture asks for the row's own shape
-and the filter waits for it. `hospital_max_distance`, `hospital_max_price` and
-`hospital_own` sit on the vehicle in `/api/vehicles`, which is where the game
-keeps that setting itself.
+**The columns are asked of the table, not guessed.** Which cell carries the
+distance cannot be found by name — 35 destinations came back with
+`rowClasses: {}`, not one row carrying a class. So the table answers for itself:
+its own `<thead>` names the columns, and a column counts as sortable when most
+of its cells read as a number and they are not all the same. A column nobody has
+heard of sorts just as well, and a game update that adds one needs no change
+here.
+
+**The range filter is sort plus a limit.** "Sort by distance" and "show the
+first 10" is a range, and it works for price or free beds without a second
+control. `hospital_max_distance`, `hospital_max_price` and `hospital_own` sit on
+the vehicle in `/api/vehicles`, which is where the game keeps its own version of
+that setting.
+
+**A dot before exactly three digits is a thousand; anything else is a decimal
+point.** `2.79` is a distance and `1.450` is a thousand and a half, and both
+turn up in the same list. Decided per value, which is safe because a column
+holds one kind of thing.
+
+**`#own-hospitals` and `#alliance-hospitals` are in the page, but whether they
+are the container or the heading above it was never captured.** Both shapes are
+handled — the element itself if it holds destinations, otherwise the next thing
+after it that does — and where neither works the control is not offered at all
+rather than offered and doing nothing.
 
 **`fms_real` and `fms_show` carry the status**, and the first fleet capture
 settled it: both run 1 to 6 across a fleet of 83, so 5 is a value the field
@@ -190,12 +208,6 @@ apart. **That capture found the field without being told its name**, by
 reporting every field whose values across the whole fleet are few and small; an
 id is never tallied however small it happens to be, so a status names itself
 without the player's own identifiers riding along.
-
-What is still missing is the markup of the game's own vehicle window *while it
-is transporting*: what holds the destinations, what a pick actually is, and what
-the page does afterwards. **Guessing which link is a hospital is guessing where a
-patient goes, and there is no undo for that**, so the list links to each vehicle
-and stops.
 
 **A capture button says where it is being pressed, before it is pressed.** The
 first one was taken on the map and came back with 67 building links and no
@@ -505,6 +517,14 @@ capability flags like `fire`, `elw`, `rw`, `dlk`, `gwa`, `fustw`, `any_rtw`.
 `#mission_general_info[data-mission-type]` gives the type id, so what a mission
 *needs* comes from `/einsaetze.json` and the window is only asked what is
 available.
+
+**At the mission and on the way are not the same certainty.** One that has
+arrived is there; one that is driving carries a recall button on its very row,
+and on an alliance call it may not be yours at all. Both meet the requirement,
+so both are counted — but they are counted separately and the panel says which
+is which, because "why does it want one fewer than I do" has to have an answer
+on screen. **Count what is on the way** is a switch for the player who does not
+want the second kind counted.
 
 **"Covered" is what is committed, never what is planned.** At the mission, on
 the way, or ticked. A row that reads covered before a box has been ticked says

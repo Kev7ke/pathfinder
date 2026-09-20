@@ -228,10 +228,16 @@ function hfPanel(el, ctx) {
         you and never repeats your click \u2014 assigning a hospital cannot be undone.</p>
     </div>
 
-    <div class="ymca-note warn"><b>Filtering the list does not work yet.</b>
-      Setting a range, so only the hospitals close enough are listed, needs to know which column
-      of that table carries the distance \u2014 and on a page with 35 of them not one row carries
-      a class. The capture below asks for the table's own shape.</div>
+    <div class="ymca-card">
+      <b>Sorting and filtering</b>
+      <p class="ymca-dim" style="margin:6px 0 0">The controls sit on the vehicle's own page,
+        above the destinations. Which column is the distance is not something the page says
+        anywhere &mdash; not one row carries a class &mdash; so the table is asked instead: its
+        own headers name the columns, and any column whose cells read as numbers can be sorted
+        by. <b>Show the first 10</b> is the range: sort by distance and the far ones are gone.
+        Yours and the alliance's can be separated where the page marks them.</p>
+      <div id="hf-last" class="ymca-dim" style="font-size:12px;margin-top:9px"></div>
+    </div>
 
     <div class="ymca-card">
       <b>Send the missing piece</b>
@@ -273,6 +279,17 @@ function hfPanel(el, ctx) {
         }
     };
     paint();
+
+    const last = ctx.store.read('lastRun', null);
+    el.querySelector('#hf-last').innerHTML = last
+        ? `Last transport page seen ${ctx.esc(new Date(last.at).toLocaleString())}:
+       ${last.destinations} destinations,
+       ${last.namesNextVehicle ? 'the page named a next vehicle'
+        : '<b>the page named no next vehicle</b>, so there was nowhere to go on to'},
+       ${last.sortableColumns.length
+        ? `sortable by ${ctx.esc(last.sortableColumns.join(', '))}`
+        : 'no column read as a number'}.`
+        : 'No transport page seen yet. Open a vehicle that is transporting.';
 
     const advance = el.querySelector('[data-cfg="advance"]');
     advance.checked = hfCfg(ctx).advance !== false;
@@ -345,9 +362,129 @@ function hfTakeJump() {
     return held;
 }
 
+/* ------------------------------------------- sorting what the page gave us */
+
 /**
- * On a vehicle waiting for a destination: remember where "next" points, and
- * put the switch where the player is looking.
+ * A number out of a cell, whichever way this game writes them.
+ *
+ * `2.79` is a distance and `1.450` is a thousand and a half, and both turn up
+ * in the same table. A dot before exactly three digits at the end is a
+ * thousands separator; anything else is a decimal point. Decided per value,
+ * which is safe because a column holds one kind of thing.
+ */
+function hfNum(text) {
+    const m = /-?\d[\d.,]*/.exec(String(text || ''));
+    if (!m) return null;
+    let t = m[0];
+    if (/^-?\d{1,3}([.,]\d{3})+$/.test(t)) t = t.replace(/[.,]/g, '');
+    else t = t.replace(',', '.');
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+}
+
+/** Every table holding destinations. There can be more than one. */
+function hfTables() {
+    const seen = new Set();
+    for (const a of document.querySelectorAll(HF_PICK_LINK)) {
+        const t = a.closest('table');
+        if (t) seen.add(t);
+    }
+    return [...seen];
+}
+
+const hfRowsOf = (table) => [...table.querySelectorAll('tr')]
+    .filter((tr) => tr.querySelector(HF_PICK_LINK));
+
+/**
+ * What this table's columns are called and which of them hold numbers.
+ *
+ * ASKED OF THE PAGE, NOT GUESSED. Which cell carries the distance cannot be
+ * found by name — not one row carries a class — so the table is asked instead:
+ * its own headers name the columns, and a column counts as sortable when most
+ * of its cells read as a number. That way a column this has never heard of
+ * sorts just as well, and a game update that adds one needs no change here.
+ */
+function hfColumns(table) {
+    const rows = hfRowsOf(table);
+    if (!rows.length) return [];
+    const heads = [...table.querySelectorAll('thead th, thead td')];
+    const width = Math.max(...rows.map((r) => r.cells.length));
+    const out = [];
+    for (let i = 0; i < width; i += 1) {
+        const values = rows.map((r) => (r.cells[i]?.textContent || '').trim());
+        const numbers = values.filter((v) => hfNum(v) !== null).length;
+        if (numbers < Math.max(2, Math.ceil(rows.length * 0.6))) continue;
+        // All one value is a column nobody would sort by.
+        if (new Set(values).size < 2) continue;
+        const label = (heads[i]?.textContent || '').replace(/\s+/g, ' ').trim();
+        out.push({ index: i, label: label || `Column ${i + 1}` });
+    }
+    return out;
+}
+
+/**
+ * Which rows belong to which half of the list.
+ *
+ * `#own-hospitals` and `#alliance-hospitals` are in the page, but whether they
+ * are the container or the heading above it is not something a capture said.
+ * So both shapes are handled: if the element holds destinations it is the
+ * container, otherwise the next thing after it that does. Neither, and the
+ * control is not offered at all rather than offered and doing nothing.
+ */
+function hfSectionRows(id) {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    let holder = el.querySelector(HF_PICK_LINK) ? el : null;
+    for (let n = holder ? null : el.nextElementSibling; n; n = n.nextElementSibling) {
+        if (n.querySelector(HF_PICK_LINK)) { holder = n; break; }
+    }
+    if (!holder) return null;
+    return new Set([...holder.querySelectorAll(HF_PICK_LINK)]
+        .map((a) => a.closest('tr')).filter(Boolean));
+}
+
+/** Sort, then hide what the player did not ask to see. */
+function hfApply(ctx, cfg) {
+    const own = hfSectionRows('own-hospitals');
+    const alliance = hfSectionRows('alliance-hospitals');
+    let shown = 0;
+
+    for (const table of hfTables()) {
+        const rows = hfRowsOf(table);
+        if (!rows.length) continue;
+
+        const column = hfColumns(table).find((c) => c.label === cfg.sortBy);
+        if (column) {
+            const key = (tr) => hfNum(tr.cells[column.index]?.textContent);
+            const sorted = [...rows].sort((a, b) => {
+                const x = key(a);
+                const y = key(b);
+                if (x === null) return 1;      // unreadable rows go last, either way
+                if (y === null) return -1;
+                return cfg.sortDown ? y - x : x - y;
+            });
+            const parent = sorted[0].parentElement;
+            // Only within one parent: a row moved between tbodies would leave
+            // the game's own grouping behind it.
+            for (const tr of sorted) if (tr.parentElement === parent) parent.append(tr);
+        }
+
+        for (const tr of hfRowsOf(table)) {
+            let hide = false;
+            if (cfg.who === 'own' && own) hide = !own.has(tr);
+            if (cfg.who === 'alliance' && alliance) hide = !alliance.has(tr);
+            if (!hide && cfg.limit && shown >= cfg.limit) hide = true;
+            tr.style.display = hide ? 'none' : '';
+            if (!hide) shown += 1;
+        }
+    }
+    ctx.log.info('destinations filtered', `${shown} shown, by ${cfg.sortBy || 'page order'}`);
+    return shown;
+}
+
+/**
+ * On a vehicle waiting for a destination: the controls, and remembering where
+ * "next" points.
  *
  * The click is only listened to. It is never taken over, never prevented and
  * never repeated as a fetch — the player's own click is what assigns the
@@ -360,6 +497,9 @@ function hfOnPickPage(ctx) {
 
     const next = document.querySelector(HF_NEXT);
     const cfg = hfCfg(ctx);
+    const columns = hfTables().flatMap(hfColumns);
+    const haveSections = !!(hfSectionRows('own-hospitals') || hfSectionRows('alliance-hospitals'));
+    const total = document.querySelectorAll(HF_PICK_LINK).length;
 
     /* The game's own Bootstrap, never YMCA's role classes: this is the game's
      * page and it has to follow it into whatever theme it is wearing. */
@@ -367,32 +507,86 @@ function hfOnPickPage(ctx) {
     bar.id = 'hf-bar';
     bar.className = 'alert alert-info';
     bar.style.margin = '6px 0';
-    bar.innerHTML = `<label style="font-weight:400;margin:0;cursor:pointer">
-      <input type="checkbox" id="hf-advance" ${cfg.advance ? 'checked' : ''}>
-      Go straight to the next transport after you pick</label>
-    ${next ? ` <a class="btn btn-xs btn-success" href="${next.getAttribute('href')}"
-      style="margin-left:10px">Next transport</a>`
-        : ' <span class="text-muted" style="margin-left:10px">This is the last one.</span>'}`;
+    bar.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+      <b>HighFive</b>
+      <label style="font-weight:400;margin:0;cursor:pointer">
+        <input type="checkbox" id="hf-advance" ${cfg.advance !== false ? 'checked' : ''}>
+        Go straight to the next transport</label>
+      ${next ? `<a class="btn btn-xs btn-success" id="hf-next"
+        href="${next.getAttribute('href')}">Next transport</a>`
+        : '<span class="text-muted">This is the last transport.</span>'}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:7px">
+      ${columns.length ? `<label style="font-weight:400;margin:0">Sort by
+        <select id="hf-sort" class="input-sm">
+          <option value="">the page's own order</option>
+          ${columns.map((c) => `<option value="${ctx.esc(c.label)}"${
+        c.label === cfg.sortBy ? ' selected' : ''}>${ctx.esc(c.label)}</option>`).join('')}
+        </select></label>
+      <label style="font-weight:400;margin:0;cursor:pointer">
+        <input type="checkbox" id="hf-down" ${cfg.sortDown ? 'checked' : ''}> biggest first</label>`
+        : '<span class="text-muted">No column in this table reads as a number.</span>'}
+      <label style="font-weight:400;margin:0">Show
+        <select id="hf-limit" class="input-sm">
+          ${[0, 5, 10, 20, 40].map((n) => `<option value="${n}"${n === (cfg.limit || 0)
+        ? ' selected' : ''}>${n ? `the first ${n}` : `all ${total}`}</option>`).join('')}
+        </select></label>
+      ${haveSections ? `<label style="font-weight:400;margin:0">
+        <select id="hf-who" class="input-sm">
+          ${[['all', 'Yours and the alliance\u2019s'], ['own', 'Yours only'],
+        ['alliance', 'The alliance\u2019s only']].map(([v, t]) => `<option value="${v}"${
+        v === (cfg.who || 'all') ? ' selected' : ''}>${t}</option>`).join('')}
+        </select></label>` : ''}
+      <span class="text-muted" id="hf-count"></span>
+    </div>`;
+
     /* Above whatever holds the destinations. `before()` needs a parent, so a
      * table sitting directly in <body> falls back to going in at the top. */
     const holder = link.closest('table') || link.closest('div');
     if (holder && holder.parentElement) holder.before(bar);
     else document.body.prepend(bar);
 
-    bar.querySelector('#hf-advance').addEventListener('change', (e) => {
-        ctx.store.write('cfg', { ...hfCfg(ctx), advance: e.target.checked });
-        ctx.log.info(`advance ${e.target.checked ? 'on' : 'off'}`);
+    const read = () => ({
+        ...hfCfg(ctx),
+        advance: bar.querySelector('#hf-advance').checked,
+        sortBy: bar.querySelector('#hf-sort')?.value || '',
+        sortDown: !!bar.querySelector('#hf-down')?.checked,
+        limit: Number(bar.querySelector('#hf-limit').value) || 0,
+        who: bar.querySelector('#hf-who')?.value || 'all',
     });
+    const redraw = () => {
+        const now = read();
+        ctx.store.write('cfg', now);
+        const shown = hfApply(ctx, now);
+        bar.querySelector('#hf-count').textContent = shown < total
+            ? `${shown} of ${total} shown` : '';
+    };
+    bar.addEventListener('change', redraw);
+    redraw();
 
     document.addEventListener('click', (e) => {
         const picked = e.target.closest(HF_PICK_LINK);
-        if (!picked || !hfCfg(ctx).advance) return;
+        if (!picked || hfCfg(ctx).advance === false) return;
         const href = document.querySelector(HF_NEXT)?.getAttribute('href');
-        if (!href) return;
+        if (!href) { ctx.log.info('picked, but the page names no next vehicle'); return; }
         hfArmJump(href);
-        ctx.log.info('picked a destination, next is armed');
+        ctx.log.info('picked a destination, next is armed', href);
     }, true);
 
+    /* Why it did or did not advance, without anybody having to describe it.
+     * "It does not go to the next one" has four different causes and only one
+     * of them is a bug. */
+    ctx.store.write('lastRun', {
+        at: new Date().toISOString(),
+        path: hfShape(location.pathname),
+        inFrame: window.top !== window.self,
+        destinations: total,
+        namesNextVehicle: !!next,
+        sortableColumns: columns.map((c) => c.label),
+        sectionsFound: haveSections,
+        advance: cfg.advance !== false,
+    });
     return true;
 }
 
@@ -434,7 +628,9 @@ YMCA.register({
      * nothing. Off until it does something. */
     mainTile: false,
     optional: true,
-    defaultOn: false,
+    /* On. It stopped being a promise the moment the game's own
+     * #next-vehicle-fms-5 turned out to exist. */
+    defaultOn: true,
 
     async mount(el, ctx) { hfPanel(el, ctx); },
     settings(el, ctx) { hfPanel(el, ctx); },

@@ -779,9 +779,44 @@ const flagless = await mission.evaluate(() =>
 console.log('flagless type     :', JSON.stringify(flagless));
 assert.deepEqual(flagless.caps, [], 'the game gave it none of the flags YMCA reads');
 const sceneNote = (await mission.textContent('#ymca-mm-panel')).replace(/\s+/g, ' ');
-console.log('scene note        :', sceneNote.slice(sceneNote.indexOf('already at the mission'), 200));
+console.log('scene note        :', sceneNote.slice(sceneNote.indexOf('at the mission') - 4, 210));
 assert.ok(/1 whose type has not been seen/.test(sceneNote),
   'an empty flag set is unknown, not nothing, so the panel says what it cannot judge');
+assert.ok(/2 at the mission/.test(sceneNote),
+  'the panel says how many have arrived, not just how many are counted');
+
+// ---- at the mission and on the way are not the same certainty ----
+// One that has arrived is there; one that is driving still carries a recall button on its own
+// row. Both meet the requirement, so both count — but the panel says which is which, and the
+// switch is there for a player who does not want the second kind counted.
+await mission.evaluate(() => {
+  const t = document.createElement('table');
+  t.id = 'mission_vehicle_driving';
+  t.innerHTML = '<tbody><tr id="vehicle_row_97"><td vehicle_type_id="13">driving</td></tr></tbody>';
+  document.getElementById('col_right').append(t);
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(900);
+const bothNote = (await mission.textContent('#ymca-mm-panel')).replace(/\s+/g, ' ');
+console.log('driving note      :', bothNote.slice(0, 260));
+assert.ok(/on the way/.test(bothNote), 'one on the way should be named as such');
+const withDriving = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+assert.equal(withDriving.find((r) => r[4] === 'Platform trucks')?.[1], '1',
+  'a Quint on the way covers the platform truck line like one already there');
+
+await mission.click('#ymca-mm-panel .mm-switch:has([data-cfg="countDriving"])');
+await mission.waitForTimeout(900);
+const notCounted = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('not counting      :', JSON.stringify(notCounted.find((r) => r[4] === 'Platform trucks')));
+assert.match(notCounted.find((r) => r[4] === 'Platform trucks')?.[1], /^(0|\u2013)$/,
+  'switched off, what is on the way stops being subtracted');
+assert.ok(/not counted/.test((await mission.textContent('#ymca-mm-panel')).replace(/\s+/g, ' ')),
+  'and the panel says so rather than quietly wanting one more');
+await mission.click('#ymca-mm-panel .mm-switch:has([data-cfg="countDriving"])');
+await mission.waitForTimeout(900);
+await mission.evaluate(() => document.getElementById('mission_vehicle_driving')?.remove());
 
 // ---- a Rescue Engine covers heavy rescue AND an engine, by the same route ----
 // The game flags it fire+rw exactly as it flags a Quint fire+dlk, so this needs no special case;
@@ -1355,9 +1390,11 @@ console.log('elements          :', JSON.stringify(elements));
 await pg.screenshot({ path: '/tmp/ymca-elements.png' });
 assert.deepEqual(elements, ['renamer', 'missionmagician', 'trackops', 'highfive'],
   'every switchable module should have an element tile');
-// Shipped-before-the-switchboard is on; does-not-work-yet is off.
-assert.equal(await pg.locator('.ymca-switch[data-sw="trackops"] input').isChecked(), true);
-assert.equal(await pg.locator('.ymca-switch[data-sw="highfive"] input').isChecked(), false);
+// Nothing that works is off by default: an update that hides a tool is an update that broke.
+for (const id of ['renamer', 'missionmagician', 'trackops', 'highfive']) {
+  assert.equal(await pg.locator(`.ymca-switch[data-sw="${id}"] input`).isChecked(), true,
+    `${id} should be on until somebody says otherwise`);
+}
 
 // A switch takes the tool out of the launcher, not just out of this page.
 await pg.click('.ymca-switch[data-sw="trackops"]');
@@ -1382,7 +1419,8 @@ await pg.click('.ymca-tile[data-mod="elementfriend"]');
 await pg.click('.ymca-tile.el[data-el="highfive"] b');
 await pg.waitForSelector('[data-do="capture"]');
 const hfText = (await pg.textContent('#ef-body')).replace(/\s+/g, ' ');
-assert.ok(/does not work yet/i.test(hfText), 'HighFive should say plainly what does not work');
+assert.ok(/Sorting and filtering/i.test(hfText),
+  'HighFive should explain how the destinations are sorted');
 await pg.waitForSelector('#hf-list a');
 const transporting = await pg.$$eval('#hf-list a', (a) => a.map((x) => x.textContent.trim()));
 console.log('transporting      :', JSON.stringify(transporting));
@@ -1422,18 +1460,29 @@ await pg.click('#ymca-back');
 // repeats the click, because assigning a hospital cannot be undone.
 await pg.evaluate(() => {
   document.getElementById('ymca-window')?.remove();
-  // Switched on here, not at load: a switch has to take effect where it is flicked.
+  // Switched off and on again: a switch has to take effect where it is flicked, not on reload.
+  window.YMCA.switchElement('highfive', false);
   window.YMCA.switchElement('highfive', true);
   const page = document.createElement('div');
   page.innerHTML = `
     <a class="btn btn-success" id="next-vehicle-fms-5" href="/vehicles/15079875"
       >Go to the next vehicle with a transport request</a>
-    <table><tbody>
-      <tr><td>Mercy General</td><td><span id="div_free_beds_41">6</span></td>
+    <div id="own-hospitals"><table>
+      <thead><tr><th>Hospital</th><th>Free beds</th><th>Distance</th><th></th></tr></thead>
+      <tbody>
+      <tr><td>Mercy General</td><td><span id="div_free_beds_41">6</span></td><td>12.40 km</td>
         <td><a class="btn btn-success" href="/vehicles/15079874/patient/41">Transport</a></td></tr>
-      <tr><td>St Anne</td><td><span id="div_free_beds_42">2</span></td>
+      <tr><td>St Anne</td><td><span id="div_free_beds_42">2</span></td><td>2.79 km</td>
         <td><a class="btn btn-success" href="/vehicles/15079874/patient/42">Transport</a></td></tr>
-    </tbody></table>
+      <tr><td>County</td><td><span id="div_free_beds_43">9</span></td><td>7.10 km</td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/43">Transport</a></td></tr>
+      <tr><td>Riverside</td><td><span id="div_free_beds_44">4</span></td><td>19.00 km</td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/44">Transport</a></td></tr>
+      <tr><td>Lakeview</td><td><span id="div_free_beds_45">1</span></td><td>21.50 km</td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/45">Transport</a></td></tr>
+      <tr><td>Hillcrest</td><td><span id="div_free_beds_46">3</span></td><td>30.00 km</td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/46">Transport</a></td></tr>
+    </tbody></table></div>
     <a id="leave_without_transport_no_compensation"
       href="/vehicles/15079874/patient/-1">Leave without transport</a>`;
   document.body.append(page);
@@ -1445,6 +1494,31 @@ assert.equal(await pg.locator('#hf-advance').isChecked(), true, 'advancing is on
 assert.equal(await pg.getAttribute('#hf-bar a.btn', 'href'), '/vehicles/15079875',
   'the bar links to the vehicle the game named as next');
 console.log('highfive bar      : next is /vehicles/15079875');
+
+// The columns are read off the table's own headers, because not one row carries a class.
+const sortable = await pg.$$eval('#hf-sort option', (o) => o.map((x) => x.value).filter(Boolean));
+console.log('sortable columns  :', JSON.stringify(sortable));
+assert.deepEqual(sortable, ['Free beds', 'Distance'],
+  'a column counts as sortable when its own cells read as numbers — the name column does not');
+
+const order = () => pg.$$eval('#own-hospitals tbody tr', (rows) => rows
+  .filter((r) => r.style.display !== 'none').map((r) => r.cells[0].textContent.trim()));
+await pg.selectOption('#hf-sort', 'Distance');
+await pg.waitForTimeout(150);
+console.log('sorted by distance:', JSON.stringify(await order()));
+assert.deepEqual(await order(),
+  ['St Anne', 'County', 'Mercy General', 'Riverside', 'Lakeview', 'Hillcrest'],
+  '2.79 before 7.10 before 12.40 — a dot before two digits is a decimal point, not a thousand');
+
+// "Show the first N" is the range: sort by distance and the far ones are gone.
+await pg.selectOption('#hf-limit', '5');
+await pg.waitForTimeout(150);
+assert.deepEqual(await order(),
+  ['St Anne', 'County', 'Mercy General', 'Riverside', 'Lakeview'],
+  'the limit hides what is furthest away — sorted by distance, that is the range filter');
+console.log('limited           : the five nearest, 30.00 km dropped');
+await pg.selectOption('#hf-limit', '0');
+await pg.waitForTimeout(150);
 
 // Clicking a destination arms the jump. HighFive never prevents that click — so the test has
 // to, or the browser really would navigate away to the game's own transport page.

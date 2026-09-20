@@ -462,24 +462,41 @@ function mmLearntTypes() {
  * subtracting them was the difference between "needs 4 engines" and "needs 4
  * more engines" — and only the second is true once anything has been sent.
  */
-function mmOnScene(known) {
-    const rows = document.querySelectorAll(
-        '#mission_vehicle_at_mission tbody tr[id^="vehicle_row"], '
-        + '#mission_vehicle_driving tbody tr[id^="vehicle_row"]');
+function mmOnScene(known, countDriving = true) {
+    /* AT THE MISSION AND ON THE WAY ARE COUNTED SEPARATELY, because they are
+     * not equally certain. One that has arrived is there; one that is driving
+     * can still be recalled — the game puts a backalarm button on its very row
+     * — and on an alliance call it may not even be yours. Both meet the
+     * requirement, so both count by default, and the panel says which is which
+     * so "why does it want one fewer than I do" has an answer on screen. */
+    const at = [...document.querySelectorAll(
+        '#mission_vehicle_at_mission tbody tr[id^="vehicle_row"]')];
+    const driving = [...document.querySelectorAll(
+        '#mission_vehicle_driving tbody tr[id^="vehicle_row"]')];
+
     const counts = {};
     const vehicles = [];
     let unknown = 0;
     let total = 0;
-    for (const row of rows) {
-        const typeId = row.querySelector('[vehicle_type_id]')?.getAttribute('vehicle_type_id');
-        if (!typeId) continue;
-        total += 1;
-        const flags = known[typeId];
-        if (!flags) { unknown += 1; continue; }
-        vehicles.push(flags);
-        for (const flag of flags) counts[flag] = (counts[flag] || 0) + 1;
-    }
-    return { counts, vehicles, unknown, total };
+    const take = (rows) => {
+        let took = 0;
+        for (const row of rows) {
+            const typeId = row.querySelector('[vehicle_type_id]')?.getAttribute('vehicle_type_id');
+            if (!typeId) continue;
+            took += 1;
+            total += 1;
+            const flags = known[typeId];
+            if (!flags) { unknown += 1; continue; }
+            vehicles.push(flags);
+            for (const flag of flags) counts[flag] = (counts[flag] || 0) + 1;
+        }
+        return took;
+    };
+    const atCount = take(at);
+    const drivingCount = countDriving ? take(driving) : 0;
+    /* Counted or not, how many are on the way is worth saying. */
+    const drivingSeen = driving.filter((r) => r.querySelector('[vehicle_type_id]')).length;
+    return { counts, vehicles, unknown, total, atCount, drivingCount, drivingSeen, countDriving };
 }
 
 /**
@@ -840,7 +857,7 @@ async function mmPlan(page, ctx, cfg) {
     if (cfg.fastestFirst !== false) { free.sort(mmOrder); busy.sort(mmOrder); }
     const vehicles = free.concat(busy);
     const untimed = vehicles.filter((v) => v.seconds === null).length;
-    const scene = mmOnScene(mmLearnTypes(vehicles));
+    const scene = mmOnScene(mmLearnTypes(vehicles), cfg.countDriving !== false);
     const patients = mmPatients(record);
 
     const picked = new Map();
@@ -1717,7 +1734,7 @@ function mmMountPanel(ctx) {
 
     panel.addEventListener('change', (e) => {
         const key = e.target.dataset.cfg;
-        if (!['fastestFirst', 'ambulancePerPatient', 'followUp'].includes(key)) return;
+        if (!['fastestFirst', 'ambulancePerPatient', 'followUp', 'countDriving'].includes(key)) return;
         const cfg = ctx.store.read('cfg', {});
         cfg[key] = e.target.checked;
         ctx.store.write('cfg', cfg);
@@ -2086,8 +2103,11 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         The catalogue says this mission can produce up to <b>${plan.patients.count}</b> patients.
         This window has not said how many it has, so no ambulance is picked for them.</p>` : ''}
 
-      ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
-        ${plan.scene.total} already at the mission or on the way, subtracted above${
+      ${plan.scene.total || plan.scene.drivingSeen ? `<p class="text-muted" style="margin:0 0 8px">
+        ${[plan.scene.atCount ? `<b>${plan.scene.atCount}</b> at the mission` : '',
+        plan.scene.drivingSeen ? `<b>${plan.scene.drivingSeen}</b> on the way${
+            plan.scene.countDriving ? '' : ', not counted'}` : '']
+        .filter(Boolean).join(', ')}${plan.scene.total ? ', subtracted above' : ''}${
         plan.scene.unknown ? ` — except ${plan.scene.unknown} whose type has not been seen in a
         selection list yet, so what they cover is not known` : ''}.</p>` : ''}
 
@@ -2099,6 +2119,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
         ${mmSwitch('fastestFirst', 'Fastest first', cfg.fastestFirst !== false)}
         ${mmSwitch('ambulancePerPatient', 'Ambulance per patient', cfg.ambulancePerPatient !== false)}
+        ${mmSwitch('countDriving', 'Count what is on the way', cfg.countDriving !== false)}
         <span style="display:inline-flex;align-items:center;gap:4px">
           ${mmSwitch('followUp', `Follow-up${plan.followUp ? ` (${plan.followUp})` : ''}`,
         cfg.followUp === true, !plan.followUpOffered)}
