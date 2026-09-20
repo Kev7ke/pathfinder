@@ -577,9 +577,15 @@ async function vehicleCapabilities(ctx) {
     };
 }
 
-/* The map page, where the fleet is worth reading. Inside a mission frame there
- * is a mission to get on with. */
-const SWEEP_PAGE = /^\/?$/;
+/* Anywhere but a mission. Pinning this to `/` was wrong twice over: a mission
+ * window is a frame whose address bar still says `/`, and the player spends
+ * plenty of time on building and vehicle pages where a quiet sweep is welcome.
+ * What it stays out of is the mission itself, where there is a call to run. */
+function sweepHere() {
+    if (window.top !== window.self) return false;
+    if (/^\/missions\//.test(location.pathname)) return false;
+    return !document.getElementById('mission-form');
+}
 
 /**
  * Learn a type the moment it turns up in the fleet, without being asked.
@@ -663,11 +669,46 @@ async function learnNewTypes(ctx) {
     return learnt;
 }
 
+/**
+ * Read the catalogue into this install, so nothing here waits on a release.
+ *
+ * The buy pages name every type the game sells, which branch it belongs to and
+ * what extension it needs — for all of them, not only the ones owned. That is
+ * the whole naming problem solved locally: a type added by a game update names
+ * itself the next time this runs, on every install, with nobody exporting
+ * anything to anybody.
+ *
+ * Once a week is plenty: the catalogue changes when the game is updated, not
+ * while anyone is playing.
+ */
+const CATALOGUE_KEY = 'ymca-diagnostics-lastCatalogue';
+const CATALOGUE_EVERY_MS = 7 * 24 * 3600e3;
+
+async function learnCatalogue(ctx) {
+    let last = 0;
+    try { last = Number(localStorage.getItem(CATALOGUE_KEY)) || 0; } catch (e) { /* private window */ }
+    if (Date.now() - last < CATALOGUE_EVERY_MS) return null;
+    try { localStorage.setItem(CATALOGUE_KEY, String(Date.now())); } catch (e) { /* as above */ }
+
+    let fleet;
+    try {
+        fleet = await vehicleCatalogue(ctx);
+    } catch (err) {
+        ctx.log.warn('catalogue sweep', err.message);
+        return null;
+    }
+    const named = (fleet.types || []).filter((t) => t.name).length;
+    ctx.log.info('read the vehicle catalogue', `${named} types named from the buy pages`);
+    return fleet;
+}
+
 /* Once per load, a while after the page has settled, and never in the way. */
 YMCA.inject('diagnostics', (ctx) => {
-    if (!SWEEP_PAGE.test(location.pathname)) return true;
+    if (!sweepHere()) return true;
     setTimeout(() => {
-        learnNewTypes(ctx).catch((err) => ctx.log.warn('type sweep', err.message));
+        learnNewTypes(ctx)
+            .then(() => learnCatalogue(ctx))
+            .catch((err) => ctx.log.warn('type sweep', err.message));
     }, 8000);
     return true;
 });
@@ -752,7 +793,13 @@ async function vehicleCatalogue(ctx) {
     try {
         const store = {};
         for (const r of rows) {
-            if (r.name || r.capabilities) store[r.id] = { name: r.name, caps: r.capabilities };
+            if (!r.name && !r.capabilities) continue;
+            store[r.id] = { name: r.name, caps: r.capabilities };
+            /* Kept because the game states them, not because anything counts
+             * with them: `Max. Crew` is a cap the player sets per vehicle, so
+             * it is a fact about the type and not a count of people. */
+            if (r.crew) store[r.id].maxCrew = r.crew;
+            if (r.education) store[r.id].education = r.education;
         }
         localStorage.setItem('ymca-vehicle-types', JSON.stringify(store));
     } catch (e) { /* private window: the copy below still carries it */ }

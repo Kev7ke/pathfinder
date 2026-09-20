@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.29
+// @version      0.0.30
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.29',
+    version: '0.0.30',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2734,24 +2734,6 @@ async function mmPlan(page, ctx, cfg) {
             });
         }
 
-        /* Trained crew are a total like water is, and the vehicles that carry
-         * the training are the ones that bring them. Two HazMats seat six; a
-         * call wanting eight needs a third, and picking by requirement count
-         * alone stopped at two. */
-        for (const t of (mmCrewTraining(record) || [])) {
-            const aboard = mmTrainedAboard([...picked.values()], t.label);
-            if (aboard.unknown || !aboard.seats) continue;   // nothing to count with
-            let seats = aboard.seats;
-            const more = vehicles.filter((v) => !picked.has(v.id)
-                && mmTrainedAboard([v], t.label).seats);
-            for (const v of more) {
-                if (seats >= t.count) break;
-                picked.set(v.id, v);
-                seats += mmTrainedAboard([v], t.label).seats;
-            }
-            t.seats = seats;
-        }
-
         /* Water and foam are totals, so they are filled by adding vehicles until
          * the figure is reached — the ones already picked may carry some. */
         for (const [key, rule] of Object.entries(MM_AMOUNTS)) {
@@ -2859,40 +2841,16 @@ function mmCrewTraining(record) {
     }));
 }
 
-/**
- * Which types carry which training, and how many people each holds.
+/* COUNTING THE CREW WAS TRIED AND WITHDRAWN.
  *
- * Both come off the buy page, which states `Max. Crew: 3` and `Requires special
- * education (HazMat)` on every card — so a mission asking for eight
- * HazMat-trained crew can be answered by counting seats on HazMat vehicles.
+ * The buy page states `Max. Crew: 3`, and that read like the answer: count the
+ * seats on every vehicle carrying the training and stop when the mission's
+ * figure is reached. It is not the answer. `Max. Crew` is a cap the player sets
+ * per vehicle — the same HazMat can ride with fewer or more — so seats are not
+ * people, and a number built on them looks measured while being a guess.
  *
- * TWO THINGS ARE INFERRED HERE, and the panel says so rather than presenting a
- * figure that looks measured. `Max. Crew` is the most a vehicle can hold, not
- * who is aboard right now; and everybody on a vehicle that *requires* a
- * training is taken to have it, which is what "requires" means but is not
- * something the game states per person.
- */
-function mmCrewOfType() {
-    const out = {};
-    for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) {
-        if (t.crew || t.education) out[id] = { crew: t.crew || null, education: t.education || null };
-    }
-    return out;
-}
-
-/** Seats aboard the vehicles that carry a given training. */
-function mmTrainedAboard(vehicles, training) {
-    const byType = mmCrewOfType();
-    let seats = 0;
-    let unknown = 0;
-    for (const v of vehicles) {
-        const t = byType[String(v.typeId)];
-        if (!t || !t.education) continue;
-        if (t.education.toLowerCase() !== String(training).toLowerCase()) continue;
-        if (t.crew) seats += t.crew; else unknown += 1;
-    }
-    return { seats, unknown };
-}
+ * Nothing in a mission window says who is aboard. The requirement is stated,
+ * and stated as the game states it, until there is something real to count. */
 
 function mmPretty(key) {
     return key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
@@ -3813,10 +3771,8 @@ function mmGamePanelHtml(plan, cfg, ctx) {
 
       ${plan.crewTraining?.length ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.crewTraining.map((t) => `Crew: <b>${t.count}</b> with
-          ${ctx.esc(t.label)} training${t.seats
-        ? ` &mdash; about <b>${t.seats}</b> aboard what is picked, counting every seat on a
-            vehicle that needs that training` : ' &mdash; seats per vehicle not known yet, so '
-            + 'this one is not counted'}`).join('; ')}.</p>` : ''}
+          ${ctx.esc(t.label)} training`).join('; ')} &mdash; they ride on whatever is sent, and
+        how many are aboard is not something this window says.</p>` : ''}
 
       ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.scene.total} already at the mission or on the way, subtracted above${
@@ -5394,9 +5350,15 @@ async function vehicleCapabilities(ctx) {
     };
 }
 
-/* The map page, where the fleet is worth reading. Inside a mission frame there
- * is a mission to get on with. */
-const SWEEP_PAGE = /^\/?$/;
+/* Anywhere but a mission. Pinning this to `/` was wrong twice over: a mission
+ * window is a frame whose address bar still says `/`, and the player spends
+ * plenty of time on building and vehicle pages where a quiet sweep is welcome.
+ * What it stays out of is the mission itself, where there is a call to run. */
+function sweepHere() {
+    if (window.top !== window.self) return false;
+    if (/^\/missions\//.test(location.pathname)) return false;
+    return !document.getElementById('mission-form');
+}
 
 /**
  * Learn a type the moment it turns up in the fleet, without being asked.
@@ -5480,11 +5442,46 @@ async function learnNewTypes(ctx) {
     return learnt;
 }
 
+/**
+ * Read the catalogue into this install, so nothing here waits on a release.
+ *
+ * The buy pages name every type the game sells, which branch it belongs to and
+ * what extension it needs — for all of them, not only the ones owned. That is
+ * the whole naming problem solved locally: a type added by a game update names
+ * itself the next time this runs, on every install, with nobody exporting
+ * anything to anybody.
+ *
+ * Once a week is plenty: the catalogue changes when the game is updated, not
+ * while anyone is playing.
+ */
+const CATALOGUE_KEY = 'ymca-diagnostics-lastCatalogue';
+const CATALOGUE_EVERY_MS = 7 * 24 * 3600e3;
+
+async function learnCatalogue(ctx) {
+    let last = 0;
+    try { last = Number(localStorage.getItem(CATALOGUE_KEY)) || 0; } catch (e) { /* private window */ }
+    if (Date.now() - last < CATALOGUE_EVERY_MS) return null;
+    try { localStorage.setItem(CATALOGUE_KEY, String(Date.now())); } catch (e) { /* as above */ }
+
+    let fleet;
+    try {
+        fleet = await vehicleCatalogue(ctx);
+    } catch (err) {
+        ctx.log.warn('catalogue sweep', err.message);
+        return null;
+    }
+    const named = (fleet.types || []).filter((t) => t.name).length;
+    ctx.log.info('read the vehicle catalogue', `${named} types named from the buy pages`);
+    return fleet;
+}
+
 /* Once per load, a while after the page has settled, and never in the way. */
 YMCA.inject('diagnostics', (ctx) => {
-    if (!SWEEP_PAGE.test(location.pathname)) return true;
+    if (!sweepHere()) return true;
     setTimeout(() => {
-        learnNewTypes(ctx).catch((err) => ctx.log.warn('type sweep', err.message));
+        learnNewTypes(ctx)
+            .then(() => learnCatalogue(ctx))
+            .catch((err) => ctx.log.warn('type sweep', err.message));
     }, 8000);
     return true;
 });
@@ -5569,7 +5566,13 @@ async function vehicleCatalogue(ctx) {
     try {
         const store = {};
         for (const r of rows) {
-            if (r.name || r.capabilities) store[r.id] = { name: r.name, caps: r.capabilities };
+            if (!r.name && !r.capabilities) continue;
+            store[r.id] = { name: r.name, caps: r.capabilities };
+            /* Kept because the game states them, not because anything counts
+             * with them: `Max. Crew` is a cap the player sets per vehicle, so
+             * it is a fact about the type and not a count of people. */
+            if (r.crew) store[r.id].maxCrew = r.crew;
+            if (r.education) store[r.id].education = r.education;
         }
         localStorage.setItem('ymca-vehicle-types', JSON.stringify(store));
     } catch (e) { /* private window: the copy below still carries it */ }

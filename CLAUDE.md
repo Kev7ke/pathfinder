@@ -242,21 +242,34 @@ your selection table, so its checkbox — the only place the flags are written �
 is never yours to read. All the at-mission row gives is a type id. An alliance
 partner bringing every type he owns is not a capability capture.
 
-**Nobody has to be fed data.** A player's own game teaches their own install:
-the flags are on every checkbox in a mission window, and on the map page
-Diagnostics quietly reads one vehicle page for any type in the fleet nothing
-knows yet — at most eight per sweep, a second apart, once in six hours. Buy a
-vehicle nobody has ever owned and it is flagged within a page load, with no
-release and no report. What `data/vehicle-types.json` ships is a head start, not
-a dependency.
+**Nobody has to be fed data, and no install waits on a release.** A player's
+own game teaches their own install, on its own, on every page but a mission:
 
-**The buy page states crew size and required training.** `Max. Crew: 3` and
-`Requires special education (HazMat)` on every card, so a mission wanting eight
-HazMat-trained crew can be answered by counting seats on HazMat vehicles. Two of
-them seat six; the third is the one picking by requirement count alone missed.
-**Both halves of that are inferred and the panel says so**: `Max. Crew` is the
-most a vehicle holds rather than who is aboard, and everybody on a vehicle that
-*requires* a training is taken to have it.
+- **Flags** are on every checkbox in a mission window, and the sweep reads one
+  vehicle page for any type in the fleet nothing knows yet — at most eight per
+  sweep, a second apart, once in six hours.
+- **Names, branches and extensions** come from the buy pages, which list every
+  type the game sells whether or not it is owned. Read once a week, because a
+  catalogue changes when the game is updated and not while anyone is playing.
+
+Buy a vehicle nobody has ever owned and it is flagged within a page load. A type
+added by a game update names itself the next week. `data/vehicle-types.json` is
+a head start on day one, not a dependency, and **Diagnostics → Vehicle types /
+What they can do** are the same work on demand rather than the only way to get it.
+
+**The sweep runs everywhere but a mission.** Pinning it to `/` was wrong twice
+over: a mission window is a frame whose address bar still says `/`, and the
+player spends plenty of time on building and vehicle pages where a quiet sweep
+is welcome. What it stays out of is the mission itself.
+
+**Counting the crew was tried and withdrawn.** The buy page states
+`Max. Crew: 3` and `Requires special education (HazMat)` on every card, and that
+read like the answer: count the seats on every vehicle carrying the training.
+It is not. **`Max. Crew` is a cap the player sets per vehicle** — the same
+HazMat rides with fewer or more — so seats are not people, and a figure built on
+them looks measured while being a guess. Nothing in a mission window says who is
+aboard. The requirement is stated and nothing counts it. Both facts are kept in
+the type store because the game states them; neither is arithmetic.
 
 **`average_credits` is the game's own figure**, in the catalogue the
 `#mission_help` link points at, so the panel can show what a call is worth

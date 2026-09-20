@@ -285,6 +285,18 @@ await pg.waitForSelector('[data-do="report"]');
 await pg.evaluate(() => { navigator.clipboard.writeText = async () => {}; });
 await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
+// ---- the catalogue reads itself, so no install waits on a release ----
+// The buy pages name every type the game sells, and the sweep reads them on its own a few
+// seconds after the page settles. Nobody presses anything, and nobody exports anything.
+await pg.waitForFunction(
+  () => !!localStorage.getItem('ymca-vehicle-types'), null, { timeout: 40000 });
+const swept = await pg.evaluate(() =>
+  JSON.parse(localStorage.getItem('ymca-vehicle-types') || '{}'));
+console.log('swept catalogue   :', JSON.stringify(Object.entries(swept).slice(0, 3)));
+assert.ok(Object.keys(swept).length >= 3,
+  'the buy pages are read on their own, with nobody pressing anything');
+assert.equal(swept['13'].name, 'Quint', 'and the names land where every module reads them');
+
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
 assert.equal(report.ymca, VERSION, 'the report must carry the version the build stamped in');
@@ -1149,6 +1161,10 @@ const crewNote = (await mission.textContent('#ymca-mm-panel')).replace(/\s+/g, '
 console.log('crew note         :', crewNote.slice(crewNote.indexOf('Crew:'), crewNote.indexOf('Crew:') + 70));
 assert.ok(/Crew: 8 with HazMat training/.test(crewNote),
   'it is said in the game\'s own English, from additional.personnel_educations');
+// It says the requirement and stops there. `Max. Crew` is a cap the player sets per vehicle, so
+// counting seats would look measured while being a guess.
+assert.ok(!/about \d+|\d+ aboard|\d+ seats/i.test(crewNote),
+  'nothing in this window says who is aboard, so nothing here counts them');
 // A met row goes green on its own, so what is still missing is the only thing still red.
 await mission.click('#ymca-mm-panel [data-do="select"]');
 await mission.waitForTimeout(400);
