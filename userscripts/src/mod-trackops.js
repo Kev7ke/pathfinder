@@ -88,11 +88,8 @@ YMCA.register({
          * the natural second chance — and the one moment the player would notice it missing. */
         if (cfg.recording) toAttach();
         const log = toRead(TO_LOG_KEY, []);
-        const trusted = log.filter((e) => e.alone && e.delta > 0);
         const listed = await toListedCredits(ctx);
         const rows = toSummarise(log, listed);
-        const totalPaid = trusted.reduce((n, e) => n + e.delta, 0);
-        const share = toShareOfListed(log, listed);
 
         el.innerHTML = `
       <div class="ymca-card">
@@ -104,37 +101,28 @@ YMCA.register({
           ${cfg.recording ? 'checked' : ''}> Keep recording</label>
       </div>
 
-      ${share ? `<div class="ymca-card">
-        <b>What a mission actually pays</b>
-        <p style="font-size:26px;font-weight:700;margin:8px 0 2px">${(share.ratio * 100).toFixed(0)}%
-          <span class="ymca-dim" style="font-size:14px;font-weight:400">of what the game lists</span></p>
-        <p class="ymca-dim">${ctx.fmt(share.paid)} received where ${ctx.fmt(share.listed)} was
-          listed, over ${share.missions} missions measured one at a time.
-          ${share.missions < 10 ? '<b>Too few to rely on yet.</b>' : ''}</p>
-      </div>` : ''}
-
-      <div class="ymca-note"><b>The count is measured. The payout is inferred.</b> The game
-        announces that a mission ended and, separately, what your balance became; pairing the two
-        is TrackOps' doing. A rise is credited to the longest-waiting ending, and trusted only when
-        nothing else was waiting &mdash; ${trusted.length} of ${log.length} here.</div>
+      <div class="ymca-note warn"><b>The payout reading does not work, and is no longer
+        shown.</b> Pairing a mission ending with the next rise in your balance cannot tell that
+        rise apart from a daily task reward, an alliance payment or anything else that lands in
+        the same few seconds. It read a 320-credit call at 3,716. The deltas are still recorded
+        and still in the export, marked for what they are, but nothing here averages them and
+        nothing uses them.</div>
 
       ${rows.length ? `
       <div class="ymca-card">
-        <b>What each kind of mission paid</b>
+        <b>What you have run</b>
         <table id="to-table" style="margin-top:8px">
-          <thead><tr><th>Mission</th><th class="ymca-num">Run</th><th class="ymca-num">Measured</th>
-            <th class="ymca-num">Average paid</th><th class="ymca-num">Listed</th></tr></thead>
+          <thead><tr><th class="ymca-num">Run</th><th>Mission</th>
+            <th class="ymca-num">Listed</th></tr></thead>
           <tbody>${rows.map((r) => `
-            <tr><td>${ctx.esc(r.name)}</td>
-              <td class="ymca-num">${r.runs}</td>
-              <td class="ymca-num">${r.measured}</td>
-              <td class="ymca-num">${r.measured ? ctx.fmt(Math.round(r.average)) : '<span class="ymca-dim">—</span>'}</td>
+            <tr><td class="ymca-num">${r.runs}</td>
+              <td>${ctx.esc(r.name)}</td>
               <td class="ymca-num">${r.listed === null
         ? '<span class="ymca-warn">none listed</span>' : ctx.fmt(r.listed)}</td></tr>`).join('')}
           </tbody>
         </table>
         <p class="ymca-sub" style="margin-top:8px">Rows where the game lists nothing are the ones
-          worth having. StepOps does not use any of this yet.</p>
+          worth having &mdash; those are what the planner is guessing at.</p>
       </div>` : `
       <div class="ymca-card">
         <b>Nothing counted yet</b>
@@ -229,28 +217,6 @@ function toSummarise(log, listed) {
 }
 
 /**
- * How much of the listed figure actually arrives.
- *
- * Only missions measured on their own, and only where the game lists a figure
- * to compare against. It is a ratio of two totals rather than an average of
- * ratios, so one cheap mission cannot swing it.
- */
-function toShareOfListed(log, listed) {
-    let paid = 0;
-    let quoted = 0;
-    let missions = 0;
-    for (const e of log) {
-        if (!e.alone || !(e.delta > 0)) continue;
-        const figure = listed[String(e.type)]?.listed;
-        if (!figure) continue;
-        paid += e.delta;
-        quoted += figure;
-        missions += 1;
-    }
-    return missions ? { paid, listed: quoted, missions, ratio: paid / quoted } : null;
-}
-
-/**
  * What goes back for the planner's sake.
  *
  * Mission type ids and credit figures, which are the game's own constants, and
@@ -265,19 +231,17 @@ function toExport(log, listed) {
         measuredFrom: log.length ? new Date(log[0].at).toISOString().slice(0, 10) : null,
         missionsEnded: log.length,
         missionsMeasured: log.filter((e) => e.alone && e.delta > 0).length,
-        shareOfListed: (() => {
-            const share = toShareOfListed(log, listed);
-            return share ? {
-                paid: share.paid, listed: share.listed,
-                missions: share.missions, ratio: Number(share.ratio.toFixed(4)),
-            } : null;
-        })(),
+        payoutReadingRetired: 'a balance rise cannot be told apart from a daily reward',
         byMissionType: rows.map((r) => ({
             type: Number(r.type) || r.type,
             name: r.name,
             runs: r.runs,
-            measured: r.measured,
-            averagePaid: r.measured ? Math.round(r.average) : null,
+            /* Kept, and kept labelled. A balance rise near a mission ending is
+             * not that mission's payout — a daily task reward lands the same
+             * way — so these are observations of the balance, not of a payout,
+             * and nothing averages them. */
+            balanceRoseNearby: r.measured,
+            balanceRiseTotal: r.measured ? r.total : null,
             listedByGame: r.listed,
         })),
     };

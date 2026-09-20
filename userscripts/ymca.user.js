@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.14
+// @version      0.0.15
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.14',
+    version: '0.0.15',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1983,17 +1983,23 @@ function mmPatients(record) {
         return null;
     };
 
-    const missing = firstNumber('#patient_missing_requirements strong', /^(\d+)\s*x/i);
-    if (missing) return { count: missing, from: 'missing' };
-
+    /* The patient panel's own header counts every patient at the mission,
+     * treated or not, and keeps counting them until they are taken away. That
+     * is the number this wants. */
     const stated = firstNumber('#patient_button_text strong, #patient_button_form strong', /^(\d+)\b/);
-    if (stated) return { count: stated, from: 'window' };
+    if (stated) return { count: stated, total: true, from: 'window' };
 
     const each = document.querySelectorAll('.mission_patient, [id^="patient_form_"]').length;
-    if (each) return { count: each, from: 'rows' };
+    if (each) return { count: each, total: true, from: 'rows' };
+
+    /* "1x We need: Ambulance" is how many *more* are wanted, not how many the
+     * mission has. Subtracting what is already there from it would ask for one
+     * ambulance and then answer itself with the one already treating somebody. */
+    const missing = firstNumber('#patient_missing_requirements strong', /^(\d+)\s*x/i);
+    if (missing) return { count: missing, total: false, from: 'missing' };
 
     const possible = Number(record?.additional?.possible_patient) || 0;
-    return possible ? { count: possible, from: 'catalogue' } : null;
+    return possible ? { count: possible, total: true, from: 'catalogue' } : null;
 }
 
 /** Where the window keeps its patients, for a window that keeps them elsewhere. */
@@ -2208,16 +2214,32 @@ YMCA.register({
 /* ---------------------------------------------------------- reading the page */
 
 /** What this page is and what it offers, without reading a word of its text. */
-function mmReadMissionPage() {
+function mmReadMissionPage(withFollowUp) {
     const info = document.getElementById('mission_general_info');
     const form = document.getElementById('mission-form');
     const body = document.getElementById('vehicle_show_table_body_all');
+    const rows = body ? [...body.querySelectorAll('.vehicle_select_table_tr')] : [];
+
+    /* Follow-up holds vehicles that are already out on another mission and can
+     * be redirected to this one. The game loads that tab only when it is
+     * opened, so opening it is what makes the rows exist — and it is the game's
+     * own tab doing the game's own fetch, not a request built here. */
+    let followUp = [];
+    if (withFollowUp) {
+        followUp = [...document.querySelectorAll(
+            '#vehicle_show_table_body_occupied .vehicle_select_table_tr, '
+            + '#occupied .vehicle_select_table_tr')];
+        if (!followUp.length) document.querySelector('#tabs a[tabload="occupied"]')?.click();
+    }
+
     return {
         onMissionPage: !!(info && form && body),
         inFrame: window.top !== window.self,
         // The type id, which is the key into /einsaetze.json. Not the title.
         missionType: info?.getAttribute('data-mission-type') || null,
-        rows: body ? [...body.querySelectorAll('.vehicle_select_table_tr')] : [],
+        rows,
+        followUpRows: followUp,
+        followUpOffered: !!document.querySelector('#tabs a[tabload="occupied"]'),
     };
 }
 
@@ -2368,8 +2390,13 @@ async function mmPlan(page, ctx, cfg) {
         ctx.log.warn('could not read the mission list', err.message);
     }
 
-    const vehicles = page.rows.map(mmVehicle).filter(Boolean);
-    if (cfg.fastestFirst !== false) vehicles.sort(mmOrder);
+    const free = page.rows.map(mmVehicle).filter(Boolean);
+    /* A follow-up vehicle is already committed somewhere else, so it goes behind
+     * every free one however fast it is — taking it costs another mission. */
+    const busy = page.followUpRows.map(mmVehicle).filter(Boolean).map((v) =>
+        Object.assign(v, { followUp: true }));
+    if (cfg.fastestFirst !== false) { free.sort(mmOrder); busy.sort(mmOrder); }
+    const vehicles = free.concat(busy);
     const untimed = vehicles.filter((v) => v.seconds === null).length;
     const scene = mmOnScene(mmLearnTypes(vehicles));
     const patients = mmPatients(record);
@@ -2398,7 +2425,11 @@ async function mmPlan(page, ctx, cfg) {
                 mmRememberUnmatched(key, page.missionType);
                 continue;
             }
-            needs.push({ key, rule, wanted, onScene: mmSceneCount(scene, rule) });
+            const onScene = mmSceneCount(scene, rule);
+            /* A shortfall is counted on top of what is there; a total has what
+             * is there counted against it. */
+            const shortfall = key === 'patients' && patients && patients.total === false;
+            needs.push({ key, rule, wanted: shortfall ? wanted + onScene : wanted, onScene });
         }
 
         for (const v of mmAllocate(needs, vehicles)) picked.set(v.id, v);
@@ -2441,7 +2472,9 @@ async function mmPlan(page, ctx, cfg) {
         requirements,
         lines,
         pick: [...picked.values()],
-        available: vehicles.length,
+        available: free.length,
+        followUp: busy.length,
+        followUpOffered: page.followUpOffered,
         untimed,
         scene,
         patients,
@@ -2791,6 +2824,39 @@ function captureMissionWindow() {
 
 const MM_PANEL_ID = 'ymca-mm-panel';
 
+/* The two states the table can be in, said loudly enough to read without
+ * looking. Not from the interface probe: the game has no "everything is
+ * covered" of its own to match, so these are chosen, and they are the only
+ * colours in YMCA that are. */
+const MM_RED = '#e74c3c';
+const MM_GREEN = '#00bc8c';
+
+/**
+ * A switch rather than a tick box.
+ *
+ * The real checkbox is still there and still what the browser reports — it is
+ * moved out of sight rather than replaced, so a click, a label and a keyboard
+ * all behave as they did. Only the track and the knob are drawn.
+ */
+const MM_SWITCH_CSS = `
+#${MM_PANEL_ID} .mm-switch{display:inline-flex;align-items:center;gap:7px;
+  font-weight:normal;margin:0;cursor:pointer;user-select:none}
+#${MM_PANEL_ID} .mm-switch input{position:absolute;opacity:0;width:0;height:0}
+#${MM_PANEL_ID} .mm-switch i{position:relative;width:30px;height:16px;flex:0 0 30px;
+  border-radius:8px;background:rgba(127,127,127,.5);transition:background .15s}
+#${MM_PANEL_ID} .mm-switch i::after{content:"";position:absolute;top:2px;left:2px;
+  width:12px;height:12px;border-radius:50%;background:#fff;transition:left .15s}
+#${MM_PANEL_ID} .mm-switch input:checked + i{background:${MM_GREEN}}
+#${MM_PANEL_ID} .mm-switch input:checked + i::after{left:16px}
+#${MM_PANEL_ID} .mm-switch input:focus-visible + i{outline:2px solid currentColor;outline-offset:2px}
+#${MM_PANEL_ID} .mm-switch.off{opacity:.55}`;
+
+function mmSwitch(key, label, on, disabled) {
+    return `<label class="mm-switch${on ? '' : ' off'}"${disabled ? ' title="not on this mission"' : ''}>
+    <input type="checkbox" data-cfg="${key}"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}>
+    <i></i>${label}</label>`;
+}
+
 /* The game fills travel times in after the page settles and appends rows when
  * "load missing vehicles" is used, so the panel re-reads rather than assuming
  * the first look was the whole picture. */
@@ -2813,6 +2879,13 @@ function mmMountPanel(ctx) {
     panel.className = 'panel panel-default';
     panel.innerHTML = '<div class="panel-body"><i>YMCA is reading this mission…</i></div>';
 
+    if (!document.getElementById('ymca-mm-style')) {
+        const style = document.createElement('style');
+        style.id = 'ymca-mm-style';
+        style.textContent = MM_SWITCH_CSS;
+        document.head.append(style);
+    }
+
     /* Top of the right-hand half, which is where LSS-Manager puts its own mission
      * helper. The window is two columns — the dispatch orders on the left and
      * everything else on the right — and this belongs with the everything else.
@@ -2827,9 +2900,9 @@ function mmMountPanel(ctx) {
     let timer = null;
     let lastPlan = null;
     const draw = async () => {
-        const page = mmReadMissionPage();
-        if (!page.onMissionPage) return;
         const cfg = ctx.store.read('cfg', { fastestFirst: true });
+        const page = mmReadMissionPage(cfg.followUp === true);
+        if (!page.onMissionPage) return;
         const plan = await mmPlan(page, ctx, cfg);
         panel.dataset.pick = plan.pick.map((v) => v.id).join(',');
         panel.dataset.type = String(plan.missionType || '');
@@ -2875,7 +2948,7 @@ function mmMountPanel(ctx) {
 
     panel.addEventListener('change', (e) => {
         const key = e.target.dataset.cfg;
-        if (key !== 'fastestFirst' && key !== 'ambulancePerPatient') return;
+        if (!['fastestFirst', 'ambulancePerPatient', 'followUp'].includes(key)) return;
         const cfg = ctx.store.read('cfg', {});
         cfg[key] = e.target.checked;
         ctx.store.write('cfg', cfg);
@@ -3013,26 +3086,27 @@ function mmRecount(panel, plan) {
     for (const line of plan.lines) {
         if (line.unmatched) continue;
         judged = true;
-        line.found = line.unit
+        const byTick = line.unit
             ? ticked.reduce((n2, v) => n2 + (line.carries === 'water_needed' ? v.water : v.foam), 0)
-            : line.onScene + ticked.filter((v) => mmMeets(v, line.rule)).length;
+            : ticked.filter((v) => mmMeets(v, line.rule)).length;
+        line.ticked = byTick;
+        line.found = line.onScene + byTick;
         if (line.found < line.wanted) allMet = false;
 
-        const cell = panel.querySelector(`[data-covered="${line.key}"]`);
-        if (cell) {
-            cell.className = `label label-${line.found >= line.wanted ? 'success' : 'danger'}`;
-            cell.textContent = line.unit ? `${line.found} ${line.unit}` : String(line.found);
-        }
+        const show = (attr, value) => {
+            const cell = panel.querySelector(`[data-${attr}="${line.key}"]`);
+            if (cell) cell.textContent = line.unit ? `${value} ${line.unit}` : String(value);
+        };
+        show('ticked', byTick);
+        show('covered', line.found);
     }
 
-    /* Red until everything is covered, then green — a tint rather than a colour,
-     * so it lies over the game's own background and reads the same in its dark
-     * theme as in its light one. */
+    /* Not a tint. The table is the surface with the answer on it, so it carries
+     * the answer: red while anything is short, green once nothing is. */
     const table = panel.querySelector('.mm-table');
     if (table) {
-        table.style.backgroundColor = judged
-            ? (allMet ? 'rgba(40,160,70,.22)' : 'rgba(190,45,45,.22)')
-            : '';
+        table.style.backgroundColor = judged ? (allMet ? MM_GREEN : MM_RED) : '';
+        table.style.color = judged ? '#fff' : '';
     }
 }
 
@@ -3067,19 +3141,20 @@ function mmGamePanelHtml(plan, cfg, ctx) {
     const rows = plan.lines.map((l) => {
         // mmRecount fills this and keeps it filled, so it is never rendered stale.
         const cell = l.unmatched
-            ? '<span class="label label-warning">not matched</span>'
-            : `<span class="label label-danger" data-covered="${ctx.esc(l.key)}">0</span>`;
+            ? '?'
+            : `<span data-covered="${ctx.esc(l.key)}">0</span>`;
+        const num = 'text-right" style="width:1%;white-space:nowrap';
         return `<tr>
-      <td class="text-right" style="width:1%;white-space:nowrap">${
-    ctx.fmt(l.wanted)}${l.unit ? ` ${l.unit}` : ''}</td>
-      <td class="text-right" style="width:1%">${l.onScene
-        ? `<span class="label label-info">${l.onScene}</span>`
-        : '<span class="text-muted">&ndash;</span>'}</td>
-      <td class="text-right" style="width:1%;padding-right:10px">${cell}</td>
-      <td>${ctx.esc(l.label)}${mmIcon(l.icon)}</td></tr>`;
+      <td class="${num}">${ctx.fmt(l.wanted)}${l.unit ? ` ${l.unit}` : ''}</td>
+      <td class="${num}">${l.onScene || '&ndash;'}</td>
+      <td class="${num}" data-ticked="${ctx.esc(l.key)}">0</td>
+      <td class="${num};padding-right:10px"><b>${cell}</b></td>
+      <td>${ctx.esc(l.label)}${mmIcon(l.icon)}${
+    l.key === 'patients' && plan.patients
+        ? `<small> &middot; ${plan.patients.count} patient${
+            plan.patients.count > 1 ? 's' : ''}</small>` : ''}</td></tr>`;
     }).join('');
 
-    const short = plan.lines.filter((l) => !l.unmatched && l.found < l.wanted);
     const unmatched = plan.lines.filter((l) => l.unmatched);
 
     return `
@@ -3092,6 +3167,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         <thead><tr>
           <th class="text-right">Wanted</th>
           <th class="text-right" title="already at the mission or on the way">There</th>
+          <th class="text-right" title="ticked, not yet dispatched">Ticked</th>
           <th class="text-right" style="padding-right:10px">Covered</th>
           <th>Needs</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -3102,28 +3178,22 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         plan.scene.unknown ? ` — except ${plan.scene.unknown} whose type has not been seen in a
         selection list yet, so what they cover is not known` : ''}.</p>` : ''}
 
-      ${short.length ? `<div class="alert alert-warning" style="padding:6px 10px">
-        <b>Not enough in range:</b> ${short.map((l) => ctx.esc(l.label)).join(', ')}.
-        Widen the distance with the game's own km buttons.</div>` : ''}
-
       ${unmatched.length ? `<div class="alert alert-warning" style="padding:6px 10px">
         <b>Left alone:</b> ${unmatched.map((l) => ctx.esc(l.label)).join(', ')}.
         <button type="button" class="btn btn-xs btn-default" data-do="type">Copy this mission
           type</button> to have it added.</div>` : ''}
 
-      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">
-        <label style="font-weight:normal;margin:0">
-          <input type="checkbox" data-cfg="fastestFirst"
-            ${cfg.fastestFirst !== false ? 'checked' : ''}> Fastest first</label>
-        <label style="font-weight:normal;margin:0 0 0 10px">
-          <input type="checkbox" data-cfg="ambulancePerPatient"
-            ${cfg.ambulancePerPatient !== false ? 'checked' : ''}> Ambulance per patient</label>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+        ${mmSwitch('fastestFirst', 'Fastest first', cfg.fastestFirst !== false)}
+        ${mmSwitch('ambulancePerPatient', 'Ambulance per patient', cfg.ambulancePerPatient !== false)}
+        ${mmSwitch('followUp', `Follow-up${plan.followUp ? ` (${plan.followUp})` : ''}`,
+        cfg.followUp === true, !plan.followUpOffered)}
         <span style="flex:1 1 auto"></span>
         ${plan.surplus.length ? `<button type="button" class="btn btn-warning btn-sm"
           data-do="cancel">Cancel ${plan.surplus.length} unused</button>` : ''}
-        <button type="button" class="btn btn-default btn-sm" data-do="clear">Untick everything</button>
         <button type="button" class="btn btn-success btn-sm" data-do="select">
           Tick ${plan.pick.length} vehicles</button>
+        <button type="button" class="btn btn-default btn-sm" data-do="clear">Untick everything</button>
       </div>
       ${plan.untimed ? `<small class="text-muted">${plan.untimed} of ${plan.available}
         have no travel time yet, ordered by distance until the game works them out</small>` : ''}
@@ -3222,11 +3292,8 @@ YMCA.register({
          * the natural second chance — and the one moment the player would notice it missing. */
         if (cfg.recording) toAttach();
         const log = toRead(TO_LOG_KEY, []);
-        const trusted = log.filter((e) => e.alone && e.delta > 0);
         const listed = await toListedCredits(ctx);
         const rows = toSummarise(log, listed);
-        const totalPaid = trusted.reduce((n, e) => n + e.delta, 0);
-        const share = toShareOfListed(log, listed);
 
         el.innerHTML = `
       <div class="ymca-card">
@@ -3238,37 +3305,28 @@ YMCA.register({
           ${cfg.recording ? 'checked' : ''}> Keep recording</label>
       </div>
 
-      ${share ? `<div class="ymca-card">
-        <b>What a mission actually pays</b>
-        <p style="font-size:26px;font-weight:700;margin:8px 0 2px">${(share.ratio * 100).toFixed(0)}%
-          <span class="ymca-dim" style="font-size:14px;font-weight:400">of what the game lists</span></p>
-        <p class="ymca-dim">${ctx.fmt(share.paid)} received where ${ctx.fmt(share.listed)} was
-          listed, over ${share.missions} missions measured one at a time.
-          ${share.missions < 10 ? '<b>Too few to rely on yet.</b>' : ''}</p>
-      </div>` : ''}
-
-      <div class="ymca-note"><b>The count is measured. The payout is inferred.</b> The game
-        announces that a mission ended and, separately, what your balance became; pairing the two
-        is TrackOps' doing. A rise is credited to the longest-waiting ending, and trusted only when
-        nothing else was waiting &mdash; ${trusted.length} of ${log.length} here.</div>
+      <div class="ymca-note warn"><b>The payout reading does not work, and is no longer
+        shown.</b> Pairing a mission ending with the next rise in your balance cannot tell that
+        rise apart from a daily task reward, an alliance payment or anything else that lands in
+        the same few seconds. It read a 320-credit call at 3,716. The deltas are still recorded
+        and still in the export, marked for what they are, but nothing here averages them and
+        nothing uses them.</div>
 
       ${rows.length ? `
       <div class="ymca-card">
-        <b>What each kind of mission paid</b>
+        <b>What you have run</b>
         <table id="to-table" style="margin-top:8px">
-          <thead><tr><th>Mission</th><th class="ymca-num">Run</th><th class="ymca-num">Measured</th>
-            <th class="ymca-num">Average paid</th><th class="ymca-num">Listed</th></tr></thead>
+          <thead><tr><th class="ymca-num">Run</th><th>Mission</th>
+            <th class="ymca-num">Listed</th></tr></thead>
           <tbody>${rows.map((r) => `
-            <tr><td>${ctx.esc(r.name)}</td>
-              <td class="ymca-num">${r.runs}</td>
-              <td class="ymca-num">${r.measured}</td>
-              <td class="ymca-num">${r.measured ? ctx.fmt(Math.round(r.average)) : '<span class="ymca-dim">—</span>'}</td>
+            <tr><td class="ymca-num">${r.runs}</td>
+              <td>${ctx.esc(r.name)}</td>
               <td class="ymca-num">${r.listed === null
         ? '<span class="ymca-warn">none listed</span>' : ctx.fmt(r.listed)}</td></tr>`).join('')}
           </tbody>
         </table>
         <p class="ymca-sub" style="margin-top:8px">Rows where the game lists nothing are the ones
-          worth having. StepOps does not use any of this yet.</p>
+          worth having &mdash; those are what the planner is guessing at.</p>
       </div>` : `
       <div class="ymca-card">
         <b>Nothing counted yet</b>
@@ -3363,28 +3421,6 @@ function toSummarise(log, listed) {
 }
 
 /**
- * How much of the listed figure actually arrives.
- *
- * Only missions measured on their own, and only where the game lists a figure
- * to compare against. It is a ratio of two totals rather than an average of
- * ratios, so one cheap mission cannot swing it.
- */
-function toShareOfListed(log, listed) {
-    let paid = 0;
-    let quoted = 0;
-    let missions = 0;
-    for (const e of log) {
-        if (!e.alone || !(e.delta > 0)) continue;
-        const figure = listed[String(e.type)]?.listed;
-        if (!figure) continue;
-        paid += e.delta;
-        quoted += figure;
-        missions += 1;
-    }
-    return missions ? { paid, listed: quoted, missions, ratio: paid / quoted } : null;
-}
-
-/**
  * What goes back for the planner's sake.
  *
  * Mission type ids and credit figures, which are the game's own constants, and
@@ -3399,19 +3435,17 @@ function toExport(log, listed) {
         measuredFrom: log.length ? new Date(log[0].at).toISOString().slice(0, 10) : null,
         missionsEnded: log.length,
         missionsMeasured: log.filter((e) => e.alone && e.delta > 0).length,
-        shareOfListed: (() => {
-            const share = toShareOfListed(log, listed);
-            return share ? {
-                paid: share.paid, listed: share.listed,
-                missions: share.missions, ratio: Number(share.ratio.toFixed(4)),
-            } : null;
-        })(),
+        payoutReadingRetired: 'a balance rise cannot be told apart from a daily reward',
         byMissionType: rows.map((r) => ({
             type: Number(r.type) || r.type,
             name: r.name,
             runs: r.runs,
-            measured: r.measured,
-            averagePaid: r.measured ? Math.round(r.average) : null,
+            /* Kept, and kept labelled. A balance rise near a mission ending is
+             * not that mission's payout — a daily task reward lands the same
+             * way — so these are observations of the balance, not of a payout,
+             * and nothing averages them. */
+            balanceRoseNearby: r.measured,
+            balanceRiseTotal: r.measured ? r.total : null,
             listedByGame: r.listed,
         })),
     };

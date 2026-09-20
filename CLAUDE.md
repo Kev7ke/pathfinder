@@ -165,6 +165,13 @@ which is there whenever the mission has patients, including while a first
 responder is already on its way; and one element per patient. Read all of them —
 reading only the first misses every call where nothing is being flagged.
 
+**"1x We need: Ambulance" is a shortfall, not a total.** The patient panel's
+header counts every patient at the mission, treated or not, and that is the
+total; the missing-vehicles line counts how many *more* are wanted. Subtracting
+what is already there from a shortfall asks for one ambulance and then answers
+itself with the one already treating somebody. Read the total where there is
+one; where there is only the shortfall, add what is there to it.
+
 One ambulance per patient, and **an ambulance means `any_rtw`**: a Rescue Engine
 or a heavy rescue is a fire appliance that can neither treat a patient nor carry
 one, and the game does not flag them `any_rtw`.
@@ -377,10 +384,16 @@ the log without a module having to remember to log it.
   the sort of thing that should feed StepOps, and exactly the sort of thing not
   to wire in quietly — it is shown in TrackOps and goes no further until asked.
 - **Separate what is measured from what is inferred, on screen and not only in
-  the code.** TrackOps counts endings, which the game states, and infers
-  payouts, which it does not: the balance rising after a mission ended is
-  TrackOps' own pairing. The panel says which is which, because a number that
-  looks equally solid gets used as though it is.
+  the code.** TrackOps counts endings, which the game states. It used to infer
+  payouts, which it could not: a rise in the balance cannot be told apart from a
+  daily task reward or an alliance payment landing in the same few seconds, and
+  across 102 missions it put a 320-credit call at 3,716. **A reading that cannot
+  be made sound is withdrawn, not caveated.** The deltas are still recorded and
+  exported, labelled as balance movements rather than payouts, and nothing
+  averages them.
+- **Do not tell the player about a setting they chose.** The vehicle range in a
+  mission window is theirs and starts at its widest; "not enough in range, widen
+  it" is a tool second-guessing a deliberate choice.
 - Anything that writes to the player's account needs a **mandatory preview**, a
   confirmation, and a **backup that makes it undoable** — and must say so
   plainly when the backup could not be written.

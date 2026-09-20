@@ -213,7 +213,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.14');
+assert.equal(report.ymca, '0.0.15');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -464,12 +464,12 @@ assert.equal(await mission.evaluate(() =>
 const panelRows = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('panel table       :', JSON.stringify(panelRows));
-assert.deepEqual(panelRows, [['1', '\u2013', '0', 'Fire engines']],
+assert.deepEqual(panelRows, [['1', '\u2013', '0', '0', 'Fire engines']],
   'covered is what is committed, and nothing is committed before a box is ticked');
 const tintBefore = await mission.evaluate(() =>
   document.querySelector('#ymca-mm-panel .mm-table').style.backgroundColor);
 console.log('tint short        :', tintBefore);
-assert.ok(/^rgba\(190, 45, 45/.test(tintBefore), 'red while something is still missing');
+assert.equal(tintBefore, 'rgb(231, 76, 60)', 'red while something is still missing');
 
 // Travel time, not map distance: vehicle 22 is further away but arrives in 90s, not 300s.
 await mission.click('#ymca-mm-panel [data-do="select"]');
@@ -481,8 +481,9 @@ const afterTick = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
 const tintAfter = await mission.evaluate(() =>
   document.querySelector('#ymca-mm-panel .mm-table').style.backgroundColor);
 console.log('after ticking     :', JSON.stringify(afterTick), tintAfter);
-assert.equal(afterTick[0][2], '1', 'a ticked vehicle counts as covered');
-assert.ok(/^rgba\(40, 160, 70/.test(tintAfter), 'green once every requirement is covered');
+assert.equal(afterTick[0][2], '1', 'the Ticked column shows what was ticked');
+assert.equal(afterTick[0][3], '1', 'and Covered is There plus Ticked');
+assert.equal(tintAfter, 'rgb(0, 188, 140)', 'green once every requirement is covered');
 // And unticking by hand takes it straight back, without YMCA being told.
 await mission.evaluate(() => {
   const box = document.querySelector('.vehicle_checkbox:checked');
@@ -490,13 +491,13 @@ await mission.evaluate(() => {
   box.dispatchEvent(new Event('change', { bubbles: true }));
 });
 await mission.waitForTimeout(150);
-const afterUntick = await mission.$$eval('#ymca-mm-panel tbody tr td:nth-child(3)',
+const afterUntick = await mission.$$eval('#ymca-mm-panel tbody tr td:nth-child(4)',
   (tds) => tds.map((t) => t.textContent.trim()));
 const tintBack = await mission.evaluate(() =>
   document.querySelector('#ymca-mm-panel .mm-table').style.backgroundColor);
 console.log('after unticking   :', JSON.stringify(afterUntick), tintBack);
 assert.equal(afterUntick[0], '0', 'unticking by hand must drop the count again');
-assert.ok(/^rgba\(190, 45, 45/.test(tintBack), 'and turn the table red again');
+assert.equal(tintBack, 'rgb(231, 76, 60)', 'and turn the table red again');
 await mission.click('#ymca-mm-panel [data-do="select"]');
 assert.deepEqual(chosen, ['22'],
   'ordering must follow the travel time the game prints, not how close the dot is');
@@ -554,7 +555,7 @@ await mission.waitForTimeout(900);
 const withScene = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('with one on scene :', JSON.stringify(withScene));
-const engines = withScene.find((r) => r[3] === 'Fire engines');
+const engines = withScene.find((r) => r[4] === 'Fire engines');
 assert.equal(engines[1], '1', 'the engine already at the mission must show in the There column');
 const tickAfter = await mission.textContent('#ymca-mm-panel [data-do="select"]');
 console.log('tick after        :', tickAfter.trim());
@@ -626,7 +627,7 @@ await mission.waitForTimeout(900);
 const withPatients = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('patients          :', JSON.stringify(withPatients));
-const amb = withPatients.find((r) => /Ambulances/.test(r[3]));
+const amb = withPatients.find((r) => /Ambulances/.test(r[4]));
 assert.ok(amb, 'patients must reach the plan even though `requirements` omits them');
 assert.equal(amb[0], '2', 'the window states two, and the window beats the catalogue maximum');
 // One glyph per requirement, sized to the text and taking its colour.
@@ -638,17 +639,21 @@ assert.ok(icons.every((i) => i.w === '12' && i.stroke === 'currentColor'),
   'the glyphs must be small and take the colour around them rather than choosing one');
 
 // "Ambulance per patient" off means one ambulance, however many patients there are.
-await mission.uncheck('#ymca-mm-panel [data-cfg="ambulancePerPatient"]');
+// The switch keeps a real checkbox behind it, moved out of sight — clicking the label is what
+// a person does, and it must still drive the input the browser reports.
+await mission.click('#ymca-mm-panel [data-cfg="ambulancePerPatient"] ~ i');
+assert.equal(await mission.isChecked('#ymca-mm-panel [data-cfg="ambulancePerPatient"]'), false,
+  'the switch must toggle the checkbox it is drawn over');
 await mission.waitForTimeout(600);
 const oneAmb = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
-console.log('one ambulance     :', JSON.stringify(oneAmb.find((r) => /Ambulances/.test(r[3]))));
-assert.equal(oneAmb.find((r) => /Ambulances/.test(r[3]))[0], '1',
+console.log('one ambulance     :', JSON.stringify(oneAmb.find((r) => /Ambulances/.test(r[4]))));
+assert.equal(oneAmb.find((r) => /Ambulances/.test(r[4]))[0], '1',
   'with the setting off, two patients still want one ambulance');
-await mission.check('#ymca-mm-panel [data-cfg="ambulancePerPatient"]');
+await mission.click('#ymca-mm-panel [data-cfg="ambulancePerPatient"] ~ i');
 await mission.waitForTimeout(600);
 // oneof: the pumper answers "an engine, rescue or ladder" AND "firetrucks" at once.
-assert.ok(withPatients.some((r) => /engine, rescue or ladder/i.test(r[3])),
+assert.ok(withPatients.some((r) => /engine, rescue or ladder/i.test(r[4])),
   'the oneof_ family must be matched, not left as an unmatched requirement');
 const tickPatients = await mission.textContent('#ymca-mm-panel [data-do="select"]');
 console.log('tick w/ patients  :', tickPatients.trim());
@@ -774,7 +779,7 @@ const after = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('panel redrew      :', JSON.stringify(after));
 assert.ok(after.length >= 1, 'the panel should re-read itself when the vehicle table changes');
-assert.ok(after.every((r) => Number(r[2]) >= Number(r[0])),
+assert.ok(after.every((r) => Number(r[3]) >= Number(r[0])),
   'every requirement is still at least covered after the redraw');
 console.log('mission panel     :', missionErrs.length ? missionErrs : 'no page errors');
 assert.equal(missionErrs.length, 0);
@@ -844,17 +849,24 @@ await pg.waitForSelector('#to-table');
 const summary = await pg.$$eval('#to-table tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('trackops table    :', JSON.stringify(summary));
-assert.equal(summary[0][0], 'Forest fire', 'the mission type id was not resolved to its name');
-assert.equal(summary[0][3], '2,340', 'the measured payout is not shown');
-assert.equal(summary[0][4], '9,000', 'the game\'s own listed figure should sit beside it');
+assert.equal(summary[0][1], 'Forest fire', 'the mission type id was not resolved to its name');
+assert.equal(summary[0][0], '1', 'the run count is the point of the table now');
+assert.equal(summary[0][2], '9,000', 'the game\'s own listed figure sits beside it');
+// The payout reading is retired: nothing in the table may present one.
+assert.ok(!summary[0].includes('2,340'), 'no averaged payout may be shown');
 
 // And the export carries the comparison without carrying a balance.
 await pg.click('[data-do="copy"]');
 await pg.waitForFunction(() => document.querySelector('#to-out')?.value.includes('byMissionType'));
 const exported = JSON.parse(await pg.inputValue('#to-out'));
 console.log('trackops export   :', JSON.stringify(exported.byMissionType));
-assert.equal(exported.byMissionType[0].averagePaid, 2340);
 assert.equal(exported.byMissionType[0].listedByGame, 9000);
+assert.equal(exported.byMissionType[0].runs, 1);
+// The balance movement is kept, and kept labelled as a balance movement.
+assert.equal(exported.byMissionType[0].balanceRiseTotal, 2340);
+assert.ok(!('averagePaid' in exported.byMissionType[0]),
+  'nothing may call a balance movement a payout');
+assert.ok(exported.payoutReadingRetired, 'the export should say the reading was retired');
 assert.ok(!JSON.stringify(exported).includes('502340') && !JSON.stringify(exported).includes('500000'),
   'the export must never carry a balance');
 // Two different missions ending together: one rise belongs to one mission, never to both.
