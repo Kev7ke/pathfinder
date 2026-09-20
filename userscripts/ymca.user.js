@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.22
+// @version      0.0.23
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.22',
+    version: '0.0.23',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2077,12 +2077,17 @@ const MM_ICONS = {
     tree: '<path d="M10 2 5 9h10z"/><path d="M10 6.5 4 14h12z"/><path d="M10 14v4"/>',
 };
 
+/**
+ * The glyphs are drawn edge to edge in a 20-wide box, so a 1.6 stroke put half
+ * its width outside it and the outermost lines came back shaved. The viewBox
+ * carries a unit of margin on every side instead of the paths being redrawn.
+ */
 function mmIcon(name) {
     const path = MM_ICONS[name];
     if (!path) return '';
-    return `<svg viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="currentColor"
-    stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-    style="vertical-align:-1px;margin-left:5px;opacity:.75">${path}</svg>`;
+    return `<svg viewBox="-1.5 -1.5 23 23" width="15" height="15" fill="none"
+    stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+    aria-hidden="true" class="mm-glyph">${path}</svg>`;
 }
 
 /** Every flag the requirements above ask for by name. */
@@ -3129,6 +3134,10 @@ const MM_GREEN = '#00bc8c';
  * moved out of sight rather than replaced, so a click, a label and a keyboard
  * all behave as they did. Only the track and the knob are drawn.
  */
+/** How many requirement rows the frame is built for. Below this it does not
+ * shrink; above it, the rest scroll. */
+const MM_ROWS_SHOWN = 6;
+
 const MM_SWITCH_CSS = `
 #${MM_PANEL_ID} .mm-switch{display:inline-flex;align-items:center;gap:7px;
   font-weight:normal;margin:0;cursor:pointer;user-select:none}
@@ -3152,12 +3161,96 @@ const MM_SWITCH_CSS = `
   background-color:${MM_RED}!important;color:#fff!important;border-color:rgba(255,255,255,.25)!important}
 #${MM_PANEL_ID} .mm-table.mm-ok td,#${MM_PANEL_ID} .mm-table.mm-ok th{
   background-color:${MM_GREEN}!important;color:#fff!important;border-color:rgba(255,255,255,.25)!important}
-#${MM_PANEL_ID} .mm-table.mm-short small,#${MM_PANEL_ID} .mm-table.mm-ok small{color:rgba(255,255,255,.8)}`;
+#${MM_PANEL_ID} .mm-table.mm-short small,#${MM_PANEL_ID} .mm-table.mm-ok small{color:rgba(255,255,255,.8)}
 
-function mmSwitch(key, label, on, disabled) {
-    return `<label class="mm-switch${on ? '' : ' off'}"${disabled ? ' title="not on this mission"' : ''}>
+/* One height, whatever the mission asks for.
+ *
+ * A panel that grows and shrinks with the requirement count moves the buttons
+ * under the cursor between one mission and the next. The frame is ${MM_ROWS_SHOWN}
+ * rows tall and stays there: fewer rows leave space below, more rows scroll
+ * inside it, and Dispatch never moves. */
+#${MM_PANEL_ID} .mm-scroll{position:relative;margin-bottom:8px;
+  height:calc(var(--mm-head) + ${MM_ROWS_SHOWN} * var(--mm-row));
+  --mm-row:29px;--mm-head:33px;
+  overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;
+  scrollbar-color:rgba(127,127,127,.55) transparent}
+#${MM_PANEL_ID} .mm-scroll::-webkit-scrollbar{width:8px}
+#${MM_PANEL_ID} .mm-scroll::-webkit-scrollbar-track{background:transparent}
+#${MM_PANEL_ID} .mm-scroll::-webkit-scrollbar-thumb{
+  background:rgba(127,127,127,.55);border-radius:4px;
+  border:2px solid transparent;background-clip:content-box}
+#${MM_PANEL_ID} .mm-scroll:hover::-webkit-scrollbar-thumb{background:rgba(127,127,127,.8);
+  background-clip:content-box}
+#${MM_PANEL_ID} .mm-scroll .mm-table{margin-bottom:0}
+#${MM_PANEL_ID} .mm-scroll thead th{position:sticky;top:0;z-index:1}
+
+/* Only when there is more below: the last rows fade rather than being cut,
+ * and the fade lifts as the bottom is reached. Masked, not painted over, so it
+ * works on whatever colour the row happens to be. */
+#${MM_PANEL_ID} .mm-scroll.mm-more{
+  -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 34px),transparent);
+  mask-image:linear-gradient(to bottom,#000 calc(100% - 34px),transparent);
+  transition:-webkit-mask-image .2s,mask-image .2s}
+#${MM_PANEL_ID} .mm-scroll.mm-more.mm-end{
+  -webkit-mask-image:linear-gradient(to bottom,#000 100%,#000);
+  mask-image:linear-gradient(to bottom,#000 100%,#000)}
+
+/* The glyphs sit on the text baseline and take its colour. */
+#${MM_PANEL_ID} .mm-glyph{vertical-align:-2.5px;margin-left:6px;opacity:.8;overflow:visible}
+#${MM_PANEL_ID} tr:hover .mm-glyph{opacity:1}`;
+
+function mmSwitch(key, label, on, disabled, why) {
+    const title = disabled ? ` title="${why || 'not on this mission'}"` : '';
+    return `<label class="mm-switch${on ? '' : ' off'}"${title}>
     <input type="checkbox" data-cfg="${key}"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}>
     <i></i>${label}</label>`;
+}
+
+/**
+ * Follow-up belongs to one mission at a time.
+ *
+ * It pulls vehicles off whatever they are doing. Arm it on two missions and the
+ * two take each other's vehicles: each is short, each reaches for the other's,
+ * and appliances spend the call driving between them. The game will happily let
+ * that happen — it happens by hand.
+ *
+ * So the mission that armed it is written down, and while that is a different
+ * mission the switch here is held shut and says which one has it. Switching it
+ * off there, or dispatching there, hands it back. The claim is only ever
+ * released by the mission holding it or by time, so a window closed without
+ * dispatching cannot hold it for ever.
+ */
+const MM_CLAIM_MS = 10 * 60e3;
+
+function mmFollowUpClaim() {
+    try {
+        const held = JSON.parse(localStorage.getItem('ymca-missionmagician-followUpClaim'));
+        if (!held || Date.now() - held.at > MM_CLAIM_MS) return null;
+        return held;
+    } catch (e) {
+        return null;
+    }
+}
+
+function mmClaimFollowUp(missionId, on) {
+    try {
+        const key = 'ymca-missionmagician-followUpClaim';
+        if (!on) {
+            const held = mmFollowUpClaim();
+            // Only the mission that took it may put it back.
+            if (held && String(held.mission) !== String(missionId)) return;
+            localStorage.removeItem(key);
+            return;
+        }
+        localStorage.setItem(key, JSON.stringify({ mission: String(missionId), at: Date.now() }));
+    } catch (e) { /* private window: the switch still works, it just forgets */ }
+}
+
+/** The mission this window is, for the claim above. */
+function mmMissionId() {
+    return (/\/missions\/(\d+)/.exec(location.pathname) || [])[1]
+        || document.getElementById('mission_general_info')?.getAttribute('mission_id')
+        || null;
 }
 
 /* The game fills travel times in after the page settles and appends rows when
@@ -3210,9 +3303,15 @@ function mmMountPanel(ctx) {
     const draw = async () => {
         const mine = (drawing += 1);
         const cfg = ctx.store.read('cfg', { fastestFirst: true });
-        const page = mmReadMissionPage(cfg.followUp === true);
+        /* Another mission holding follow-up means its tab is not opened here
+         * either: the guard is on what gets read, not only on the switch. */
+        const held = mmFollowUpClaim();
+        const claimedElsewhere = held && String(held.mission) !== String(mmMissionId())
+            ? held.mission : null;
+        const page = mmReadMissionPage(cfg.followUp === true && !claimedElsewhere);
         if (!page.onMissionPage) return;
         const plan = await mmPlan(page, ctx, cfg);
+        plan.claimedElsewhere = claimedElsewhere;
         if (mine !== drawing) return;
         panel.dataset.pick = plan.pick.map((v) => v.id).join(',');
         panel.dataset.type = String(plan.missionType || '');
@@ -3220,6 +3319,7 @@ function mmMountPanel(ctx) {
         lastPlan = plan;
         panel.innerHTML = mmGamePanelHtml(plan, cfg, ctx);
         mmRecount(panel, plan);
+        mmWatchScroll(panel);
     };
     const redraw = () => {
         clearTimeout(timer);
@@ -3269,6 +3369,7 @@ function mmMountPanel(ctx) {
         const cfg = ctx.store.read('cfg', {});
         cfg[key] = e.target.checked;
         ctx.store.write('cfg', cfg);
+        if (key === 'followUp') mmClaimFollowUp(mmMissionId(), e.target.checked);
         draw();
     });
 
@@ -3300,6 +3401,7 @@ function mmMountPanel(ctx) {
         if (!c.followUp || c.followUpLocked) return;
         c.followUp = false;
         ctx.store.write('cfg', c);
+        mmClaimFollowUp(mmMissionId(), false);
         ctx.log.info('follow-up', 'switched off after dispatching');
         redraw();
     };
@@ -3426,6 +3528,19 @@ function mmSurplus(plan) {
  * Driven by the game's own change event, so ticking or unticking moves the
  * numbers without a redraw, whether it was YMCA or the player who did it.
  */
+/** The fade lifts once the last row is in view, so nothing looks cut off when
+ * there is nothing left below. */
+function mmWatchScroll(panel) {
+    const box = panel.querySelector('.mm-scroll');
+    if (!box) return;
+    const mark = () => {
+        const end = box.scrollTop + box.clientHeight >= box.scrollHeight - 2;
+        box.classList.toggle('mm-end', end);
+    };
+    box.addEventListener('scroll', mark, { passive: true });
+    mark();
+}
+
 function mmRecount(panel, plan) {
     if (!plan || !plan.lines) return;
     const ticked = [...document.querySelectorAll('.vehicle_checkbox:checked')].map((box) => ({
@@ -3471,6 +3586,36 @@ function mmRecount(panel, plan) {
  * what is in range. Mission type ids and counts — the game's own constants —
  * and no mission text, addresses or names.
  */
+/**
+ * The shape of the two tables that only exist once something is happening.
+ *
+ * A vehicle already at a mission has no checkbox, so what it covers is looked
+ * up by type — which is why an unowned type cannot be judged. Whether that is
+ * actually necessary depends on what the game writes on those rows, and this
+ * is that question asked once, of the real page.
+ */
+function mmTableShapes() {
+    const shapes = {};
+    for (const id of ['mission_vehicle_at_mission', 'mission_vehicle_driving',
+        'vehicle_show_table_body_occupied']) {
+        const table = document.getElementById(id);
+        if (!table) { shapes[id] = 'not on this page'; continue; }
+        const row = table.querySelector('tr[id^="vehicle_row"], tr.vehicle_select_table_tr, tbody tr');
+        if (!row) { shapes[id] = 'present, no rows'; continue; }
+        shapes[id] = {
+            rowAttributes: [...row.attributes].map((a) =>
+                `${a.name}=${/^\d+$/.test(a.value) ? '#' : a.value.slice(0, 12)}`),
+            cells: [...row.cells].map((td) => ({
+                classes: td.className || null,
+                attributes: [...td.attributes].map((a) => a.name),
+                controls: [...td.querySelectorAll('a,button,input')]
+                    .map((el) => `${el.tagName.toLowerCase()}.${el.className}`.trim()),
+            })),
+        };
+    }
+    return shapes;
+}
+
 async function mmCopyState(ctx, plan, panel) {
     const page = mmReadMissionPage(false);
     const state = {
@@ -3489,6 +3634,12 @@ async function mmCopyState(ctx, plan, panel) {
         followUpTabPresent: page.followUpOffered,
         vehicleTypesLearnt: Object.keys(mmKnownTypes()).length,
         panelPlaced: !!panel,
+        /* The two tables nothing here has ever seen with something in them:
+         * what is at the mission, and what the follow-up tab offers. If either
+         * carries the capability flags the way a selection checkbox does, a
+         * vehicle nobody owns can be counted without owning one. Attribute and
+         * class names only — no captions, no addresses, no player names. */
+        tablesNotSeenYet: mmTableShapes(),
     };
     await ctx.clipboard(JSON.stringify(state, null, 1), 'what this panel is seeing');
 }
@@ -3553,15 +3704,17 @@ function mmGamePanelHtml(plan, cfg, ctx) {
       ${plan.name ? `<small> · ${ctx.esc(plan.name)}</small>` : ''}
     </div>
     <div class="panel-body">
-      <table class="table table-condensed mm-table" style="margin-bottom:8px">
-        <thead><tr>
-          <th class="text-right">Wanted</th>
-          <th class="text-right" title="already at the mission or on the way">There</th>
-          <th class="text-right" title="ticked, not yet dispatched">Ticked</th>
-          <th class="text-right" style="padding-right:10px">Covered</th>
-          <th>Needs</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="mm-scroll${plan.lines.length > MM_ROWS_SHOWN ? ' mm-more' : ''}">
+        <table class="table table-condensed mm-table">
+          <thead><tr>
+            <th class="text-right">Wanted</th>
+            <th class="text-right" title="already at the mission or on the way">There</th>
+            <th class="text-right" title="ticked, not yet dispatched">Ticked</th>
+            <th class="text-right" style="padding-right:10px">Covered</th>
+            <th>Needs</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
 
       ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.scene.total} already at the mission or on the way, subtracted above${
@@ -3578,7 +3731,12 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         ${mmSwitch('ambulancePerPatient', 'Ambulance per patient', cfg.ambulancePerPatient !== false)}
         <span style="display:inline-flex;align-items:center;gap:4px">
           ${mmSwitch('followUp', `Follow-up${plan.followUp ? ` (${plan.followUp})` : ''}`,
-        cfg.followUp === true, !plan.followUpOffered)}
+        cfg.followUp === true && !plan.claimedElsewhere,
+        !plan.followUpOffered || !!plan.claimedElsewhere,
+        plan.claimedElsewhere
+            ? 'another mission has follow-up armed — two missions pulling from each other leave '
+              + 'the vehicles driving between them'
+            : 'not on this mission')}
           <button type="button" class="mm-lock${cfg.followUpLocked ? ' on' : ''}"
             data-do="lock" title="${cfg.followUpLocked
         ? 'Follow-up stays on after dispatching' : 'Follow-up switches off after dispatching'}"

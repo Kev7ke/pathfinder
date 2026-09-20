@@ -783,11 +783,19 @@ assert.ok(amb, 'patients must reach the plan even though `requirements` omits th
 assert.equal(amb[0], '2', 'the window states two, and the window beats the catalogue maximum');
 // One glyph per requirement, sized to the text and taking its colour.
 const icons = await mission.$$eval('#ymca-mm-panel tbody tr td:last-child svg',
-  (els) => els.map((e) => ({ w: e.getAttribute('width'), stroke: e.getAttribute('stroke') })));
-console.log('row icons         :', JSON.stringify(icons));
+  (els) => els.map((e) => ({
+    w: e.getAttribute('width'), stroke: e.getAttribute('stroke'), box: e.getAttribute('viewBox'),
+  })));
+console.log('row icons         :', JSON.stringify(icons[0]), `x${icons.length}`);
 assert.equal(icons.length, withPatients.length, 'every requirement row should carry a glyph');
-assert.ok(icons.every((i) => i.w === '12' && i.stroke === 'currentColor'),
-  'the glyphs must be small and take the colour around them rather than choosing one');
+assert.ok(icons.every((i) => i.stroke === 'currentColor'),
+  'the glyphs take the colour around them rather than choosing one');
+// The paths run edge to edge in a 20-wide box, so the viewBox has to carry the stroke's
+// overhang or the outermost lines come back shaved.
+assert.ok(icons.every((i) => /^-[\d.]+ -[\d.]+ /.test(i.box)),
+  'the viewBox must leave room for the stroke rather than clipping it');
+assert.ok(icons.every((i) => Number(i.w) >= 14 && Number(i.w) <= 18),
+  'and read at the size of the text beside them');
 
 // "Ambulance per patient" off means one ambulance, however many patients there are.
 // The switch keeps a real checkbox behind it, moved out of sight — clicking the label is what
@@ -1000,6 +1008,64 @@ console.log('hazmat sent back  :', JSON.stringify(hazBack));
 assert.deepEqual(hazBack, ['93'], 'a pumper goes home, never a HazMat');
 // Out of the way: the next block builds its own scene table, and two with this id would merge.
 await mission.evaluate(() => document.getElementById('mission_vehicle_at_mission')?.remove());
+
+// ---- one height, whatever the mission asks for ----
+// A panel that grows with the requirement count moves the buttons under the cursor between one
+// mission and the next. Three rows and six rows must measure the same.
+const frame = await mission.evaluate(() => {
+  const box = document.querySelector('#ymca-mm-panel .mm-scroll');
+  return { h: Math.round(box.getBoundingClientRect().height), more: box.classList.contains('mm-more'),
+    rows: document.querySelectorAll('#ymca-mm-panel tbody tr').length };
+});
+console.log('panel frame       :', JSON.stringify(frame));
+assert.ok(frame.h > 120, 'the frame is built for six rows even when fewer are shown');
+assert.equal(frame.more, false, 'and nothing fades while everything fits');
+// Now overfill it: the frame holds, and the overflow scrolls behind a fade.
+await mission.evaluate(() => {
+  const body = document.querySelector('#ymca-mm-panel tbody');
+  for (let i = 0; i < 8; i += 1) body.append(body.firstElementChild.cloneNode(true));
+  document.querySelector('#ymca-mm-panel .mm-scroll').classList.add('mm-more');
+});
+const full = await mission.evaluate(() => {
+  const box = document.querySelector('#ymca-mm-panel .mm-scroll');
+  return { h: Math.round(box.getBoundingClientRect().height), scrolls: box.scrollHeight > box.clientHeight,
+    masked: getComputedStyle(box).maskImage !== 'none'
+      || getComputedStyle(box).webkitMaskImage !== 'none' };
+});
+console.log('panel overfilled  :', JSON.stringify(full));
+assert.equal(full.h, frame.h, 'eleven rows must not make the panel taller than three');
+assert.ok(full.scrolls, 'the rest scroll inside it');
+assert.ok(full.masked, 'and fade at the bottom rather than being cut');
+
+// ---- follow-up belongs to one mission at a time ----
+// Armed on two missions, each pulls the other's vehicles and they spend the call driving between.
+await mission.evaluate(() => {
+  localStorage.setItem('ymca-missionmagician-followUpClaim',
+    JSON.stringify({ mission: '999999', at: Date.now() }));
+  const tab = document.createElement('a');
+  tab.setAttribute('tabload', 'occupied');
+  (document.getElementById('tabs') || document.body).append(tab);
+});
+await mission.waitForTimeout(900);
+const claim = await mission.evaluate(() => {
+  const box = document.querySelector('#ymca-mm-panel input[data-cfg="followUp"]');
+  return { disabled: box.disabled, why: box.closest('.mm-switch').getAttribute('title') };
+});
+console.log('follow-up claim   :', JSON.stringify(claim));
+assert.equal(claim.disabled, true, 'another mission holds it, so this one may not also arm it');
+assert.ok(/another mission/.test(claim.why || ''), 'and the switch says why rather than just sulking');
+await mission.evaluate(() => {
+  localStorage.removeItem('ymca-missionmagician-followUpClaim');
+  // A store key changing moves nothing in the page, so nudge the redraw the way the game would.
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(900);
+const released = await mission.evaluate(() =>
+  document.querySelector('#ymca-mm-panel .mm-switch input[data-cfg="followUp"]')
+    .closest('.mm-switch').getAttribute('title'));
+console.log('claim released    :', JSON.stringify(released));
+assert.ok(!/another mission/.test(released || ''),
+  'releasing the claim hands follow-up back, whatever else this window offers');
 
 // ---- follow-up switches off however the mission was dispatched ----
 // Only one of the game's five dispatch controls submits the form. Dispatch and Next, the alliance

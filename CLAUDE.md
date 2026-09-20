@@ -229,6 +229,35 @@ read-here row are not mistaken for each other. The match is only ever made
 against a flag some vehicle *in that table* actually carries, so nothing is
 invented: a key with no answer in the page stays unmatched and says so.
 
+**There is no page that states what an unowned type covers.** The flags are
+written per vehicle *instance*, onto that vehicle's checkbox and its own page.
+The buy page lists all 106 types with crew, patient transport and required
+education — no capabilities. The mission window's script carries only the
+selection tabs (`feuerwehr_lf`, `rettungsdienst`, `polizei`, `wasserrettung`,
+`fbi`, `brush`, `tow_trucks`, `mountain_rescue`, `occupied`), not a type map. So
+the dataset grows from what players actually have, and the open question —
+whether an at-mission row carries the flags itself, which would end the need for
+it — rides in MissionMagician's report as `tablesNotSeenYet`.
+
+**Follow-up belongs to one mission at a time.** It pulls vehicles off whatever
+they are doing, so armed on two missions each takes the other's and the
+appliances spend the call driving between them. The mission that armed it is
+written down; while a different mission holds it the switch is shut here and
+says which one has it. The claim is released by that mission switching off or
+dispatching, and by a timeout, so a window closed without dispatching cannot
+hold it for ever.
+
+**One height, whatever the mission asks for.** A panel that grows with the
+requirement count moves the buttons under the cursor between one mission and the
+next. The frame is six rows tall and stays there: fewer leave space, more scroll
+inside it behind a mask that fades the last rows and lifts once the end is
+reached.
+
+**A glyph drawn edge to edge needs a viewBox bigger than its paths.** At
+`0 0 20 20` a 1.5 stroke put half its width outside the box and the outermost
+lines came back shaved; the box carries the overhang instead of the paths being
+redrawn.
+
 **Versatility is still judged on the named flags**, not on every attribute. The
 composites mean the game has several ways of describing the same vehicle, and
 counting them would rank a vehicle by how talkative the game is about it.
