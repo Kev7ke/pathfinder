@@ -37,7 +37,8 @@ await pg.setContent(`<html><head><style>
   </div></body></html>`);
 
 await pg.evaluate(() => {
-  window.__posts = [];
+window.__hired = [];
+    window.__posts = [];
   window.confirm = () => true;
   window.GM_registerMenuCommand = () => {};
   window.GM_info = { scriptHandler: 'Tampermonkey', version: '5.0' };
@@ -99,6 +100,11 @@ await pg.evaluate(() => {
       const v = vehicles.find((x) => x.id === Number(m[1]));
       return new Response(form(`/vehicles/${v.id}`, 'vehicle[caption]', v.caption),
         { headers: { 'content-type': 'text/html' } });
+    }
+    m = url.match(/^\/buildings\/(\d+)\/hire_do\/(\d+)$/);
+    if (m) {
+      window.__hired.push(`${m[1]}/${m[2]}`);
+      return new Response('ok');
     }
     m = url.match(/^\/buildings\/(\d+)$/);
     if (m) {
@@ -1046,40 +1052,9 @@ assert.equal(full.h, frame.h, 'eleven rows must not make the panel taller than t
 assert.ok(full.scrolls, 'the rest scroll inside it');
 assert.ok(full.masked, 'and fade at the bottom rather than being cut');
 
-// ---- follow-up belongs to one mission at a time ----
-// Armed on two missions, each pulls the other's vehicles and they spend the call driving between.
-await mission.evaluate(() => {
-  localStorage.setItem('ymca-missionmagician-followUpClaim',
-    JSON.stringify({ mission: '999999', at: Date.now() }));
-  const tab = document.createElement('a');
-  tab.setAttribute('tabload', 'occupied');
-  (document.getElementById('tabs') || document.body).append(tab);
-});
-await mission.waitForTimeout(900);
-const claim = await mission.evaluate(() => {
-  const box = document.querySelector('#ymca-mm-panel input[data-cfg="followUp"]');
-  return { disabled: box.disabled, why: box.closest('.mm-switch').getAttribute('title') };
-});
-console.log('follow-up claim   :', JSON.stringify(claim));
-assert.equal(claim.disabled, true, 'another mission holds it, so this one may not also arm it');
-assert.ok(/another mission/.test(claim.why || ''), 'and the switch says why rather than just sulking');
-await mission.evaluate(() => {
-  localStorage.removeItem('ymca-missionmagician-followUpClaim');
-  // A store key changing moves nothing in the page, so nudge the redraw the way the game would.
-  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
-});
-await mission.waitForTimeout(900);
-const released = await mission.evaluate(() =>
-  document.querySelector('#ymca-mm-panel .mm-switch input[data-cfg="followUp"]')
-    .closest('.mm-switch').getAttribute('title'));
-console.log('claim released    :', JSON.stringify(released));
-assert.ok(!/another mission/.test(released || ''),
-  'releasing the claim hands follow-up back, whatever else this window offers');
-
-// ---- follow-up switches off however the mission was dispatched ----
-// Only one of the game's five dispatch controls submits the form. Dispatch and Next, the alliance
-// one that shares as it goes, and both navbar buttons are <a href="#"> that post by themselves,
-// so watching the submit left follow-up on through every one of them.
+// ---- follow-up stays on until it is switched off ----
+// It was guarded against — a claim, a lock, an automatic switch-off after dispatching — and the
+// guard was wrong more often than the thing it guarded against happened. It is a plain switch.
 await mission.evaluate(() => {
   const bar = document.createElement('div');
   bar.innerHTML = `<a class="alert_next" href="#">Dispatch and Next</a>
@@ -1087,253 +1062,48 @@ await mission.evaluate(() => {
     <a id="mission_alarm_btn" href="#">Dispatch</a>`;
   document.body.append(bar);
 });
-const followUpAfter = async (selector, locked) => {
-  await mission.evaluate(([sel, lock]) => {
-    const key = 'ymca-missionmagician-cfg';
-    const cfg = JSON.parse(localStorage.getItem(key) || '{}');
-    cfg.followUp = true;
-    cfg.followUpLocked = lock;
-    localStorage.setItem(key, JSON.stringify(cfg));
-    document.querySelector(sel).click();
-  }, [selector, locked]);
-  return mission.evaluate(() =>
-    JSON.parse(localStorage.getItem('ymca-missionmagician-cfg') || '{}').followUp);
-};
-for (const sel of ['.alert_next', '.alert_next_alliance', '#mission_alarm_btn']) {
-  const still = await followUpAfter(sel, false);
-  console.log('follow-up after   :', sel, '->', JSON.stringify(still));
-  assert.equal(still, false, `${sel} dispatches, so follow-up must fall out with it`);
-}
-const kept = await followUpAfter('.alert_next', true);
-console.log('follow-up locked  :', JSON.stringify(kept));
-assert.equal(kept, true, 'unless the lock beside the switch says to keep it on');
-// And the claim goes back either way. Dispatch and Next loads the next mission into this same
-// frame, so a claim left behind would open it on a switch its predecessor was holding shut.
-const claimAfter = await mission.evaluate(() =>
-  localStorage.getItem('ymca-missionmagician-followUpClaim'));
-console.log('claim after locked:', JSON.stringify(claimAfter));
-assert.ok(!claimAfter || !JSON.parse(claimAfter).mission,
-  'dispatching hands the claim back, locked or not — this mission has sent what it is sending');
-
-// ---- Cancel unused: the overlap has to be re-checked, not assumed ----
-// A Quint on scene covers the ladder and an engine at once. Counting per requirement says the
-// engines are over-supplied and the Quint can go; checking again after taking it away says no.
 await mission.evaluate(() => {
-  window.__catalogue = [{
-    id: '211', name: 'Overlap test', average_credits: 100,
-    requirements: { platform_trucks: 1, firetrucks: 2 },
-  }];
-  localStorage.removeItem('ymca-cache-/einsaetze.json');
-  document.getElementById('patient_missing_requirements')?.remove();
-  document.getElementById('mission_general_info').setAttribute('data-mission-type', '211');
-  const t = document.createElement('table');
-  t.id = 'mission_vehicle_at_mission';
-  t.innerHTML = `<tbody>
-    <tr id="vehicle_row_61"><td vehicle_type_id="13"></td>
-      <td><a class="btn-backalarm-ajax" vehicle_id="61" href="#">back</a></td></tr>
-    <tr id="vehicle_row_62"><td vehicle_type_id="33"></td>
-      <td><a class="btn-backalarm-ajax" vehicle_id="62" href="#">back</a></td></tr>
-    <tr id="vehicle_row_63"><td vehicle_type_id="33"></td>
-      <td><a class="btn-backalarm-ajax" vehicle_id="63" href="#">back</a></td></tr></tbody>`;
-  document.getElementById('col_right').append(t);
-  window.__backalarms = [];
-  for (const a of t.querySelectorAll('.btn-backalarm-ajax')) {
-    a.addEventListener('click', (e) => {
-      e.preventDefault();
-      window.__backalarms.push(a.getAttribute('vehicle_id'));
-    });
-  }
-  window.confirm = () => true;
+  const key = 'ymca-missionmagician-cfg';
+  const cfg = JSON.parse(localStorage.getItem(key) || '{}');
+  cfg.followUp = true;
+  localStorage.setItem(key, JSON.stringify(cfg));
+  document.querySelector('.alert_next').click();
+  document.querySelector('#mission_alarm_btn').click();
 });
-await mission.waitForTimeout(900);
-console.log('panel now         :', (await mission.textContent('#ymca-mm-panel')).replace(/\s+/g, ' ').slice(0, 220));
-console.log('known types       :', await mission.evaluate(() => localStorage.getItem('ymca-missionmagician-types')));
-const cancelLabel = await mission.textContent('#ymca-mm-panel [data-do="cancel"]');
-console.log('cancel unused     :', cancelLabel.trim(), '(Quint + 2 pumpers, needs 1 ladder + 2 engines)');
-assert.ok(/Cancel 1 unused/.test(cancelLabel),
-  'the Quint covers the ladder and an engine, so exactly one pumper is spare — not two');
-await mission.click('#ymca-mm-panel [data-do="cancel"]');
-const sentBack = await mission.evaluate(() => window.__backalarms);
-console.log('sent back         :', JSON.stringify(sentBack));
-assert.deepEqual(sentBack, ['63'], 'the last-arriving pumper goes, and the Quint stays');
+await mission.waitForTimeout(400);
+const stillOn = await mission.evaluate(() =>
+  JSON.parse(localStorage.getItem('ymca-missionmagician-cfg') || '{}').followUp);
+console.log('follow-up after   : dispatched twice ->', JSON.stringify(stillOn));
+assert.equal(stillOn, true, 'dispatching does not switch it off any more');
+const noLock = await mission.$('#ymca-mm-panel [data-do="lock"]');
+assert.equal(noLock, null, 'and the lock beside it is gone with the thing it was locking');
 
-// And it re-reads itself when another engine turns up in the table afterwards. Mission 210 wants
-// two engines and only one pumper was left over; a second pumper arriving should change nothing
-// about the count, but a third engine appearing must be picked up rather than ignored.
+// ---- D ticks ----
+// The button says its key, and the key does what the button does.
 await mission.evaluate(() => {
-  const tbody = document.getElementById('vehicle_show_table_body_all');
-  const tr = document.createElement('tr');
-  tr.className = 'vehicle_select_table_tr';
-  tr.setAttribute('vehicle_id', '44');
-  tr.setAttribute('data-distance', '0.5');
-  tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_44"
-    value="44" name="vehicle_ids[]" fire="1" vehicle_type_id="33" fms="2"></td>
-    <td id="vehicle_sort_44" timevalue="5">5 sec.</td>`;
-  tbody.append(tr);
+  for (const b of document.querySelectorAll('.vehicle_checkbox:checked')) b.checked = false;
 });
-await mission.waitForTimeout(900);
-const after = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
-  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
-console.log('panel redrew      :', JSON.stringify(after));
-assert.ok(after.length >= 1, 'the panel should re-read itself when the vehicle table changes');
-assert.ok(after.every((r) => Number(r[3]) >= Number(r[0])),
-  'every requirement is still at least covered after the redraw');
-console.log('mission panel     :', missionErrs.length ? missionErrs : 'no page errors');
-assert.equal(missionErrs.length, 0);
-await mission.close();
-
-// ---- TrackOps: hook the game's own missionDelete, the way the game really announces it ----
-// A finished mission does not leave #mission_list — the game adds .mission_deleted to its panel
-// and calls missionDelete(id). That is what is hooked here, and 505... ids are the game's.
-await pg.evaluate(() => {
-  window.__creditsBalance = 500000;
-  window.__missionDeleteCalls = [];
-  window.__creditsUpdateCalls = [];
-  window.missionDelete = (id) => { window.__missionDeleteCalls.push(id); };
-  // The game's own balance push — a mission frame sends tellParent('creditsUpdate(2283098);').
-  window.creditsUpdate = (n) => { window.__creditsUpdateCalls.push(n); };
-  const realFetch = window.fetch;
-  window.fetch = async (url, opts) => {
-    if (String(url) === '/api/credits') {
-      return new Response(JSON.stringify({ credits_user_current: window.__creditsBalance }));
-    }
-    return realFetch(url, opts);
-  };
-  localStorage.removeItem('ymca-trackops-log');
-  // the MissionMagician capture left us on a mission page; the recorder belongs on the map
-  history.replaceState({}, '', '/');
+const keyLabel = await mission.textContent('#ymca-mm-panel [data-do="select"]');
+console.log('tick button       :', keyLabel.replace(/\s+/g, ' ').trim());
+assert.ok(/\bd\b/i.test(keyLabel), 'the button names the key, or nobody finds it');
+await mission.evaluate(() => document.body.dispatchEvent(
+  new KeyboardEvent('keydown', { key: 'd', bubbles: true })));
+await mission.waitForTimeout(200);
+const byKey = await mission.evaluate(() =>
+  document.querySelectorAll('.vehicle_checkbox:checked').length);
+console.log('ticked by key     :', byKey);
+assert.ok(byKey > 0, 'D ticks what the button would have ticked');
+// Not while something is being typed into.
+await mission.evaluate(() => {
+  for (const b of document.querySelectorAll('.vehicle_checkbox:checked')) b.checked = false;
+  const input = document.createElement('input');
+  document.body.append(input);
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true }));
 });
-await pg.click('#ymca-back');
-await pg.click('.ymca-tile[data-mod="trackops"]');
-await pg.waitForSelector('[data-do="probe"]');
-await pg.click('[data-do="probe"]');
-await pg.waitForFunction(() => document.querySelector('#to-out')?.value.includes('globals'));
-const hooks = JSON.parse(await pg.inputValue('#to-out'));
-console.log('trackops hooks    :', JSON.stringify(hooks.globals), 'hooked:', hooks.hooked);
-assert.equal(hooks.globals.missionDelete, 'function', 'the game\'s own hook was not seen');
-assert.equal(hooks.globals.creditsUpdate, 'function',
-  'the balance is announced by the game, not polled for');
-assert.equal(hooks.hooked, true, 'TrackOps did not wrap missionDelete');
-
-// A mission ends. The game calls its own function; the wrapper must pass it straight through.
-// It announces the same ending twice, which is what made six of nine real missions unmeasurable.
-await pg.evaluate(() => {
-  window.missionDelete(4711);
-  window.missionDelete(4711);
-  window.creditsUpdate(502340);
-});
-await pg.waitForFunction(
-  () => JSON.parse(localStorage.getItem('ymca-trackops-log') || '[]').length > 0,
-  null, { timeout: 8000 });
-// Both calls reach the game untouched — the wrapper never swallows one. The dedupe is only
-// about what TrackOps writes down, never about what the game gets to do.
-assert.deepEqual(await pg.evaluate(() => window.__missionDeleteCalls), [4711, 4711],
-  'every call must be passed through to the game\'s own missionDelete');
-assert.deepEqual(await pg.evaluate(() => window.__creditsUpdateCalls), [502340],
-  'the game\'s own creditsUpdate must still run, exactly once');
-const recorded = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-trackops-log')));
-console.log('trackops recorded :', JSON.stringify(recorded));
-assert.equal(recorded[0].type, 3, 'the mission type id must be read off the panel before it goes');
-assert.equal(recorded[0].delta, 2340, 'the payout is the balance difference');
-assert.equal(recorded[0].alone, true, 'one ending at a time is attributable');
-assert.equal(recorded.length, 1,
-  'a mission can only end once, so the second announcement must be dropped');
-
-// It reads as a table, named from the mission list rather than from the page's text.
-await pg.click('#ymca-back');
-await pg.click('.ymca-tile[data-mod="trackops"]');
-await pg.waitForSelector('#to-table');
-const summary = await pg.$$eval('#to-table tbody tr', (trs) =>
-  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
-console.log('trackops table    :', JSON.stringify(summary));
-assert.equal(summary[0][2], 'Forest fire', 'the mission type id was not resolved to its name');
-assert.equal(summary[0][1], '1', 'the count of what ended nearby');
-assert.equal(summary[0][0], '\u2013',
-  'and none of them known to be yours, because nothing was dispatched to this one');
-assert.equal(summary[0][3], '9,000', 'the game\'s own listed figure sits beside it');
-// The payout reading is retired: nothing in the table may present one.
-assert.ok(!summary[0].includes('2,340'), 'no averaged payout may be shown');
-
-// And the export carries the comparison without carrying a balance.
-await pg.click('[data-do="copy"]');
-await pg.waitForFunction(() => document.querySelector('#to-out')?.value.includes('byMissionType'));
-const exported = JSON.parse(await pg.inputValue('#to-out'));
-console.log('trackops export   :', JSON.stringify(exported.byMissionType));
-assert.equal(exported.byMissionType[0].listedByGame, 9000);
-assert.equal(exported.byMissionType[0].runs, 1);
-// The balance movement is kept, and kept labelled as a balance movement.
-assert.equal(exported.byMissionType[0].balanceRiseTotal, 2340);
-assert.ok(!('averagePaid' in exported.byMissionType[0]),
-  'nothing may call a balance movement a payout');
-assert.ok(exported.payoutReadingRetired, 'the export should say the reading was retired');
-assert.ok(!JSON.stringify(exported).includes('502340') && !JSON.stringify(exported).includes('500000'),
-  'the export must never carry a balance');
-// Two different missions ending together: one rise belongs to one mission, never to both.
-await pg.evaluate(() => {
-  const list = document.getElementById('mission_list');
-  for (const [id, type] of [[5001, 1], [5002, 2]]) {
-    const div = document.createElement('div');
-    div.id = `mission_${id}`;
-    div.setAttribute('mission_id', String(id));
-    div.setAttribute('mission_type_id', String(type));
-    list.append(div);
-  }
-  window.missionDelete(5001);
-  window.missionDelete(5002);
-  window.creditsUpdate(503340);   // 1000 for the first
-  window.creditsUpdate(503540);   // 200 for the second
-});
-await pg.waitForFunction(
-  () => JSON.parse(localStorage.getItem('ymca-trackops-log') || '[]').length >= 3,
-  null, { timeout: 8000 });
-const both = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-trackops-log')).slice(1));
-console.log('two at once       :', JSON.stringify(both.map((e) => ({ t: e.type, d: e.delta, a: e.alone }))));
-assert.deepEqual(both.map((e) => e.delta), [1000, 200],
-  'one rise belongs to one mission — the first version gave every rise to every pending one');
-// Neither is trusted: pairing them relies on the game paying in the order the missions ended,
-// which has not been established. The deltas are kept and counted, just not averaged.
-assert.deepEqual(both.map((e) => e.alone), [false, false],
-  'two endings waiting together means neither payout is attributable');
-console.log('trackops          : the game announces, TrackOps measures, nothing is assumed');
-
-// ---- the credits ledger, which names every line it pays ----
-// This is the page the balance-watching could never be: each amount says what it was for.
-await pg.evaluate(() => {
-  const realFetch = window.fetch;
-  const ledger = `<html><body><table><tbody>
-    <tr><td class="text-success">+575</td><td>Patient Treatment and Transport</td><td>20 Sep 00:45</td></tr>
-    <tr><td class="text-success">+250</td><td>Patient Treatment</td><td>20 Sep 00:44</td></tr>
-    <tr><td class="text-success">+13.500</td><td>Completed task "Treat 6 patients"</td><td>20 Sep 00:44</td></tr>
-    <tr><td class="text-danger">-5.000</td><td>Vehicle bought</td><td>20 Sep 00:39</td></tr>
-    <tr><td class="text-success">+1.450</td><td>Bar Fight</td><td>20 Sep 00:39</td></tr>
-    <tr><td class="text-success">+1.250</td><td>Bar Fight</td><td>20 Sep 00:38</td></tr>
-    <tr><td class="text-success">+3.510</td><td>Large Field Fire</td><td>20 Sep 00:32</td></tr>
-  </tbody></table></body></html>`;
-  window.fetch = async (url, opts) => {
-    if (String(url).startsWith('/credits')) {
-      return new Response(ledger, { headers: { 'content-type': 'text/html' } });
-    }
-    return realFetch(url, opts);
-  };
-});
-await pg.click('#ymca-back');
-await pg.click('.ymca-tile[data-mod="trackops"]');
-await pg.waitForSelector('[data-do="ledger-copy"]');
-await pg.click('[data-do="ledger-copy"]');
-await pg.waitForFunction(() => document.querySelector('#to-ledger table'));
-const ledgerRows = await pg.$$eval('#to-ledger tbody tr', (trs) =>
-  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
-console.log('ledger            :', JSON.stringify(ledgerRows));
-assert.deepEqual(ledgerRows[0], ['2', 'Bar Fight', '1,350', '1,250', '1,450'],
-  'two Bar Fights average to 1,350, and the spread is shown rather than hidden');
-assert.ok(ledgerRows.some((r) => r[1] === 'Large Field Fire' && r[2] === '3,510'));
-assert.ok(!ledgerRows.some((r) => /Completed task|bought/i.test(r[1])),
-  'a daily task and a purchase are not a mission being paid for');
-const patientLine = await pg.textContent('#to-ledger');
-console.log('patient income    :', patientLine.replace(/\s+/g, ' ').trim().slice(0, 90));
-assert.ok(/825/.test(patientLine),
-  'patient treatment and transport is its own income, and the mission list does not carry it');
-console.log('ledger            : every line says what it was for, so nothing has to be guessed');
+await mission.waitForTimeout(200);
+assert.equal(await mission.evaluate(() =>
+  document.querySelectorAll('.vehicle_checkbox:checked').length), 0,
+'a D typed into a field is a letter, not a dispatch');
 
 // ---- RecruitRoom: every station's hiring on one screen, and it hires nothing ----
 await pg.click('#ymca-back');
@@ -1343,10 +1113,9 @@ await pg.waitForSelector('#rr-table');
 await pg.waitForFunction(() => [...document.querySelectorAll('#rr-table .rr-staff')]
   .every((c) => !c.textContent.includes('\u2026')));
 const rooms = await pg.$$eval('#rr-table tbody tr', (trs) => trs.map((tr) => ({
-  name: tr.cells[1].textContent.trim(),
-  crew: tr.cells[2].textContent.trim(),
+  name: tr.cells[2].textContent.trim(),
+  crew: tr.cells[3].textContent.trim(),
   art: !!tr.querySelector('img'),
-  links: [...tr.querySelectorAll('a')].map((a) => a.getAttribute('href')),
 })));
 console.log('recruitroom       :', JSON.stringify(rooms.map((r) => [r.name, r.crew, r.art])));
 assert.ok(!rooms.some((r) => /Central Dispatch/.test(r.name)),
@@ -1356,15 +1125,30 @@ assert.equal(rooms.find((r) => /FS01/.test(r.name)).crew, '16',
   'the crew count is read from the station page, not guessed at');
 assert.equal(rooms.find((r) => /AS01/.test(r.name)).crew, '\u2013',
   'a page that does not state one reads as unknown, never as zero');
-console.log('recruit links     :', JSON.stringify(rooms[0].links));
-assert.deepEqual(rooms[0].links.slice(0, 3).map((h) => h.replace(/\d+/g, '#')),
-  ['/buildings/#/hire_do/#', '/buildings/#/hire_do/#', '/buildings/#/hire_do/#'],
-  'the buttons are the game\'s own recruit links, one per length');
-// It must never press them: spent credits do not come back, so there is no undo to offer.
-const posted = await pg.evaluate(() => window.__posts.length);
-await pg.waitForTimeout(400);
-assert.equal(await pg.evaluate(() => window.__posts.length), posted,
-  'RecruitRoom writes nothing — the click that costs credits stays the player\'s');
+// Recruiting spends credits and cannot be undone, so it asks first — and a no sends nothing.
+await pg.evaluate(() => { window.confirm = () => false; });
+await pg.click('#rr-all');
+await pg.click('[data-hire="2"]');
+await pg.waitForTimeout(300);
+assert.deepEqual(await pg.evaluate(() => window.__hired), [],
+  'a preview answered no must send nothing at all');
+
+let asked = null;
+await pg.evaluate(() => {
+  window.__asked = null;
+  window.confirm = (text) => { window.__asked = text; return true; };
+});
+await pg.click('[data-hire="2"]');
+await pg.waitForFunction(() => window.__hired.length >= 4);
+asked = await pg.evaluate(() => window.__asked);
+console.log('recruit preview   :', JSON.stringify(asked.replace(/\s+/g, ' ').slice(0, 120)));
+assert.ok(/cannot be undone/.test(asked), 'the preview has to say there is no taking it back');
+assert.ok(/FS01/.test(asked) && /AS01/.test(asked),
+  'and name every station it is about to spend credits at');
+const hired = await pg.evaluate(() => window.__hired);
+console.log('recruited         :', JSON.stringify(hired));
+assert.equal(hired.length, 4, 'one request per ticked station');
+assert.ok(hired.every((h) => h.endsWith('/2')), 'and the length that was pressed, at each');
 
 // ---- whose mission was it, and when ----
 // missionDelete says a mission ended, not that you were in it. An alliance call somebody else

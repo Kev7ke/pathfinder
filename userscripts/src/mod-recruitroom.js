@@ -5,10 +5,16 @@
  * length, confirm. Across fourteen stations that is the whole evening, and it
  * is the same four clicks every time.
  *
- * WHAT THIS DOES NOT DO: hire. Credits spent on personnel do not come back, and
- * a tool that cannot undo what it did does not write — so the buttons here are
- * the game's own links, rendered together, and the player presses them. One
- * click instead of four, and the thing that costs money is still their hand.
+ * THIS ONE WRITES, AND WHAT IT WRITES CANNOT BE UNDONE. Credits spent on
+ * personnel do not come back. That is the one place YMCA departs from "where
+ * there can be no undo, do not write at all", and it is deliberate: the player
+ * asked for it after tab-per-station proved worse than the clicking it
+ * replaced. What guards it instead is a preview that names every station and
+ * what it will cost, and a confirmation that has to be given before anything is
+ * sent. Nothing is ever recruited without both.
+ *
+ * It follows the game's own link — `hire_do` is a plain GET, the same request
+ * the button in the page makes — rather than posting a form of its own.
  *
  * Where the numbers come from, all of it the game's own:
  *   /api/buildings                  the stations, their type and their name
@@ -65,6 +71,22 @@ const RR_DAYS = [
     { days: 3, label: '3 days' },
 ];
 
+/**
+ * Recruit at one station, by following the game's own link.
+ *
+ * `/buildings/<id>/hire_do/<days>` is what the button in the page points at,
+ * and it is a plain GET — so this is the same request the game would make,
+ * not a form built here.
+ */
+async function rrHire(buildingId, days) {
+    const res = await fetch(`/buildings/${buildingId}/hire_do/${days}`, {
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return true;
+}
+
 YMCA.register({
     id: 'recruitroom',
     title: 'RecruitRoom',
@@ -104,26 +126,90 @@ YMCA.register({
 
       <div class="ymca-card">
         <table id="rr-table" style="margin-top:4px">
-          <thead><tr><th style="width:1%"></th><th>Station</th>
-            <th class="ymca-num">Crew</th><th>Recruit for</th></tr></thead>
+          <thead><tr><th style="width:1%"><input type="checkbox" id="rr-all"
+              title="all of them"></th><th style="width:1%"></th><th>Station</th>
+            <th class="ymca-num">Crew</th><th></th></tr></thead>
           <tbody>${stations.map((b) => `
             <tr data-station="${b.id}">
+              <td><input type="checkbox" class="rr-pick" value="${b.id}"></td>
               <td class="rr-art"></td>
               <td>${ctx.esc(b.caption || `Building ${b.id}`)}</td>
               <td class="ymca-num rr-staff"><span class="ymca-dim">&hellip;</span></td>
-              <td>${RR_DAYS.map((d) => `<a class="ymca-btn" target="_blank" rel="noopener"
-                href="/buildings/${b.id}/hire_do/${d.days}">${d.label}</a>`).join(' ')}
-                <a class="ymca-btn" target="_blank" rel="noopener"
-                  href="/buildings/${b.id}/hire">All options</a></td>
+              <td class="rr-said"></td>
             </tr>`).join('')}
           </tbody>
         </table>
         ${stations.length ? '' : '<p class="ymca-dim">No station in this dispatch center hires.</p>'}
-      </div>`;
+      </div>
+
+      ${stations.length ? `
+      <div class="ymca-card">
+        <b>Recruit at the ticked stations</b>
+        <p class="ymca-sub" style="margin:4px 0 10px">It says what it is about to do and waits to
+          be told yes. <b>Credits spent on people do not come back</b>, so there is no undo
+          afterwards &mdash; the preview is the only check there is.</p>
+        ${RR_DAYS.map((d) => `<button class="ymca-btn primary" data-hire="${d.days}"
+          >Recruit ${d.label}</button>`).join(' ')}
+        <span class="ymca-status" id="rr-status"></span>
+      </div>` : ''}`;
 
         el.addEventListener('change', (e) => {
+            if (e.target.id === 'rr-all') {
+                for (const box of el.querySelectorAll('.rr-pick')) box.checked = e.target.checked;
+                return;
+            }
             if (e.target.dataset.cfg !== 'area') return;
             ctx.store.write('cfg', Object.assign(ctx.store.read('cfg', {}), { area: e.target.value }));
+            YMCA.modules.find((m) => m.id === 'recruitroom').mount(el, ctx);
+        });
+
+        const say = (text) => {
+            const at = el.querySelector('#rr-status');
+            if (at) at.textContent = text;
+            ctx.status(text);
+        };
+
+        el.addEventListener('click', async (e) => {
+            const go = e.target.closest('[data-hire]');
+            if (!go) return;
+            const days = Number(go.dataset.hire);
+            const picked = [...el.querySelectorAll('.rr-pick:checked')].map((b) => b.value);
+            if (!picked.length) { say('Tick the stations first.'); return; }
+
+            /* The preview is the whole safeguard: what it will do, where, and
+             * that it cannot be taken back. Nothing is sent before the yes. */
+            const named = picked.map((id) => {
+                const b = stations.find((x) => String(x.id) === String(id));
+                return `· ${b?.caption || `Building ${id}`}`;
+            }).join('\n');
+            const ok = confirm(`Recruit one person for ${days} day${days > 1 ? 's' : ''} at `
+                + `${picked.length} station${picked.length > 1 ? 's' : ''}:\n\n${named}\n\n`
+                + 'This spends credits and cannot be undone.');
+            if (!ok) return;
+
+            for (const box of el.querySelectorAll('[data-hire]')) box.disabled = true;
+            let done = 0;
+            let failed = 0;
+            for (const id of picked) {
+                const row = el.querySelector(`tr[data-station="${id}"] .rr-said`);
+                /* eslint-disable no-await-in-loop */
+                try {
+                    await rrHire(id, days);
+                    done += 1;
+                    if (row) row.innerHTML = '<span class="ymca-accent">recruited</span>';
+                } catch (err) {
+                    failed += 1;
+                    if (row) row.innerHTML = `<span class="ymca-bad">${ctx.esc(err.message)}</span>`;
+                    ctx.log.warn('recruit failed', `${id}: ${err.message}`);
+                }
+                say(`${done} of ${picked.length}…`);
+                // The crew count this browser holds is a page old now.
+                RR_CACHE.delete(Number(id));
+                RR_CACHE.delete(id);
+                await ctx.sleep(250);
+            }
+            ctx.log.info('recruited', `${done} stations, ${days} day(s), ${failed} failed`);
+            say(`Recruited at ${done}${failed ? `, ${failed} failed` : ''}. Reading the counts again…`);
             YMCA.modules.find((m) => m.id === 'recruitroom').mount(el, ctx);
         });
 

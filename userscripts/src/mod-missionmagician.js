@@ -807,9 +807,12 @@ async function mmPlan(page, ctx, cfg) {
             else wants.push(['patients', perPatient]);
         }
 
-        /* What this table can answer, in the game's own words. Every flag on
-         * every checkbox here, whether or not a requirement above names it. */
+        /* What the game's own words can answer. Every flag on every checkbox in
+         * this table, and every flag learnt from any table before it: a HazMat
+         * out of range today still taught `hazmat` the day it was in one, and a
+         * requirement is no less real for the vehicle being busy. */
         const vocab = new Set(vehicles.flatMap((v) => v.flags));
+        for (const caps of Object.values(mmKnownTypes())) for (const f of caps) vocab.add(f);
 
         const needs = [];
         for (const [key, wanted] of wants) {
@@ -1336,65 +1339,27 @@ const MM_SWITCH_CSS = `
   mask-image:linear-gradient(to bottom,#000 100%,#000)}
 
 /* The glyphs sit on the text baseline and take its colour. */
+#${MM_PANEL_ID} .mm-key{display:inline-block;margin-left:5px;padding:0 5px;border-radius:3px;
+  font:600 11px/17px "Helvetica Neue",Helvetica,Arial;text-transform:uppercase;
+  background:rgba(255,255,255,.22);box-shadow:inset 0 -1px 0 rgba(0,0,0,.25)}
 #${MM_PANEL_ID} .mm-glyph{vertical-align:-2.5px;margin-left:6px;opacity:.8;overflow:visible}
 #${MM_PANEL_ID} tr:hover .mm-glyph{opacity:1}`;
 
-function mmSwitch(key, label, on, disabled, why) {
-    const title = disabled ? ` title="${why || 'not on this mission'}"` : '';
-    return `<label class="mm-switch${on ? '' : ' off'}"${title}>
+function mmSwitch(key, label, on, disabled) {
+    return `<label class="mm-switch${on ? '' : ' off'}"${disabled ? ' title="not on this mission"' : ''}>
     <input type="checkbox" data-cfg="${key}"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}>
     <i></i>${label}</label>`;
 }
 
 /**
- * Follow-up belongs to one mission at a time.
+ * Follow-up is a plain switch.
  *
- * It pulls vehicles off whatever they are doing. Arm it on two missions and the
- * two take each other's vehicles: each is short, each reaches for the other's,
- * and appliances spend the call driving between them. The game will happily let
- * that happen — it happens by hand.
- *
- * So the mission that armed it is written down, and while that is a different
- * mission the switch here is held shut and says which one has it. Switching it
- * off there, or dispatching there, hands it back. The claim is only ever
- * released by the mission holding it or by time, so a window closed without
- * dispatching cannot hold it for ever.
+ * It holds vehicles that are out on another mission and can be redirected here,
+ * so two missions armed at once can take each other's and leave them driving
+ * between. It was guarded against — a claim, a lock, an automatic switch-off
+ * after dispatching — and the guard was wrong more often than the thing it
+ * guarded against happened. It stays on until it is switched off.
  */
-const MM_CLAIM_MS = 10 * 60e3;
-
-function mmFollowUpClaim() {
-    try {
-        const held = JSON.parse(localStorage.getItem('ymca-missionmagician-followUpClaim'));
-        if (!held || Date.now() - held.at > MM_CLAIM_MS) return null;
-        return held;
-    } catch (e) {
-        return null;
-    }
-}
-
-function mmClaimFollowUp(missionId, on) {
-    try {
-        const key = 'ymca-missionmagician-followUpClaim';
-        if (!on) {
-            const held = mmFollowUpClaim();
-            // Only the mission that took it may put it back.
-            if (held && String(held.mission) !== String(missionId)) return;
-            localStorage.removeItem(key);
-            return;
-        }
-        localStorage.setItem(key, JSON.stringify({ mission: String(missionId), at: Date.now() }));
-    } catch (e) { /* private window: the switch still works, it just forgets */ }
-}
-
-/** The mission this window is, for the claim above. */
-function mmMissionId() {
-    const help = document.getElementById('mission_help')?.getAttribute('href') || '';
-    return (/\/missions\/(\d+)/.exec(location.pathname) || [])[1]
-        || document.getElementById('mission_general_info')?.getAttribute('mission_id')
-        || (/mission_id=(\d+)/.exec(help) || [])[1]
-        || null;
-}
-
 /* The game fills travel times in after the page settles and appends rows when
  * "load missing vehicles" is used, so the panel re-reads rather than assuming
  * the first look was the whole picture. */
@@ -1447,21 +1412,9 @@ function mmMountPanel(ctx) {
         const cfg = ctx.store.read('cfg', { fastestFirst: true });
         /* Another mission holding follow-up means its tab is not opened here
          * either: the guard is on what gets read, not only on the switch. */
-        const here = mmMissionId();
-        let held = mmFollowUpClaim();
-        /* Locked and still on, arriving at a mission nobody is holding: this one
-         * takes it. That is what carries the lock through `Dispatch and Next`,
-         * which loads the next mission into the same frame. */
-        if (cfg.followUp === true && !held && here) {
-            mmClaimFollowUp(here, true);
-            held = mmFollowUpClaim();
-        }
-        const claimedElsewhere = held && String(held.mission) !== String(here)
-            ? held.mission : null;
-        const page = mmReadMissionPage(cfg.followUp === true && !claimedElsewhere);
+        const page = mmReadMissionPage(cfg.followUp === true);
         if (!page.onMissionPage) return;
         const plan = await mmPlan(page, ctx, cfg);
-        plan.claimedElsewhere = claimedElsewhere;
         if (mine !== drawing) return;
         panel.dataset.pick = plan.pick.map((v) => v.id).join(',');
         panel.dataset.type = String(plan.missionType || '');
@@ -1476,22 +1429,35 @@ function mmMountPanel(ctx) {
         timer = setTimeout(() => { draw(); }, MM_REDRAW_MS);
     };
 
+    const tick = () => {
+        const ids = (panel.dataset.pick || '').split(',').filter(Boolean);
+        const n = mmSelectIds(ids);
+        ctx.log.info('ticked vehicles', `${n} in the mission window`);
+        const done = panel.querySelector('#mm-panel-done');
+        if (done) done.hidden = false;
+    };
+
+    /* D ticks. The game's own dispatch orders are on single letters too, so this
+     * stays out of the way of anything being typed and of any chord — a D with
+     * a modifier is a browser shortcut, not a dispatch. */
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'd' && e.key !== 'D') return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const on = e.target;
+        if (on && (on.isContentEditable || /^(input|textarea|select)$/i.test(on.tagName))) return;
+        if (!document.getElementById(MM_PANEL_ID)) return;
+        e.preventDefault();
+        tick();
+        ctx.status?.('Ticked.');
+    });
+
     panel.addEventListener('click', (e) => {
         if (e.target.closest('[data-do="select"]')) {
-            const ids = (panel.dataset.pick || '').split(',').filter(Boolean);
-            const n = mmSelectIds(ids);
-            ctx.log.info('ticked vehicles', `${n} in the mission window`);
-            const done = panel.querySelector('#mm-panel-done');
-            if (done) done.hidden = false;
+            tick();
         } else if (e.target.closest('[data-do="clear"]')) {
             mmClear();
             const done = panel.querySelector('#mm-panel-done');
             if (done) done.hidden = true;
-        } else if (e.target.closest('[data-do="lock"]')) {
-            const c = ctx.store.read('cfg', {});
-            c.followUpLocked = !c.followUpLocked;
-            ctx.store.write('cfg', c);
-            draw();
         } else if (e.target.closest('[data-do="report"]')) {
             mmCopyState(ctx, lastPlan, panel);
         } else if (e.target.closest('[data-do="type"]')) {
@@ -1519,7 +1485,6 @@ function mmMountPanel(ctx) {
         const cfg = ctx.store.read('cfg', {});
         cfg[key] = e.target.checked;
         ctx.store.write('cfg', cfg);
-        if (key === 'followUp') mmClaimFollowUp(mmMissionId(), e.target.checked);
         draw();
     });
 
@@ -1546,28 +1511,6 @@ function mmMountPanel(ctx) {
      * before the game's own handler and nothing here touches the event, so the
      * dispatch goes exactly as it would. Switching off is the safe direction
      * anyway — the lock is what makes it stay on. */
-    const dispatchOff = () => {
-        const c = ctx.store.read('cfg', {});
-        if (!c.followUp) return;
-        /* The claim goes back whether or not the switch does. This mission has
-         * sent what it was going to send, so it is no longer pulling — and
-         * `Dispatch and Next` loads the next mission into this same frame, which
-         * would otherwise open on a switch its own predecessor was still
-         * holding shut. The lock decides whether follow-up stays on; it never
-         * decides who owns it. */
-        mmClaimFollowUp(mmMissionId(), false);
-        if (c.followUpLocked) { redraw(); return; }
-        c.followUp = false;
-        ctx.store.write('cfg', c);
-        ctx.log.info('follow-up', 'switched off after dispatching');
-        redraw();
-    };
-    const MM_DISPATCH = '#mission-form input[name="commit"], .alert_next, .alert_next_alliance,'
-        + ' #mission_alarm_btn, #mission_alarm_btn_mobile';
-    document.addEventListener('click', (e) => {
-        if (e.target?.closest?.(MM_DISPATCH)) dispatchOff();
-    }, true);
-    document.getElementById('mission-form')?.addEventListener('submit', dispatchOff);
 
     /* The game fires change on every box it ticks, its dispatch orders included,
      * so this catches the player's clicks and YMCA's alike. */
@@ -1888,23 +1831,13 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         ${mmSwitch('ambulancePerPatient', 'Ambulance per patient', cfg.ambulancePerPatient !== false)}
         <span style="display:inline-flex;align-items:center;gap:4px">
           ${mmSwitch('followUp', `Follow-up${plan.followUp ? ` (${plan.followUp})` : ''}`,
-        cfg.followUp === true && !plan.claimedElsewhere,
-        !plan.followUpOffered || !!plan.claimedElsewhere,
-        plan.claimedElsewhere
-            ? 'another mission has follow-up armed — two missions pulling from each other leave '
-              + 'the vehicles driving between them'
-            : 'not on this mission')}
-          <button type="button" class="mm-lock${cfg.followUpLocked ? ' on' : ''}"
-            data-do="lock" title="${cfg.followUpLocked
-        ? 'Follow-up stays on after dispatching' : 'Follow-up switches off after dispatching'}"
-            aria-pressed="${cfg.followUpLocked ? 'true' : 'false'}">${
-    mmIcon(cfg.followUpLocked ? 'locked' : 'unlocked')}</button>
+        cfg.followUp === true, !plan.followUpOffered)}
         </span>
         <span style="flex:1 1 auto"></span>
         ${plan.surplus.length ? `<button type="button" class="btn btn-warning btn-sm"
           data-do="cancel">Cancel ${plan.surplus.length} unused</button>` : ''}
-        <button type="button" class="btn btn-success btn-sm" data-do="select">
-          Tick ${plan.pick.length} vehicles</button>
+        <button type="button" class="btn btn-success btn-sm" data-do="select"
+          title="or press D">Tick ${plan.pick.length} vehicles <kbd class="mm-key">d</kbd></button>
         <button type="button" class="btn btn-default btn-sm" data-do="clear">Untick everything</button>
         <button type="button" class="btn btn-default btn-sm" data-do="report"
           title="copy what this panel is seeing">&#8942;</button>

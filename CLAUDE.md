@@ -247,6 +247,10 @@ the dataset grows from what players actually have, and the open question —
 whether an at-mission row carries the flags itself, which would end the need for
 it — rides in MissionMagician's report as `tablesNotSeenYet`.
 
+**`hire_do` is a plain GET**, the same request the button in the page makes:
+`/buildings/<id>/hire_do/1|2|3` for credits, `…/hire_do/coins` for coins. So
+recruiting needs no form of its own.
+
 **A station page states its own crew.** `Personnel:` is a `<dt>` whose `<dd>`
 reads "16 Employees", the station heads itself with `img.pull-right`, and
 hiring is `/buildings/<id>/hire` with the game's own buttons at
@@ -259,20 +263,22 @@ not come back, and where there is no undo YMCA does not write.
 `.allowed-vehicle-types` — which is where the branch a type belongs to is
 stated by the game rather than inferred from a buy-page tab.
 
-**Follow-up belongs to one mission at a time.** It pulls vehicles off whatever
-they are doing, so armed on two missions each takes the other's and the
-appliances spend the call driving between them. The mission that armed it is
-written down; while a different mission holds it the switch is shut here and
-says which one has it. The claim is released by that mission switching off or
-dispatching, and by a timeout, so a window closed without dispatching cannot
-hold it for ever.
+**Follow-up is a plain switch, and that was the lesson.** It pulls vehicles off
+whatever they are doing, so two missions armed at once can take each other's.
+That was guarded against three ways — a claim naming the mission that armed it,
+a lock beside the switch, an automatic switch-off after dispatching — and each
+guard was wrong more often than the thing it guarded against happened:
+`Dispatch and Next` loads the next mission into the same frame, and a claim held
+past the alarm opened it on a switch its own predecessor was holding shut. It
+stays on until it is switched off.
 
-**Dispatching hands the claim back whether or not the switch stays on.**
-`Dispatch and Next` loads the next mission into the same frame, so a claim kept
-past the alarm opens that mission on a switch its own predecessor is holding
-shut — follow-up off and un-turnable-on. The lock decides whether follow-up
-stays on; it never decides who owns it. A locked switch arriving at a mission
-nobody holds takes the claim itself, which is what carries the lock through.
+**The flag vocabulary is everything the game has ever flagged**, not only what
+is in the table now. A HazMat out of range today still taught `hazmat` the day
+it was in a selection list, and `hazmat_vehicles` is no less real a requirement
+for the vehicle being busy.
+
+**D ticks.** The button carries the key so it can be found, and the handler
+stands aside for anything being typed into and for any modifier chord.
 
 **One height, whatever the mission asks for.** A panel that grows with the
 requirement count moves the buttons under the cursor between one mission and the
@@ -524,6 +530,12 @@ the log without a module having to remember to log it.
   back, so MissionMagician ticks the game's own checkboxes and stops; the player
   presses Dispatch. The preview is the whole product, and that is not a
   limitation to be lifted later.
+- **RecruitRoom is the one exception, and it was asked for.** Opening a tab per
+  station was worse than the clicking it replaced, so it recruits at every ticked
+  station itself. Credits spent on people do not come back, so what stands in for
+  the backup is a preview naming every station and saying plainly that it cannot
+  be undone, and a confirmation that has to be given before anything is sent.
+  An exception is a thing somebody decided, not a precedent.
 - Never post a hand-built form to the game. Fetch the object's own edit page,
   build `FormData` from the real form, replace one field. That is what keeps the
   CSRF token and every unrelated setting intact.

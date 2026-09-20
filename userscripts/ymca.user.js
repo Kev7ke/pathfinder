@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.24
+// @version      0.0.25
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.24',
+    version: '0.0.25',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2669,9 +2669,12 @@ async function mmPlan(page, ctx, cfg) {
             else wants.push(['patients', perPatient]);
         }
 
-        /* What this table can answer, in the game's own words. Every flag on
-         * every checkbox here, whether or not a requirement above names it. */
+        /* What the game's own words can answer. Every flag on every checkbox in
+         * this table, and every flag learnt from any table before it: a HazMat
+         * out of range today still taught `hazmat` the day it was in one, and a
+         * requirement is no less real for the vehicle being busy. */
         const vocab = new Set(vehicles.flatMap((v) => v.flags));
+        for (const caps of Object.values(mmKnownTypes())) for (const f of caps) vocab.add(f);
 
         const needs = [];
         for (const [key, wanted] of wants) {
@@ -3198,65 +3201,27 @@ const MM_SWITCH_CSS = `
   mask-image:linear-gradient(to bottom,#000 100%,#000)}
 
 /* The glyphs sit on the text baseline and take its colour. */
+#${MM_PANEL_ID} .mm-key{display:inline-block;margin-left:5px;padding:0 5px;border-radius:3px;
+  font:600 11px/17px "Helvetica Neue",Helvetica,Arial;text-transform:uppercase;
+  background:rgba(255,255,255,.22);box-shadow:inset 0 -1px 0 rgba(0,0,0,.25)}
 #${MM_PANEL_ID} .mm-glyph{vertical-align:-2.5px;margin-left:6px;opacity:.8;overflow:visible}
 #${MM_PANEL_ID} tr:hover .mm-glyph{opacity:1}`;
 
-function mmSwitch(key, label, on, disabled, why) {
-    const title = disabled ? ` title="${why || 'not on this mission'}"` : '';
-    return `<label class="mm-switch${on ? '' : ' off'}"${title}>
+function mmSwitch(key, label, on, disabled) {
+    return `<label class="mm-switch${on ? '' : ' off'}"${disabled ? ' title="not on this mission"' : ''}>
     <input type="checkbox" data-cfg="${key}"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}>
     <i></i>${label}</label>`;
 }
 
 /**
- * Follow-up belongs to one mission at a time.
+ * Follow-up is a plain switch.
  *
- * It pulls vehicles off whatever they are doing. Arm it on two missions and the
- * two take each other's vehicles: each is short, each reaches for the other's,
- * and appliances spend the call driving between them. The game will happily let
- * that happen — it happens by hand.
- *
- * So the mission that armed it is written down, and while that is a different
- * mission the switch here is held shut and says which one has it. Switching it
- * off there, or dispatching there, hands it back. The claim is only ever
- * released by the mission holding it or by time, so a window closed without
- * dispatching cannot hold it for ever.
+ * It holds vehicles that are out on another mission and can be redirected here,
+ * so two missions armed at once can take each other's and leave them driving
+ * between. It was guarded against — a claim, a lock, an automatic switch-off
+ * after dispatching — and the guard was wrong more often than the thing it
+ * guarded against happened. It stays on until it is switched off.
  */
-const MM_CLAIM_MS = 10 * 60e3;
-
-function mmFollowUpClaim() {
-    try {
-        const held = JSON.parse(localStorage.getItem('ymca-missionmagician-followUpClaim'));
-        if (!held || Date.now() - held.at > MM_CLAIM_MS) return null;
-        return held;
-    } catch (e) {
-        return null;
-    }
-}
-
-function mmClaimFollowUp(missionId, on) {
-    try {
-        const key = 'ymca-missionmagician-followUpClaim';
-        if (!on) {
-            const held = mmFollowUpClaim();
-            // Only the mission that took it may put it back.
-            if (held && String(held.mission) !== String(missionId)) return;
-            localStorage.removeItem(key);
-            return;
-        }
-        localStorage.setItem(key, JSON.stringify({ mission: String(missionId), at: Date.now() }));
-    } catch (e) { /* private window: the switch still works, it just forgets */ }
-}
-
-/** The mission this window is, for the claim above. */
-function mmMissionId() {
-    const help = document.getElementById('mission_help')?.getAttribute('href') || '';
-    return (/\/missions\/(\d+)/.exec(location.pathname) || [])[1]
-        || document.getElementById('mission_general_info')?.getAttribute('mission_id')
-        || (/mission_id=(\d+)/.exec(help) || [])[1]
-        || null;
-}
-
 /* The game fills travel times in after the page settles and appends rows when
  * "load missing vehicles" is used, so the panel re-reads rather than assuming
  * the first look was the whole picture. */
@@ -3309,21 +3274,9 @@ function mmMountPanel(ctx) {
         const cfg = ctx.store.read('cfg', { fastestFirst: true });
         /* Another mission holding follow-up means its tab is not opened here
          * either: the guard is on what gets read, not only on the switch. */
-        const here = mmMissionId();
-        let held = mmFollowUpClaim();
-        /* Locked and still on, arriving at a mission nobody is holding: this one
-         * takes it. That is what carries the lock through `Dispatch and Next`,
-         * which loads the next mission into the same frame. */
-        if (cfg.followUp === true && !held && here) {
-            mmClaimFollowUp(here, true);
-            held = mmFollowUpClaim();
-        }
-        const claimedElsewhere = held && String(held.mission) !== String(here)
-            ? held.mission : null;
-        const page = mmReadMissionPage(cfg.followUp === true && !claimedElsewhere);
+        const page = mmReadMissionPage(cfg.followUp === true);
         if (!page.onMissionPage) return;
         const plan = await mmPlan(page, ctx, cfg);
-        plan.claimedElsewhere = claimedElsewhere;
         if (mine !== drawing) return;
         panel.dataset.pick = plan.pick.map((v) => v.id).join(',');
         panel.dataset.type = String(plan.missionType || '');
@@ -3338,22 +3291,35 @@ function mmMountPanel(ctx) {
         timer = setTimeout(() => { draw(); }, MM_REDRAW_MS);
     };
 
+    const tick = () => {
+        const ids = (panel.dataset.pick || '').split(',').filter(Boolean);
+        const n = mmSelectIds(ids);
+        ctx.log.info('ticked vehicles', `${n} in the mission window`);
+        const done = panel.querySelector('#mm-panel-done');
+        if (done) done.hidden = false;
+    };
+
+    /* D ticks. The game's own dispatch orders are on single letters too, so this
+     * stays out of the way of anything being typed and of any chord — a D with
+     * a modifier is a browser shortcut, not a dispatch. */
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'd' && e.key !== 'D') return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const on = e.target;
+        if (on && (on.isContentEditable || /^(input|textarea|select)$/i.test(on.tagName))) return;
+        if (!document.getElementById(MM_PANEL_ID)) return;
+        e.preventDefault();
+        tick();
+        ctx.status?.('Ticked.');
+    });
+
     panel.addEventListener('click', (e) => {
         if (e.target.closest('[data-do="select"]')) {
-            const ids = (panel.dataset.pick || '').split(',').filter(Boolean);
-            const n = mmSelectIds(ids);
-            ctx.log.info('ticked vehicles', `${n} in the mission window`);
-            const done = panel.querySelector('#mm-panel-done');
-            if (done) done.hidden = false;
+            tick();
         } else if (e.target.closest('[data-do="clear"]')) {
             mmClear();
             const done = panel.querySelector('#mm-panel-done');
             if (done) done.hidden = true;
-        } else if (e.target.closest('[data-do="lock"]')) {
-            const c = ctx.store.read('cfg', {});
-            c.followUpLocked = !c.followUpLocked;
-            ctx.store.write('cfg', c);
-            draw();
         } else if (e.target.closest('[data-do="report"]')) {
             mmCopyState(ctx, lastPlan, panel);
         } else if (e.target.closest('[data-do="type"]')) {
@@ -3381,7 +3347,6 @@ function mmMountPanel(ctx) {
         const cfg = ctx.store.read('cfg', {});
         cfg[key] = e.target.checked;
         ctx.store.write('cfg', cfg);
-        if (key === 'followUp') mmClaimFollowUp(mmMissionId(), e.target.checked);
         draw();
     });
 
@@ -3408,28 +3373,6 @@ function mmMountPanel(ctx) {
      * before the game's own handler and nothing here touches the event, so the
      * dispatch goes exactly as it would. Switching off is the safe direction
      * anyway — the lock is what makes it stay on. */
-    const dispatchOff = () => {
-        const c = ctx.store.read('cfg', {});
-        if (!c.followUp) return;
-        /* The claim goes back whether or not the switch does. This mission has
-         * sent what it was going to send, so it is no longer pulling — and
-         * `Dispatch and Next` loads the next mission into this same frame, which
-         * would otherwise open on a switch its own predecessor was still
-         * holding shut. The lock decides whether follow-up stays on; it never
-         * decides who owns it. */
-        mmClaimFollowUp(mmMissionId(), false);
-        if (c.followUpLocked) { redraw(); return; }
-        c.followUp = false;
-        ctx.store.write('cfg', c);
-        ctx.log.info('follow-up', 'switched off after dispatching');
-        redraw();
-    };
-    const MM_DISPATCH = '#mission-form input[name="commit"], .alert_next, .alert_next_alliance,'
-        + ' #mission_alarm_btn, #mission_alarm_btn_mobile';
-    document.addEventListener('click', (e) => {
-        if (e.target?.closest?.(MM_DISPATCH)) dispatchOff();
-    }, true);
-    document.getElementById('mission-form')?.addEventListener('submit', dispatchOff);
 
     /* The game fires change on every box it ticks, its dispatch orders included,
      * so this catches the player's clicks and YMCA's alike. */
@@ -3750,23 +3693,13 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         ${mmSwitch('ambulancePerPatient', 'Ambulance per patient', cfg.ambulancePerPatient !== false)}
         <span style="display:inline-flex;align-items:center;gap:4px">
           ${mmSwitch('followUp', `Follow-up${plan.followUp ? ` (${plan.followUp})` : ''}`,
-        cfg.followUp === true && !plan.claimedElsewhere,
-        !plan.followUpOffered || !!plan.claimedElsewhere,
-        plan.claimedElsewhere
-            ? 'another mission has follow-up armed — two missions pulling from each other leave '
-              + 'the vehicles driving between them'
-            : 'not on this mission')}
-          <button type="button" class="mm-lock${cfg.followUpLocked ? ' on' : ''}"
-            data-do="lock" title="${cfg.followUpLocked
-        ? 'Follow-up stays on after dispatching' : 'Follow-up switches off after dispatching'}"
-            aria-pressed="${cfg.followUpLocked ? 'true' : 'false'}">${
-    mmIcon(cfg.followUpLocked ? 'locked' : 'unlocked')}</button>
+        cfg.followUp === true, !plan.followUpOffered)}
         </span>
         <span style="flex:1 1 auto"></span>
         ${plan.surplus.length ? `<button type="button" class="btn btn-warning btn-sm"
           data-do="cancel">Cancel ${plan.surplus.length} unused</button>` : ''}
-        <button type="button" class="btn btn-success btn-sm" data-do="select">
-          Tick ${plan.pick.length} vehicles</button>
+        <button type="button" class="btn btn-success btn-sm" data-do="select"
+          title="or press D">Tick ${plan.pick.length} vehicles <kbd class="mm-key">d</kbd></button>
         <button type="button" class="btn btn-default btn-sm" data-do="clear">Untick everything</button>
         <button type="button" class="btn btn-default btn-sm" data-do="report"
           title="copy what this panel is seeing">&#8942;</button>
@@ -3785,10 +3718,16 @@ function mmGamePanelHtml(plan, cfg, ctx) {
  * length, confirm. Across fourteen stations that is the whole evening, and it
  * is the same four clicks every time.
  *
- * WHAT THIS DOES NOT DO: hire. Credits spent on personnel do not come back, and
- * a tool that cannot undo what it did does not write — so the buttons here are
- * the game's own links, rendered together, and the player presses them. One
- * click instead of four, and the thing that costs money is still their hand.
+ * THIS ONE WRITES, AND WHAT IT WRITES CANNOT BE UNDONE. Credits spent on
+ * personnel do not come back. That is the one place YMCA departs from "where
+ * there can be no undo, do not write at all", and it is deliberate: the player
+ * asked for it after tab-per-station proved worse than the clicking it
+ * replaced. What guards it instead is a preview that names every station and
+ * what it will cost, and a confirmation that has to be given before anything is
+ * sent. Nothing is ever recruited without both.
+ *
+ * It follows the game's own link — `hire_do` is a plain GET, the same request
+ * the button in the page makes — rather than posting a form of its own.
  *
  * Where the numbers come from, all of it the game's own:
  *   /api/buildings                  the stations, their type and their name
@@ -3845,6 +3784,22 @@ const RR_DAYS = [
     { days: 3, label: '3 days' },
 ];
 
+/**
+ * Recruit at one station, by following the game's own link.
+ *
+ * `/buildings/<id>/hire_do/<days>` is what the button in the page points at,
+ * and it is a plain GET — so this is the same request the game would make,
+ * not a form built here.
+ */
+async function rrHire(buildingId, days) {
+    const res = await fetch(`/buildings/${buildingId}/hire_do/${days}`, {
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return true;
+}
+
 YMCA.register({
     id: 'recruitroom',
     title: 'RecruitRoom',
@@ -3884,26 +3839,90 @@ YMCA.register({
 
       <div class="ymca-card">
         <table id="rr-table" style="margin-top:4px">
-          <thead><tr><th style="width:1%"></th><th>Station</th>
-            <th class="ymca-num">Crew</th><th>Recruit for</th></tr></thead>
+          <thead><tr><th style="width:1%"><input type="checkbox" id="rr-all"
+              title="all of them"></th><th style="width:1%"></th><th>Station</th>
+            <th class="ymca-num">Crew</th><th></th></tr></thead>
           <tbody>${stations.map((b) => `
             <tr data-station="${b.id}">
+              <td><input type="checkbox" class="rr-pick" value="${b.id}"></td>
               <td class="rr-art"></td>
               <td>${ctx.esc(b.caption || `Building ${b.id}`)}</td>
               <td class="ymca-num rr-staff"><span class="ymca-dim">&hellip;</span></td>
-              <td>${RR_DAYS.map((d) => `<a class="ymca-btn" target="_blank" rel="noopener"
-                href="/buildings/${b.id}/hire_do/${d.days}">${d.label}</a>`).join(' ')}
-                <a class="ymca-btn" target="_blank" rel="noopener"
-                  href="/buildings/${b.id}/hire">All options</a></td>
+              <td class="rr-said"></td>
             </tr>`).join('')}
           </tbody>
         </table>
         ${stations.length ? '' : '<p class="ymca-dim">No station in this dispatch center hires.</p>'}
-      </div>`;
+      </div>
+
+      ${stations.length ? `
+      <div class="ymca-card">
+        <b>Recruit at the ticked stations</b>
+        <p class="ymca-sub" style="margin:4px 0 10px">It says what it is about to do and waits to
+          be told yes. <b>Credits spent on people do not come back</b>, so there is no undo
+          afterwards &mdash; the preview is the only check there is.</p>
+        ${RR_DAYS.map((d) => `<button class="ymca-btn primary" data-hire="${d.days}"
+          >Recruit ${d.label}</button>`).join(' ')}
+        <span class="ymca-status" id="rr-status"></span>
+      </div>` : ''}`;
 
         el.addEventListener('change', (e) => {
+            if (e.target.id === 'rr-all') {
+                for (const box of el.querySelectorAll('.rr-pick')) box.checked = e.target.checked;
+                return;
+            }
             if (e.target.dataset.cfg !== 'area') return;
             ctx.store.write('cfg', Object.assign(ctx.store.read('cfg', {}), { area: e.target.value }));
+            YMCA.modules.find((m) => m.id === 'recruitroom').mount(el, ctx);
+        });
+
+        const say = (text) => {
+            const at = el.querySelector('#rr-status');
+            if (at) at.textContent = text;
+            ctx.status(text);
+        };
+
+        el.addEventListener('click', async (e) => {
+            const go = e.target.closest('[data-hire]');
+            if (!go) return;
+            const days = Number(go.dataset.hire);
+            const picked = [...el.querySelectorAll('.rr-pick:checked')].map((b) => b.value);
+            if (!picked.length) { say('Tick the stations first.'); return; }
+
+            /* The preview is the whole safeguard: what it will do, where, and
+             * that it cannot be taken back. Nothing is sent before the yes. */
+            const named = picked.map((id) => {
+                const b = stations.find((x) => String(x.id) === String(id));
+                return `· ${b?.caption || `Building ${id}`}`;
+            }).join('\n');
+            const ok = confirm(`Recruit one person for ${days} day${days > 1 ? 's' : ''} at `
+                + `${picked.length} station${picked.length > 1 ? 's' : ''}:\n\n${named}\n\n`
+                + 'This spends credits and cannot be undone.');
+            if (!ok) return;
+
+            for (const box of el.querySelectorAll('[data-hire]')) box.disabled = true;
+            let done = 0;
+            let failed = 0;
+            for (const id of picked) {
+                const row = el.querySelector(`tr[data-station="${id}"] .rr-said`);
+                /* eslint-disable no-await-in-loop */
+                try {
+                    await rrHire(id, days);
+                    done += 1;
+                    if (row) row.innerHTML = '<span class="ymca-accent">recruited</span>';
+                } catch (err) {
+                    failed += 1;
+                    if (row) row.innerHTML = `<span class="ymca-bad">${ctx.esc(err.message)}</span>`;
+                    ctx.log.warn('recruit failed', `${id}: ${err.message}`);
+                }
+                say(`${done} of ${picked.length}…`);
+                // The crew count this browser holds is a page old now.
+                RR_CACHE.delete(Number(id));
+                RR_CACHE.delete(id);
+                await ctx.sleep(250);
+            }
+            ctx.log.info('recruited', `${done} stations, ${days} day(s), ${failed} failed`);
+            say(`Recruited at ${done}${failed ? `, ${failed} failed` : ''}. Reading the counts again…`);
             YMCA.modules.find((m) => m.id === 'recruitroom').mount(el, ctx);
         });
 
