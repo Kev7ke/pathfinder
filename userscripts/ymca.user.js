@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.30
+// @version      0.0.31
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.30',
+    version: '0.0.31',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -4852,6 +4852,7 @@ YMCA.register({
         <button class="ymca-btn primary" data-do="export-all">Download everything</button>
         <button class="ymca-btn" data-do="vehicles">Vehicle types</button>
         <button class="ymca-btn" data-do="capabilities">What they can do</button>
+        <button class="ymca-btn" data-do="sweep">Look for new types now</button>
         <button class="ymca-btn" data-do="missions">Mission list only</button>
       </div>
 
@@ -4954,6 +4955,8 @@ async function run(what, ctx, put) {
          * three tools and a paste each. */
         report.trackops = moduleStore('trackops');
         report.missionmagician = moduleStore('missionmagician');
+        // What the sweep has managed, so "nothing saves itself" is answerable.
+        report.typeSweep = sweepState();
         report.interface = interfaceProbe();
 
         put(report, 'the report');
@@ -5048,6 +5051,24 @@ async function run(what, ctx, put) {
     if (what === 'capabilities') {
         ctx.status('Reading one vehicle of each type you own…');
         put(await vehicleCapabilities(ctx), 'what your vehicles can do');
+        return;
+    }
+
+    if (what === 'sweep') {
+        /* The same work the page does on its own, with the waiting skipped —
+         * for when something has just been bought and should be known now. */
+        ctx.status('Looking for types nothing knows yet…');
+        try { localStorage.removeItem(CATALOGUE_KEY); } catch (e) { /* private window */ }
+        try { localStorage.removeItem(SWEEP_FAILED_KEY); } catch (e) { /* as above */ }
+        const flags = await learnNewTypes(ctx);
+        const named = await learnCatalogue(ctx);
+        put({
+            note: 'what the sweep found just now',
+            ymca: YMCA.version,
+            flagsLearnt: flags || 'nothing new — every type in your fleet already has flags',
+            typesNamed: named ? (named.types || []).filter((t) => t.name).length : 0,
+            stillWithoutFlags: sweepState().withoutFlags,
+        }, 'what the sweep found');
         return;
     }
 
@@ -5262,6 +5283,39 @@ const CAP_NOT_A_FLAG = new Set([
     'vehicle_type_id', 'direct', 'distance', 'tabindex', 'custom_',
 ]);
 
+/** What the sweep knows and does not, for the report and the button. */
+function sweepState() {
+    let learnt = {};
+    let failed = {};
+    try { learnt = JSON.parse(localStorage.getItem('ymca-missionmagician-types')) || {}; } catch (e) { /* none */ }
+    try { failed = JSON.parse(localStorage.getItem(SWEEP_FAILED_KEY)) || {}; } catch (e) { /* none */ }
+    const flagged = new Set();
+    for (const [id, t] of Object.entries(learnt)) {
+        const caps = Array.isArray(t) ? t : t?.caps;
+        if (caps && caps.length) flagged.add(String(id));
+    }
+    for (const [id, t] of Object.entries(SHIPPED_VEHICLE_TYPES)) {
+        if (t.capabilities?.length) flagged.add(String(id));
+    }
+    let owned = [];
+    try {
+        const raw = JSON.parse(localStorage.getItem('ymca-cache-/api/vehicles'));
+        owned = Array.isArray(raw?.value) ? raw.value : [];
+    } catch (e) { /* the sweep reads it live anyway */ }
+    return {
+        typesWithFlags: flagged.size,
+        withoutFlags: [...new Set(owned.map((v) => String(v.vehicle_type ?? '')))]
+            .filter((t) => t && !flagged.has(t)),
+        couldNotRead: Object.keys(failed),
+        catalogueReadAt: (() => {
+            try {
+                const at = Number(localStorage.getItem(CATALOGUE_KEY));
+                return at ? new Date(at).toISOString() : null;
+            } catch (e) { return null; }
+        })(),
+    };
+}
+
 async function vehicleCapabilities(ctx) {
     const vehicles = await ctx.game('/api/vehicles');
     if (!Array.isArray(vehicles) || !vehicles.length) {
@@ -5368,19 +5422,18 @@ function sweepHere() {
  * So on the map page the fleet is compared against what is already known, and
  * any type that is new has one of its vehicles' pages read.
  *
- * It is deliberately small and quiet: only types nothing knows yet, at most a
- * handful per sweep, a second apart, and not again for six hours. Nothing is
- * shown unless something is learnt, and then only in the log.
+ * IT IS NOT ON A TIMER, and the first version was, which made it useless: it
+ * wrote "done" before doing anything, so a vehicle bought after that sat
+ * unlearnt for six hours however often the page was reloaded. The check itself
+ * costs nothing — the fleet is already cached — so it runs every page load and
+ * only ever fetches a type nothing knows yet. What *is* remembered is a type
+ * whose page could not be read, so a broken one is not retried every time.
  */
-const SWEEP_KEY = 'ymca-diagnostics-lastSweep';
-const SWEEP_EVERY_MS = 6 * 3600e3;
+const SWEEP_FAILED_KEY = 'ymca-diagnostics-typeSweepFailed';
+const SWEEP_RETRY_MS = 6 * 3600e3;
 const SWEEP_AT_MOST = 8;
 
 async function learnNewTypes(ctx) {
-    let last = 0;
-    try { last = Number(localStorage.getItem(SWEEP_KEY)) || 0; } catch (e) { /* private window */ }
-    if (Date.now() - last < SWEEP_EVERY_MS) return null;
-
     let vehicles;
     try {
         vehicles = await ctx.game('/api/vehicles');
@@ -5389,6 +5442,9 @@ async function learnNewTypes(ctx) {
 
     let known = {};
     try { known = JSON.parse(localStorage.getItem('ymca-missionmagician-types')) || {}; } catch (e) { /* none */ }
+
+    let failed = {};
+    try { failed = JSON.parse(localStorage.getItem(SWEEP_FAILED_KEY)) || {}; } catch (e) { /* none */ }
 
     /* One vehicle per type the game has and nothing here has flags for. A type
      * the repo ships already counts as known — this is for what is new. */
@@ -5400,10 +5456,10 @@ async function learnNewTypes(ctx) {
         const caps = Array.isArray(mine) ? mine : mine?.caps;
         if (caps && caps.length) continue;
         if (SHIPPED_VEHICLE_TYPES[t]?.capabilities?.length) continue;
+        // A page that would not read is left alone for a while, not for ever.
+        if (Date.now() - (failed[t] || 0) < SWEEP_RETRY_MS) continue;
         wanted.set(t, v.id);
     }
-    // Mark the sweep as done even when there is nothing to do, so it stays quiet.
-    try { localStorage.setItem(SWEEP_KEY, String(Date.now())); } catch (e) { /* as above */ }
     if (!wanted.size) return null;
 
     const learnt = {};
@@ -5423,9 +5479,13 @@ async function learnNewTypes(ctx) {
                 }
             }
             if (flags.size) learnt[typeId] = [...flags].sort();
-        } catch (err) { /* the next sweep tries again */ }
+            else failed[typeId] = Date.now();
+        } catch (err) {
+            failed[typeId] = Date.now();
+        }
         await ctx.sleep(1000);
     }
+    try { localStorage.setItem(SWEEP_FAILED_KEY, JSON.stringify(failed)); } catch (e) { /* none */ }
     if (!Object.keys(learnt).length) return null;
 
     try {
@@ -5461,16 +5521,18 @@ async function learnCatalogue(ctx) {
     let last = 0;
     try { last = Number(localStorage.getItem(CATALOGUE_KEY)) || 0; } catch (e) { /* private window */ }
     if (Date.now() - last < CATALOGUE_EVERY_MS) return null;
-    try { localStorage.setItem(CATALOGUE_KEY, String(Date.now())); } catch (e) { /* as above */ }
 
     let fleet;
     try {
         fleet = await vehicleCatalogue(ctx);
     } catch (err) {
+        // Not marked done, so the next page load tries again.
         ctx.log.warn('catalogue sweep', err.message);
         return null;
     }
     const named = (fleet.types || []).filter((t) => t.name).length;
+    if (!named) return null;
+    try { localStorage.setItem(CATALOGUE_KEY, String(Date.now())); } catch (e) { /* as above */ }
     ctx.log.info('read the vehicle catalogue', `${named} types named from the buy pages`);
     return fleet;
 }

@@ -62,6 +62,8 @@ window.__hired = [];
     { id: 11, caption: 'Old A', building_id: 1, vehicle_type: 13 },
     { id: 12, caption: 'Old B', building_id: 1, vehicle_type: 13 },
     { id: 13, caption: 'Old C', building_id: 3, vehicle_type: 10 },
+    // A type the repo does not ship: exactly what the sweep exists for.
+    { id: 14, caption: 'Old D', building_id: 1, vehicle_type: 904 },
   ];
   const mission = (id, name, credits, pre, filter) => ({
     id: String(id), name, place: '', place_array: [], average_credits: credits,
@@ -161,8 +163,8 @@ window.__hired = [];
     m = url.match(/^\/vehicles\/(\d+)$/);
     if (m) {
       const v = vehicles.find((x) => x.id === Number(m[1]));
-      const body = v && v.vehicle_type === 13
-        ? `<div vehicle_type_id="13" fire="1" dlk="1" fms="2" custom_="1"></div>`
+      const body = v && (v.vehicle_type === 13 || v.vehicle_type === 904)
+        ? `<div vehicle_type_id="${v.vehicle_type}" fire="1" dlk="1" fms="2" custom_="1"></div>`
         : `<div class="panel panel-default"><table class="table"></table></div>
            <form action="/vehicles/${m[1]}/move"></form>`;
       return new Response(`<html><body><div id="vehicle-main">${body}</div></body></html>`,
@@ -284,7 +286,14 @@ await pg.click('.ymca-tile[data-mod="diagnostics"]');
 await pg.waitForSelector('[data-do="report"]');
 await pg.evaluate(() => { navigator.clipboard.writeText = async () => {}; });
 await pg.click('[data-do="report"]');
-await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
+// Wait for something only the report carries: the output box already holds the sweep's answer.
+await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('entryPoint'));
+const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
+console.log('report keys       :', Object.keys(report).join(', '));
+assert.equal(report.ymca, VERSION, 'the report must carry the version the build stamped in');
+assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
+assert.ok(report.log.length > 0, 'the report carries no log');
+
 // ---- the catalogue reads itself, so no install waits on a release ----
 // The buy pages name every type the game sells, and the sweep reads them on its own a few
 // seconds after the page settles. Nobody presses anything, and nobody exports anything.
@@ -297,11 +306,22 @@ assert.ok(Object.keys(swept).length >= 3,
   'the buy pages are read on their own, with nobody pressing anything');
 assert.equal(swept['13'].name, 'Quint', 'and the names land where every module reads them');
 
-const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
-console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, VERSION, 'the report must carry the version the build stamped in');
-assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
-assert.ok(report.log.length > 0, 'the report carries no log');
+// A type in the fleet with no flags is learnt on a reload, not six hours later. The first
+// version wrote "done" before doing anything, so a vehicle bought after that sat unlearnt.
+await pg.evaluate(() => {
+  localStorage.removeItem('ymca-missionmagician-types');
+  localStorage.removeItem('ymca-diagnostics-typeSweepFailed');
+});
+await pg.click('[data-do="sweep"]');
+await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('flagsLearnt'));
+const sweepNow = JSON.parse(await pg.inputValue('#ymca-diag-out'));
+console.log('sweep now         :', JSON.stringify(sweepNow.flagsLearnt),
+  '| still without:', JSON.stringify(sweepNow.stillWithoutFlags));
+assert.ok(sweepNow.flagsLearnt && sweepNow.flagsLearnt['904'],
+  'the fleet is checked on demand, and a type with no flags gets read');
+assert.deepEqual(sweepNow.flagsLearnt['904'], ['dlk', 'fire'],
+  'and what it reads is what the vehicle\'s own page says');
+
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
   'the log did not record what happened');
 assert.ok(!JSON.stringify(report).includes('Central Dispatch'),
@@ -351,7 +371,7 @@ console.log('taught            :', JSON.stringify(taught));
 assert.deepEqual(taught.caps, ['dlk', 'fire'], 'a sweep teaches the same store a mission does');
 
 console.log('not in dataset    :', JSON.stringify(fleet.missingFromDataset));
-assert.deepEqual(fleet.missingFromDataset, [901],
+assert.deepEqual(fleet.missingFromDataset, [901, 904],
   'a type the repo does not carry is named, so it can be added without comparing two lists');
 assert.ok(!JSON.stringify(fleet).includes('FS01'), 'no station name may leave in the fleet export');
 // A dispatch center sells nothing, and that must not read like a page that failed to load.

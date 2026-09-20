@@ -246,8 +246,16 @@ partner bringing every type he owns is not a capability capture.
 own game teaches their own install, on its own, on every page but a mission:
 
 - **Flags** are on every checkbox in a mission window, and the sweep reads one
-  vehicle page for any type in the fleet nothing knows yet — at most eight per
-  sweep, a second apart, once in six hours.
+  vehicle page for any type in the fleet nothing knows yet — at most eight at a
+  time, a second apart. **It is not on a timer**, and the first version was,
+  which made it useless: it wrote "done" before doing anything, so a vehicle
+  bought after that sat unlearnt for six hours however often the page was
+  reloaded. The check costs nothing — the fleet is already cached — so it runs
+  every page load. What is remembered is a type whose page could not be read,
+  so a broken one is not retried every time.
+- **A sweep marks itself done only once it has read something.** The same
+  mistake hid in the catalogue sweep: marked first, so one failure meant a week
+  of silence.
 - **Names, branches and extensions** come from the buy pages, which list every
   type the game sells whether or not it is owned. Read once a week, because a
   catalogue changes when the game is updated and not while anyone is playing.
