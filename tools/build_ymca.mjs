@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.28';
+export const VERSION = '0.0.29';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -152,6 +152,10 @@ function build() {
              * needs are worth keeping in the repo and worth nothing in the page. */
             const lean = { name: t.name };
             if (t.capabilities) lean.capabilities = t.capabilities;
+            // How many the vehicle seats and what training they need: both are
+            // what a crew requirement is answered with.
+            if (t.crew) lean.crew = t.crew;
+            if (t.education) lean.education = t.education;
             return [id, lean];
         })));
     const parts = [
@@ -174,9 +178,7 @@ function build() {
         read('userscripts/src/mod-missionmagician.js').replace('__VEHICLE_TYPES__', vehicleTypes),
         read('userscripts/src/mod-recruitroom.js'),
         read('userscripts/src/mod-trackops.js'),
-        read('userscripts/src/mod-diagnostics.js')
-            .replace('__VEHICLE_TYPE_IDS__',
-                JSON.stringify(Object.keys(JSON.parse(read('data/vehicle-types.json')).types))),
+        read('userscripts/src/mod-diagnostics.js').replace('__VEHICLE_TYPES__', vehicleTypes),
         BOOT,
         '})();\n',
     ];

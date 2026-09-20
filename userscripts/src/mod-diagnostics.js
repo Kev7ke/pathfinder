@@ -25,7 +25,8 @@ const ENDPOINTS = [
 /* The type ids data/vehicle-types.json already carries, so the vehicle export
  * can say which of the player's types are new rather than making somebody
  * compare two lists by eye. */
-const SHIPPED_VEHICLE_TYPE_IDS = __VEHICLE_TYPE_IDS__;
+const SHIPPED_VEHICLE_TYPES = __VEHICLE_TYPES__;
+const SHIPPED_VEHICLE_TYPE_IDS = Object.keys(SHIPPED_VEHICLE_TYPES);
 
 /** Drop what no planner reads. Icons alone are three paths per mission. */
 function slimMissions(data) {
@@ -576,6 +577,101 @@ async function vehicleCapabilities(ctx) {
     };
 }
 
+/* The map page, where the fleet is worth reading. Inside a mission frame there
+ * is a mission to get on with. */
+const SWEEP_PAGE = /^\/?$/;
+
+/**
+ * Learn a type the moment it turns up in the fleet, without being asked.
+ *
+ * A vehicle bought today is a type YMCA may never have seen, and waiting for
+ * somebody to press a button — or for a new release to carry it — is waiting.
+ * So on the map page the fleet is compared against what is already known, and
+ * any type that is new has one of its vehicles' pages read.
+ *
+ * It is deliberately small and quiet: only types nothing knows yet, at most a
+ * handful per sweep, a second apart, and not again for six hours. Nothing is
+ * shown unless something is learnt, and then only in the log.
+ */
+const SWEEP_KEY = 'ymca-diagnostics-lastSweep';
+const SWEEP_EVERY_MS = 6 * 3600e3;
+const SWEEP_AT_MOST = 8;
+
+async function learnNewTypes(ctx) {
+    let last = 0;
+    try { last = Number(localStorage.getItem(SWEEP_KEY)) || 0; } catch (e) { /* private window */ }
+    if (Date.now() - last < SWEEP_EVERY_MS) return null;
+
+    let vehicles;
+    try {
+        vehicles = await ctx.game('/api/vehicles');
+    } catch (err) { return null; }
+    if (!Array.isArray(vehicles) || !vehicles.length) return null;
+
+    let known = {};
+    try { known = JSON.parse(localStorage.getItem('ymca-missionmagician-types')) || {}; } catch (e) { /* none */ }
+
+    /* One vehicle per type the game has and nothing here has flags for. A type
+     * the repo ships already counts as known — this is for what is new. */
+    const wanted = new Map();
+    for (const v of vehicles) {
+        const t = String(v.vehicle_type ?? '');
+        if (!t || wanted.has(t)) continue;
+        const mine = known[t];
+        const caps = Array.isArray(mine) ? mine : mine?.caps;
+        if (caps && caps.length) continue;
+        if (SHIPPED_VEHICLE_TYPES[t]?.capabilities?.length) continue;
+        wanted.set(t, v.id);
+    }
+    // Mark the sweep as done even when there is nothing to do, so it stays quiet.
+    try { localStorage.setItem(SWEEP_KEY, String(Date.now())); } catch (e) { /* as above */ }
+    if (!wanted.size) return null;
+
+    const learnt = {};
+    for (const [typeId, vehicleId] of [...wanted].slice(0, SWEEP_AT_MOST)) {
+        try {
+            /* eslint-disable no-await-in-loop */
+            const res = await fetch(`/vehicles/${vehicleId}`, { credentials: 'same-origin' });
+            if (!res.ok) continue;
+            const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+            const flags = new Set();
+            for (const el of doc.querySelectorAll('[vehicle_type_id]')) {
+                for (const attr of el.attributes) {
+                    if (attr.value !== '1') continue;
+                    const n = attr.name.toLowerCase();
+                    if (CAP_NOT_A_FLAG.has(n) || !/^[a-z][a-z0-9_]*$/.test(n)) continue;
+                    flags.add(n);
+                }
+            }
+            if (flags.size) learnt[typeId] = [...flags].sort();
+        } catch (err) { /* the next sweep tries again */ }
+        await ctx.sleep(1000);
+    }
+    if (!Object.keys(learnt).length) return null;
+
+    try {
+        const key = 'ymca-missionmagician-types';
+        const store = JSON.parse(localStorage.getItem(key)) || {};
+        for (const [typeId, caps] of Object.entries(learnt)) {
+            const had = store[typeId];
+            store[typeId] = { caps, name: (Array.isArray(had) ? null : had?.name) || null };
+        }
+        localStorage.setItem(key, JSON.stringify(store));
+    } catch (e) { /* private window: it will be learnt again next time */ }
+
+    ctx.log.info('learnt new vehicle types', Object.keys(learnt).join(', '));
+    return learnt;
+}
+
+/* Once per load, a while after the page has settled, and never in the way. */
+YMCA.inject('diagnostics', (ctx) => {
+    if (!SWEEP_PAGE.test(location.pathname)) return true;
+    setTimeout(() => {
+        learnNewTypes(ctx).catch((err) => ctx.log.warn('type sweep', err.message));
+    }, 8000);
+    return true;
+});
+
 /**
  * Every vehicle type the game will sell, by the id it uses for it.
  *
@@ -612,7 +708,8 @@ async function vehicleCatalogue(ctx) {
             reached.push({ buildingType: kind, offers: options.length });
             for (const offer of options) {
                 const row = types.get(offer.id) || { id: offer.id, soldBy: [] };
-                for (const k of ['name', 'longName', 'category', 'requiredExtension']) {
+                for (const k of ['name', 'longName', 'crew', 'education', 'requiredExtension',
+                    'category']) {
                     if (!row[k] && offer[k]) row[k] = offer[k];
                 }
                 if (!row.soldBy.includes(kind)) row.soldBy.push(kind);
@@ -641,6 +738,8 @@ async function vehicleCatalogue(ctx) {
         name: r.name || learnt[String(r.id)]?.name || null,
         capabilities: learnt[String(r.id)]?.caps || null,
         longName: r.longName || undefined,
+        crew: r.crew ?? undefined,
+        education: r.education || undefined,
         category: r.category || undefined,
         requiredExtension: r.requiredExtension || undefined,
         soldByBuildingTypes: r.soldBy,
@@ -740,14 +839,25 @@ async function buyableAt(buildingId) {
         if (out.some((o) => o.id === id)) continue;
 
         const pane = card.closest('[role="tabpanel"]');
-        const needs = [...card.querySelectorAll('.alert')]
-            .map((a) => a.textContent.trim())
-            .find((t) => /^required extension:/i.test(t));
+        const alerts = [...card.querySelectorAll('.alert')].map((a) =>
+            a.textContent.replace(/\s+/g, ' ').trim());
+        const needs = alerts.find((t) => /^required extension:/i.test(t));
+
+        /* The card states two things nothing else does: how many people the
+         * vehicle carries, and which training they need. A mission asking for
+         * eight HazMat-trained crew is answered by HazMat vehicles and their
+         * crews, so both are worth having. */
+        const text = card.textContent.replace(/\s+/g, ' ');
+        const crew = /max\.?\s*crew:\s*(\d+)/i.exec(text);
+        const school = alerts.map((t) => /requires special education\s*\(([^)]+)\)/i.exec(t))
+            .find(Boolean);
 
         out.push({
             id,
             name: (card.querySelector('h3')?.textContent || '').trim() || null,
             longName: (card.querySelector('b')?.textContent || '').trim() || null,
+            crew: crew ? Number(crew[1]) : null,
+            education: school ? school[1].trim() : null,
             category: pane ? (tabName.get(pane.id) || pane.id) : null,
             requiredExtension: needs ? needs.replace(/^required extension:\s*/i, '') : null,
         });

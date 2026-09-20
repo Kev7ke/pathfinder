@@ -872,6 +872,24 @@ async function mmPlan(page, ctx, cfg) {
             });
         }
 
+        /* Trained crew are a total like water is, and the vehicles that carry
+         * the training are the ones that bring them. Two HazMats seat six; a
+         * call wanting eight needs a third, and picking by requirement count
+         * alone stopped at two. */
+        for (const t of (mmCrewTraining(record) || [])) {
+            const aboard = mmTrainedAboard([...picked.values()], t.label);
+            if (aboard.unknown || !aboard.seats) continue;   // nothing to count with
+            let seats = aboard.seats;
+            const more = vehicles.filter((v) => !picked.has(v.id)
+                && mmTrainedAboard([v], t.label).seats);
+            for (const v of more) {
+                if (seats >= t.count) break;
+                picked.set(v.id, v);
+                seats += mmTrainedAboard([v], t.label).seats;
+            }
+            t.seats = seats;
+        }
+
         /* Water and foam are totals, so they are filled by adding vehicles until
          * the figure is reached — the ones already picked may carry some. */
         for (const [key, rule] of Object.entries(MM_AMOUNTS)) {
@@ -911,6 +929,10 @@ async function mmPlan(page, ctx, cfg) {
          * requirement names it `gw_gefahrgut`, `additional` names the same
          * thing `HazMat`, and the pair is stated side by side. */
         crewTraining: mmCrewTraining(record),
+        /* What the game says this kind of call is worth on average. It is in
+         * the catalogue the `#mission_help` link points at, so it costs
+         * nothing to show and it is the game's own figure, not a measurement. */
+        listedCredits: record?.average_credits || null,
         lines,
         pick: [...picked.values()],
         fromHelpPage: !!record?.fromHelpPage,
@@ -973,6 +995,41 @@ function mmCrewTraining(record) {
         label: names[i] && english[names[i]] === n ? names[i] : mmPretty(key),
         count: n,
     }));
+}
+
+/**
+ * Which types carry which training, and how many people each holds.
+ *
+ * Both come off the buy page, which states `Max. Crew: 3` and `Requires special
+ * education (HazMat)` on every card — so a mission asking for eight
+ * HazMat-trained crew can be answered by counting seats on HazMat vehicles.
+ *
+ * TWO THINGS ARE INFERRED HERE, and the panel says so rather than presenting a
+ * figure that looks measured. `Max. Crew` is the most a vehicle can hold, not
+ * who is aboard right now; and everybody on a vehicle that *requires* a
+ * training is taken to have it, which is what "requires" means but is not
+ * something the game states per person.
+ */
+function mmCrewOfType() {
+    const out = {};
+    for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) {
+        if (t.crew || t.education) out[id] = { crew: t.crew || null, education: t.education || null };
+    }
+    return out;
+}
+
+/** Seats aboard the vehicles that carry a given training. */
+function mmTrainedAboard(vehicles, training) {
+    const byType = mmCrewOfType();
+    let seats = 0;
+    let unknown = 0;
+    for (const v of vehicles) {
+        const t = byType[String(v.typeId)];
+        if (!t || !t.education) continue;
+        if (t.education.toLowerCase() !== String(training).toLowerCase()) continue;
+        if (t.crew) seats += t.crew; else unknown += 1;
+    }
+    return { seats, unknown };
 }
 
 function mmPretty(key) {
@@ -1356,6 +1413,10 @@ const MM_SWITCH_CSS = `
   background-color:${MM_RED}!important;color:#fff!important;border-color:rgba(255,255,255,.25)!important}
 #${MM_PANEL_ID} .mm-table.mm-ok td,#${MM_PANEL_ID} .mm-table.mm-ok th{
   background-color:${MM_GREEN}!important;color:#fff!important;border-color:rgba(255,255,255,.25)!important}
+/* A met line goes green on its own, whatever the table around it is doing, so
+ * what is still missing is the only thing still red. */
+#${MM_PANEL_ID} .mm-table tr.mm-row-ok td{
+  background-color:${MM_GREEN}!important;transition:background-color .25s}
 #${MM_PANEL_ID} .mm-table.mm-short small,#${MM_PANEL_ID} .mm-table.mm-ok small{color:rgba(255,255,255,.8)}
 
 /* One height, whatever the mission asks for.
@@ -1719,6 +1780,11 @@ function mmRecount(panel, plan) {
         };
         show('ticked', byTick);
         show('covered', line.found);
+        /* Green the moment this line is met, red while it is not. One row at a
+         * time, so a table half done reads as half done rather than as failing
+         * — what is missing is the only thing still red. */
+        panel.querySelector(`tr[data-row="${line.key}"]`)
+            ?.classList.toggle('mm-row-ok', line.found >= line.wanted);
     }
 
     /* The table is the surface with the answer on it, so it carries the answer:
@@ -1845,7 +1911,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
             ? '?'
             : `<span data-covered="${ctx.esc(l.key)}">0</span>`;
         const num = 'text-right" style="width:1%;white-space:nowrap';
-        return `<tr>
+        return `<tr data-row="${ctx.esc(l.key)}">
       <td class="${num}">${ctx.fmt(l.wanted)}${l.unit ? ` ${l.unit}` : ''}</td>
       <td class="${num}">${l.onScene || '&ndash;'}</td>
       <td class="${num}" data-ticked="${ctx.esc(l.key)}">0</td>
@@ -1866,6 +1932,9 @@ function mmGamePanelHtml(plan, cfg, ctx) {
     <div class="panel-heading">
       <b>YMCA</b> — what this mission needs
       ${plan.name ? `<small> · ${ctx.esc(plan.name)}</small>` : ''}
+      ${plan.listedCredits ? `<span class="label label-default pull-right"
+        title="what the game lists this kind of call as paying on average"
+        >~${ctx.fmt(plan.listedCredits)} credits</span>` : ''}
     </div>
     <div class="panel-body">
       <div class="mm-scroll${plan.lines.length > MM_ROWS_SHOWN ? ' mm-more' : ''}">
@@ -1881,9 +1950,11 @@ function mmGamePanelHtml(plan, cfg, ctx) {
       </div>
 
       ${plan.crewTraining?.length ? `<p class="text-muted" style="margin:0 0 8px">
-        Crew: ${plan.crewTraining.map((t) =>
-        `<b>${t.count}</b> with ${ctx.esc(t.label)} training`).join(', ')} &mdash; they arrive on
-        whatever is sent, so this is not a vehicle to pick.</p>` : ''}
+        ${plan.crewTraining.map((t) => `Crew: <b>${t.count}</b> with
+          ${ctx.esc(t.label)} training${t.seats
+        ? ` &mdash; about <b>${t.seats}</b> aboard what is picked, counting every seat on a
+            vehicle that needs that training` : ' &mdash; seats per vehicle not known yet, so '
+            + 'this one is not counted'}`).join('; ')}.</p>` : ''}
 
       ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.scene.total} already at the mission or on the way, subtracted above${

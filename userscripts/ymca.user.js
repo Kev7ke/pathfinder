@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.28
+// @version      0.0.29
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.28',
+    version: '0.0.29',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2734,6 +2734,24 @@ async function mmPlan(page, ctx, cfg) {
             });
         }
 
+        /* Trained crew are a total like water is, and the vehicles that carry
+         * the training are the ones that bring them. Two HazMats seat six; a
+         * call wanting eight needs a third, and picking by requirement count
+         * alone stopped at two. */
+        for (const t of (mmCrewTraining(record) || [])) {
+            const aboard = mmTrainedAboard([...picked.values()], t.label);
+            if (aboard.unknown || !aboard.seats) continue;   // nothing to count with
+            let seats = aboard.seats;
+            const more = vehicles.filter((v) => !picked.has(v.id)
+                && mmTrainedAboard([v], t.label).seats);
+            for (const v of more) {
+                if (seats >= t.count) break;
+                picked.set(v.id, v);
+                seats += mmTrainedAboard([v], t.label).seats;
+            }
+            t.seats = seats;
+        }
+
         /* Water and foam are totals, so they are filled by adding vehicles until
          * the figure is reached — the ones already picked may carry some. */
         for (const [key, rule] of Object.entries(MM_AMOUNTS)) {
@@ -2773,6 +2791,10 @@ async function mmPlan(page, ctx, cfg) {
          * requirement names it `gw_gefahrgut`, `additional` names the same
          * thing `HazMat`, and the pair is stated side by side. */
         crewTraining: mmCrewTraining(record),
+        /* What the game says this kind of call is worth on average. It is in
+         * the catalogue the `#mission_help` link points at, so it costs
+         * nothing to show and it is the game's own figure, not a measurement. */
+        listedCredits: record?.average_credits || null,
         lines,
         pick: [...picked.values()],
         fromHelpPage: !!record?.fromHelpPage,
@@ -2835,6 +2857,41 @@ function mmCrewTraining(record) {
         label: names[i] && english[names[i]] === n ? names[i] : mmPretty(key),
         count: n,
     }));
+}
+
+/**
+ * Which types carry which training, and how many people each holds.
+ *
+ * Both come off the buy page, which states `Max. Crew: 3` and `Requires special
+ * education (HazMat)` on every card — so a mission asking for eight
+ * HazMat-trained crew can be answered by counting seats on HazMat vehicles.
+ *
+ * TWO THINGS ARE INFERRED HERE, and the panel says so rather than presenting a
+ * figure that looks measured. `Max. Crew` is the most a vehicle can hold, not
+ * who is aboard right now; and everybody on a vehicle that *requires* a
+ * training is taken to have it, which is what "requires" means but is not
+ * something the game states per person.
+ */
+function mmCrewOfType() {
+    const out = {};
+    for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) {
+        if (t.crew || t.education) out[id] = { crew: t.crew || null, education: t.education || null };
+    }
+    return out;
+}
+
+/** Seats aboard the vehicles that carry a given training. */
+function mmTrainedAboard(vehicles, training) {
+    const byType = mmCrewOfType();
+    let seats = 0;
+    let unknown = 0;
+    for (const v of vehicles) {
+        const t = byType[String(v.typeId)];
+        if (!t || !t.education) continue;
+        if (t.education.toLowerCase() !== String(training).toLowerCase()) continue;
+        if (t.crew) seats += t.crew; else unknown += 1;
+    }
+    return { seats, unknown };
 }
 
 function mmPretty(key) {
@@ -3218,6 +3275,10 @@ const MM_SWITCH_CSS = `
   background-color:${MM_RED}!important;color:#fff!important;border-color:rgba(255,255,255,.25)!important}
 #${MM_PANEL_ID} .mm-table.mm-ok td,#${MM_PANEL_ID} .mm-table.mm-ok th{
   background-color:${MM_GREEN}!important;color:#fff!important;border-color:rgba(255,255,255,.25)!important}
+/* A met line goes green on its own, whatever the table around it is doing, so
+ * what is still missing is the only thing still red. */
+#${MM_PANEL_ID} .mm-table tr.mm-row-ok td{
+  background-color:${MM_GREEN}!important;transition:background-color .25s}
 #${MM_PANEL_ID} .mm-table.mm-short small,#${MM_PANEL_ID} .mm-table.mm-ok small{color:rgba(255,255,255,.8)}
 
 /* One height, whatever the mission asks for.
@@ -3581,6 +3642,11 @@ function mmRecount(panel, plan) {
         };
         show('ticked', byTick);
         show('covered', line.found);
+        /* Green the moment this line is met, red while it is not. One row at a
+         * time, so a table half done reads as half done rather than as failing
+         * — what is missing is the only thing still red. */
+        panel.querySelector(`tr[data-row="${line.key}"]`)
+            ?.classList.toggle('mm-row-ok', line.found >= line.wanted);
     }
 
     /* The table is the surface with the answer on it, so it carries the answer:
@@ -3707,7 +3773,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
             ? '?'
             : `<span data-covered="${ctx.esc(l.key)}">0</span>`;
         const num = 'text-right" style="width:1%;white-space:nowrap';
-        return `<tr>
+        return `<tr data-row="${ctx.esc(l.key)}">
       <td class="${num}">${ctx.fmt(l.wanted)}${l.unit ? ` ${l.unit}` : ''}</td>
       <td class="${num}">${l.onScene || '&ndash;'}</td>
       <td class="${num}" data-ticked="${ctx.esc(l.key)}">0</td>
@@ -3728,6 +3794,9 @@ function mmGamePanelHtml(plan, cfg, ctx) {
     <div class="panel-heading">
       <b>YMCA</b> — what this mission needs
       ${plan.name ? `<small> · ${ctx.esc(plan.name)}</small>` : ''}
+      ${plan.listedCredits ? `<span class="label label-default pull-right"
+        title="what the game lists this kind of call as paying on average"
+        >~${ctx.fmt(plan.listedCredits)} credits</span>` : ''}
     </div>
     <div class="panel-body">
       <div class="mm-scroll${plan.lines.length > MM_ROWS_SHOWN ? ' mm-more' : ''}">
@@ -3743,9 +3812,11 @@ function mmGamePanelHtml(plan, cfg, ctx) {
       </div>
 
       ${plan.crewTraining?.length ? `<p class="text-muted" style="margin:0 0 8px">
-        Crew: ${plan.crewTraining.map((t) =>
-        `<b>${t.count}</b> with ${ctx.esc(t.label)} training`).join(', ')} &mdash; they arrive on
-        whatever is sent, so this is not a vehicle to pick.</p>` : ''}
+        ${plan.crewTraining.map((t) => `Crew: <b>${t.count}</b> with
+          ${ctx.esc(t.label)} training${t.seats
+        ? ` &mdash; about <b>${t.seats}</b> aboard what is picked, counting every seat on a
+            vehicle that needs that training` : ' &mdash; seats per vehicle not known yet, so '
+            + 'this one is not counted'}`).join('; ')}.</p>` : ''}
 
       ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.scene.total} already at the mission or on the way, subtracted above${
@@ -4771,7 +4842,8 @@ const ENDPOINTS = [
 /* The type ids data/vehicle-types.json already carries, so the vehicle export
  * can say which of the player's types are new rather than making somebody
  * compare two lists by eye. */
-const SHIPPED_VEHICLE_TYPE_IDS = ["0","1","2","3","4","5","6","7","8","9","10","12","13","15","16","17","18","19","20","21","22","23","26","27","28","29","30","31","32","33","34","38","39","40","41","43","45","46","47","48","49","50","55","56","57","58","59","60","61","62","63","64","65","66","67","68","73","74","77","78","79","80","81","82","83","84","85","86","87","88","89","90","91","92","93","94","95","96","97","98","99","100","101","102","103","104","107","108","109","110","111","112","116","117","118","119","120","126","127","128","129","130","131","132","133","134"];
+const SHIPPED_VEHICLE_TYPES = {"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine","capabilities":["fire","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw","elw1_or_elw2","elw1_or_elw_drone"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["rtw","any_rtw","ktw_or_rtw","ktw_or_rtw_2","ambulance_or_rapid_responder"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser","gwl2wasser_only","gwl2wasser_all","water_damage_pump"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat","capabilities":["gwgefahrgut","gw_gefahrgut_only"]},"10":{"name":"Patrol car","capabilities":["fustw","fustw_or_police_motorcycle","police_car_or_service_group_leader"]},"12":{"name":"MCV"},"13":{"name":"Quint","capabilities":["fire","dlk","dlk_or_tm50","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"15":{"name":"Fly-Car"},"16":{"name":"SWAT Armoured Vehicle"},"17":{"name":"Large ARFF Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw","ab_ruest_rw","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"19":{"name":"K-9 Unit"},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"23":{"name":"Police Motorcycle"},"26":{"name":"SWAT SUV"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire","gwl2wasser","gwl2wasser_only","gwl2wasser_all","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"43":{"name":"FBI Investigation Wagon"},"45":{"name":"FBI Bomb Technician Vehicle"},"46":{"name":"FBI Surveillance Drone"},"47":{"name":"Police Supervisor / Sheriff Unit"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"55":{"name":"Patrol Boat"},"56":{"name":"Warden's Truck"},"57":{"name":"EMS Mass Casualty Trailer (large)"},"58":{"name":"EMS Mass Casualty Trailer (small)"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender"},"80":{"name":"Medium ARFF Crash Tender"},"81":{"name":"Small K9 Carrier"},"82":{"name":"Large K9 Carrier"},"83":{"name":"Riot Police Van"},"84":{"name":"Riot Police Bus"},"85":{"name":"Riot Police Trailer"},"86":{"name":"Police Crew Carrier"},"87":{"name":"Police Prisoner Van"},"88":{"name":"Police ATV Trailer"},"89":{"name":"Police MCV"},"90":{"name":"Tactical Rescue Truck"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"101":{"name":"Police Traffic Control Unit"},"102":{"name":"Police Traffic Blocker Unit"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"108":{"name":"Police Wrecker"},"109":{"name":"CCTU"},"110":{"name":"Tactical Rescue Truck with Boat"},"111":{"name":"Police Water Rescue Boat Trailer"},"112":{"name":"Police Water Rescue Double Boat Trailer"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"119":{"name":"Small Police Equipment Trailer"},"120":{"name":"Large Police Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC"},"128":{"name":"FBPC"},"129":{"name":"USARC"},"130":{"name":"HazMat"},"131":{"name":"ICPC"},"132":{"name":"CWFT"},"133":{"name":"FWDC"},"134":{"name":"FRC"}};
+const SHIPPED_VEHICLE_TYPE_IDS = Object.keys(SHIPPED_VEHICLE_TYPES);
 
 /** Drop what no planner reads. Icons alone are three paths per mission. */
 function slimMissions(data) {
@@ -5322,6 +5394,101 @@ async function vehicleCapabilities(ctx) {
     };
 }
 
+/* The map page, where the fleet is worth reading. Inside a mission frame there
+ * is a mission to get on with. */
+const SWEEP_PAGE = /^\/?$/;
+
+/**
+ * Learn a type the moment it turns up in the fleet, without being asked.
+ *
+ * A vehicle bought today is a type YMCA may never have seen, and waiting for
+ * somebody to press a button — or for a new release to carry it — is waiting.
+ * So on the map page the fleet is compared against what is already known, and
+ * any type that is new has one of its vehicles' pages read.
+ *
+ * It is deliberately small and quiet: only types nothing knows yet, at most a
+ * handful per sweep, a second apart, and not again for six hours. Nothing is
+ * shown unless something is learnt, and then only in the log.
+ */
+const SWEEP_KEY = 'ymca-diagnostics-lastSweep';
+const SWEEP_EVERY_MS = 6 * 3600e3;
+const SWEEP_AT_MOST = 8;
+
+async function learnNewTypes(ctx) {
+    let last = 0;
+    try { last = Number(localStorage.getItem(SWEEP_KEY)) || 0; } catch (e) { /* private window */ }
+    if (Date.now() - last < SWEEP_EVERY_MS) return null;
+
+    let vehicles;
+    try {
+        vehicles = await ctx.game('/api/vehicles');
+    } catch (err) { return null; }
+    if (!Array.isArray(vehicles) || !vehicles.length) return null;
+
+    let known = {};
+    try { known = JSON.parse(localStorage.getItem('ymca-missionmagician-types')) || {}; } catch (e) { /* none */ }
+
+    /* One vehicle per type the game has and nothing here has flags for. A type
+     * the repo ships already counts as known — this is for what is new. */
+    const wanted = new Map();
+    for (const v of vehicles) {
+        const t = String(v.vehicle_type ?? '');
+        if (!t || wanted.has(t)) continue;
+        const mine = known[t];
+        const caps = Array.isArray(mine) ? mine : mine?.caps;
+        if (caps && caps.length) continue;
+        if (SHIPPED_VEHICLE_TYPES[t]?.capabilities?.length) continue;
+        wanted.set(t, v.id);
+    }
+    // Mark the sweep as done even when there is nothing to do, so it stays quiet.
+    try { localStorage.setItem(SWEEP_KEY, String(Date.now())); } catch (e) { /* as above */ }
+    if (!wanted.size) return null;
+
+    const learnt = {};
+    for (const [typeId, vehicleId] of [...wanted].slice(0, SWEEP_AT_MOST)) {
+        try {
+            /* eslint-disable no-await-in-loop */
+            const res = await fetch(`/vehicles/${vehicleId}`, { credentials: 'same-origin' });
+            if (!res.ok) continue;
+            const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+            const flags = new Set();
+            for (const el of doc.querySelectorAll('[vehicle_type_id]')) {
+                for (const attr of el.attributes) {
+                    if (attr.value !== '1') continue;
+                    const n = attr.name.toLowerCase();
+                    if (CAP_NOT_A_FLAG.has(n) || !/^[a-z][a-z0-9_]*$/.test(n)) continue;
+                    flags.add(n);
+                }
+            }
+            if (flags.size) learnt[typeId] = [...flags].sort();
+        } catch (err) { /* the next sweep tries again */ }
+        await ctx.sleep(1000);
+    }
+    if (!Object.keys(learnt).length) return null;
+
+    try {
+        const key = 'ymca-missionmagician-types';
+        const store = JSON.parse(localStorage.getItem(key)) || {};
+        for (const [typeId, caps] of Object.entries(learnt)) {
+            const had = store[typeId];
+            store[typeId] = { caps, name: (Array.isArray(had) ? null : had?.name) || null };
+        }
+        localStorage.setItem(key, JSON.stringify(store));
+    } catch (e) { /* private window: it will be learnt again next time */ }
+
+    ctx.log.info('learnt new vehicle types', Object.keys(learnt).join(', '));
+    return learnt;
+}
+
+/* Once per load, a while after the page has settled, and never in the way. */
+YMCA.inject('diagnostics', (ctx) => {
+    if (!SWEEP_PAGE.test(location.pathname)) return true;
+    setTimeout(() => {
+        learnNewTypes(ctx).catch((err) => ctx.log.warn('type sweep', err.message));
+    }, 8000);
+    return true;
+});
+
 /**
  * Every vehicle type the game will sell, by the id it uses for it.
  *
@@ -5358,7 +5525,8 @@ async function vehicleCatalogue(ctx) {
             reached.push({ buildingType: kind, offers: options.length });
             for (const offer of options) {
                 const row = types.get(offer.id) || { id: offer.id, soldBy: [] };
-                for (const k of ['name', 'longName', 'category', 'requiredExtension']) {
+                for (const k of ['name', 'longName', 'crew', 'education', 'requiredExtension',
+                    'category']) {
                     if (!row[k] && offer[k]) row[k] = offer[k];
                 }
                 if (!row.soldBy.includes(kind)) row.soldBy.push(kind);
@@ -5387,6 +5555,8 @@ async function vehicleCatalogue(ctx) {
         name: r.name || learnt[String(r.id)]?.name || null,
         capabilities: learnt[String(r.id)]?.caps || null,
         longName: r.longName || undefined,
+        crew: r.crew ?? undefined,
+        education: r.education || undefined,
         category: r.category || undefined,
         requiredExtension: r.requiredExtension || undefined,
         soldByBuildingTypes: r.soldBy,
@@ -5486,14 +5656,25 @@ async function buyableAt(buildingId) {
         if (out.some((o) => o.id === id)) continue;
 
         const pane = card.closest('[role="tabpanel"]');
-        const needs = [...card.querySelectorAll('.alert')]
-            .map((a) => a.textContent.trim())
-            .find((t) => /^required extension:/i.test(t));
+        const alerts = [...card.querySelectorAll('.alert')].map((a) =>
+            a.textContent.replace(/\s+/g, ' ').trim());
+        const needs = alerts.find((t) => /^required extension:/i.test(t));
+
+        /* The card states two things nothing else does: how many people the
+         * vehicle carries, and which training they need. A mission asking for
+         * eight HazMat-trained crew is answered by HazMat vehicles and their
+         * crews, so both are worth having. */
+        const text = card.textContent.replace(/\s+/g, ' ');
+        const crew = /max\.?\s*crew:\s*(\d+)/i.exec(text);
+        const school = alerts.map((t) => /requires special education\s*\(([^)]+)\)/i.exec(t))
+            .find(Boolean);
 
         out.push({
             id,
             name: (card.querySelector('h3')?.textContent || '').trim() || null,
             longName: (card.querySelector('b')?.textContent || '').trim() || null,
+            crew: crew ? Number(crew[1]) : null,
+            education: school ? school[1].trim() : null,
             category: pane ? (tabName.get(pane.id) || pane.id) : null,
             requiredExtension: needs ? needs.replace(/^required extension:\s*/i, '') : null,
         });

@@ -242,6 +242,30 @@ your selection table, so its checkbox — the only place the flags are written �
 is never yours to read. All the at-mission row gives is a type id. An alliance
 partner bringing every type he owns is not a capability capture.
 
+**Nobody has to be fed data.** A player's own game teaches their own install:
+the flags are on every checkbox in a mission window, and on the map page
+Diagnostics quietly reads one vehicle page for any type in the fleet nothing
+knows yet — at most eight per sweep, a second apart, once in six hours. Buy a
+vehicle nobody has ever owned and it is flagged within a page load, with no
+release and no report. What `data/vehicle-types.json` ships is a head start, not
+a dependency.
+
+**The buy page states crew size and required training.** `Max. Crew: 3` and
+`Requires special education (HazMat)` on every card, so a mission wanting eight
+HazMat-trained crew can be answered by counting seats on HazMat vehicles. Two of
+them seat six; the third is the one picking by requirement count alone missed.
+**Both halves of that are inferred and the panel says so**: `Max. Crew` is the
+most a vehicle holds rather than who is aboard, and everybody on a vehicle that
+*requires* a training is taken to have it.
+
+**`average_credits` is the game's own figure**, in the catalogue the
+`#mission_help` link points at, so the panel can show what a call is worth
+without measuring anything.
+
+**A met row greens itself.** Painting the whole table one colour says "something
+is missing" without saying what; a row that goes green when its own line is
+covered leaves only the missing ones red.
+
 **There is no page that states what an unowned type covers.** The flags are
 written per vehicle *instance*, onto that vehicle's checkbox and its own page.
 The buy page lists all 106 types with crew, patient transport and required

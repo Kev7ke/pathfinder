@@ -598,11 +598,13 @@ const panelRows = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
 console.log('panel table       :', JSON.stringify(panelRows));
 assert.deepEqual(panelRows, [['1', '\u2013', '0', '0', 'Fire engines']],
   'covered is what is committed, and nothing is committed before a box is ticked');
-const paint = () => mission.evaluate(() => {
+// The row fades between red and green, so let the transition land before measuring.
+const paint = async () => { await mission.waitForTimeout(400); return mission.evaluate(() => {
   const t = document.querySelector('#ymca-mm-panel .mm-table');
-  const td = t.querySelector('tbody td');
-  return { cls: t.className, cell: getComputedStyle(td).backgroundColor };
-});
+  const tr = t.querySelector('tbody tr');
+  const td = tr.querySelector('td');
+  return { cls: t.className, row: tr.className, cell: getComputedStyle(td).backgroundColor };
+}); };
 const before = await paint();
 console.log('paint short       :', JSON.stringify(before));
 assert.ok(before.cls.includes('mm-short'), 'red while something is still missing');
@@ -1147,6 +1149,19 @@ const crewNote = (await mission.textContent('#ymca-mm-panel')).replace(/\s+/g, '
 console.log('crew note         :', crewNote.slice(crewNote.indexOf('Crew:'), crewNote.indexOf('Crew:') + 70));
 assert.ok(/Crew: 8 with HazMat training/.test(crewNote),
   'it is said in the game\'s own English, from additional.personnel_educations');
+// A met row goes green on its own, so what is still missing is the only thing still red.
+await mission.click('#ymca-mm-panel [data-do="select"]');
+await mission.waitForTimeout(400);
+const perRow = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) => trs.map((tr) => ({
+  need: tr.cells[4].textContent.trim(),
+  green: tr.classList.contains('mm-row-ok'),
+})));
+console.log('rows green        :', JSON.stringify(perRow));
+assert.ok(perRow.some((r) => r.green), 'the line that is covered says so by itself');
+// And the game's own figure for what this kind of call pays rides in the heading.
+const head = await mission.textContent('#ymca-mm-panel .panel-heading');
+console.log('heading           :', head.replace(/\s+/g, ' ').trim());
+assert.ok(/~100 credits/.test(head), 'average_credits is the game\'s own number, so it is shown');
 
 // ---- water comes from the tank, not from whatever is nearest ----
 // Filling the bar in arrival order sends whatever is close, and what is close is engines: asked
