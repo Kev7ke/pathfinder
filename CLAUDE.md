@@ -285,6 +285,15 @@ spelling, however wide the vocabulary was read. Where a key and a flag are two
 names for one thing, `personnel_educations` beside `additional.personnel_educations`
 is where the game states the pair.
 
+**A requirement whose value is not a number is not a count of vehicles.**
+`personnel_educations: { gw_gefahrgut: 8 }` asks for eight trained crew at the
+mission, and they arrive on whatever is sent rather than being sent themselves.
+As a row it read "Personnel educations, wanted [object Object]". It is a
+sentence under the table instead, in the game's own English — which
+`additional.personnel_educations` gives, listing the same trainings in the same
+order. That sentence earns its place: it is why a call can sit unfinished with
+every row green.
+
 **Water is filled by the tank, not by the clock.** Adding vehicles in arrival
 order sends whatever is close, and what is close is engines: asked for 20,000
 gallons the panel picked eleven when four were wanted, because each moved the

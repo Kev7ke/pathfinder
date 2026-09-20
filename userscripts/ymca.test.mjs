@@ -1120,6 +1120,34 @@ assert.equal(await mission.evaluate(() =>
   document.querySelectorAll('.vehicle_checkbox:checked').length), 0,
 'a D typed into a field is a letter, not a dispatch');
 
+// ---- crew training is a sentence, not a vehicle row ----
+// `personnel_educations: { gw_gefahrgut: 8 }` asks for eight trained crew, who arrive on whatever
+// is sent. As a row it read "Personnel educations, wanted [object Object]".
+await mission.evaluate(() => {
+  window.__catalogue = [{
+    id: '1008', name: 'Chemical spill', average_credits: 100,
+    requirements: { firetrucks: 1, personnel_educations: { gw_gefahrgut: 8 } },
+    additional: { personnel_educations: { HazMat: 8 } },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1008');
+  document.getElementById('vehicle_show_table_body_all').innerHTML = `
+    <tr class="vehicle_select_table_tr" vehicle_id="70" data-distance="1"><td>
+    <input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_70" value="70"
+    name="vehicle_ids[]" vehicle_type_id="33" fire="1" fms="2"></td>
+    <td id="vehicle_sort_70" timevalue="10">x</td></tr>`;
+});
+await mission.waitForTimeout(1200);
+const trained = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => tr.cells[4].textContent.trim()));
+console.log('with training     :', JSON.stringify(trained));
+assert.ok(!trained.some((r) => /Personnel educations|object Object/i.test(r)),
+  'a requirement that is not a count of vehicles is not a vehicle row');
+const crewNote = (await mission.textContent('#ymca-mm-panel')).replace(/\s+/g, ' ');
+console.log('crew note         :', crewNote.slice(crewNote.indexOf('Crew:'), crewNote.indexOf('Crew:') + 70));
+assert.ok(/Crew: 8 with HazMat training/.test(crewNote),
+  'it is said in the game\'s own English, from additional.personnel_educations');
+
 // ---- water comes from the tank, not from whatever is nearest ----
 // Filling the bar in arrival order sends whatever is close, and what is close is engines: asked
 // for 20,000 gallons the panel picked eleven when four were wanted, because each moved it a

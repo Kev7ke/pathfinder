@@ -514,9 +514,14 @@ function mmShrinkCatalogue(data) {
             name: m.name,
             requirements: m.requirements || {},
             average_credits: m.average_credits || null,
-            // Patients are here, not in requirements — the one field that mattered.
-            additional: m.additional?.possible_patient
-                ? { possible_patient: m.additional.possible_patient }
+            /* Two things live under `additional` rather than in `requirements`:
+             * the patients, and the English names for the crew training the
+             * requirement asks for in the game's internal spelling. */
+            additional: (m.additional?.possible_patient || m.additional?.personnel_educations)
+                ? {
+                    possible_patient: m.additional.possible_patient,
+                    personnel_educations: m.additional.personnel_educations,
+                }
                 : undefined,
         };
     }
@@ -804,7 +809,12 @@ async function mmPlan(page, ctx, cfg) {
     const lines = [];
 
     if (requirements) {
-        const wants = Object.entries(requirements).filter(([key]) => !MM_AMOUNTS[key]);
+        /* A requirement whose value is not a number is not a count of vehicles.
+         * `personnel_educations: { gw_gefahrgut: 8 }` asks for eight trained
+         * crew at the mission — carried by whatever is sent, not sent itself —
+         * and as a row it read "Personnel educations, wanted [object Object]". */
+        const wants = Object.entries(requirements)
+            .filter(([key, n]) => !MM_AMOUNTS[key] && typeof n === 'number');
         /* Patients are not a requirement key. They want ambulances, so they are
          * counted into the ambulance line rather than shown beside it — one each
          * unless told otherwise. An `ambulances` requirement and the patients
@@ -897,6 +907,10 @@ async function mmPlan(page, ctx, cfg) {
     return {
         name,
         requirements,
+        /* Training the crew has to bring, in the game's own English: the
+         * requirement names it `gw_gefahrgut`, `additional` names the same
+         * thing `HazMat`, and the pair is stated side by side. */
+        crewTraining: mmCrewTraining(record),
         lines,
         pick: [...picked.values()],
         fromHelpPage: !!record?.fromHelpPage,
@@ -941,6 +955,26 @@ function mmRememberUnmatched(key, missionType) {
 }
 
 /** firetrucks -> Firetrucks, for a requirement with no entry in the map. */
+/**
+ * How many trained crew the mission wants, and what the training is called.
+ *
+ * This is not a vehicle line — the crew arrive on whatever is sent — but it is
+ * why a call sits unfinished with every box green, so it is worth a sentence.
+ * The English name comes from `additional.personnel_educations`, which lists
+ * the same trainings in the same order as `requirements.personnel_educations`.
+ */
+function mmCrewTraining(record) {
+    const want = record?.requirements?.personnel_educations;
+    if (!want || typeof want !== 'object') return null;
+    const english = record?.additional?.personnel_educations || {};
+    const names = Object.keys(english);
+    return Object.entries(want).map(([key, n], i) => ({
+        // The keys line up one for one; fall back to the game's own key.
+        label: names[i] && english[names[i]] === n ? names[i] : mmPretty(key),
+        count: n,
+    }));
+}
+
 function mmPretty(key) {
     return key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 }
@@ -1845,6 +1879,11 @@ function mmGamePanelHtml(plan, cfg, ctx) {
           <tbody>${rows}</tbody>
         </table>
       </div>
+
+      ${plan.crewTraining?.length ? `<p class="text-muted" style="margin:0 0 8px">
+        Crew: ${plan.crewTraining.map((t) =>
+        `<b>${t.count}</b> with ${ctx.esc(t.label)} training`).join(', ')} &mdash; they arrive on
+        whatever is sent, so this is not a vehicle to pick.</p>` : ''}
 
       ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.scene.total} already at the mission or on the way, subtracted above${
