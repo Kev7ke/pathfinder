@@ -237,6 +237,11 @@ cell, not on the row or the cell — the cells themselves carry only `sortvalue`
 capability flags are **not** there, and looking up what a vehicle already at the
 mission covers really does need the dataset. That question is closed.
 
+**Somebody else's vehicle at your mission teaches nothing.** It is never in
+your selection table, so its checkbox — the only place the flags are written —
+is never yours to read. All the at-mission row gives is a type id. An alliance
+partner bringing every type he owns is not a capability capture.
+
 **There is no page that states what an unowned type covers.** The flags are
 written per vehicle *instance*, onto that vehicle's checkbox and its own page.
 The buy page lists all 106 types with crew, patient transport and required
@@ -650,8 +655,12 @@ starts from nothing on every new machine, and an answer that arrives once and is
 not written down has to be asked for again.
 
 - A **vehicle type id** that is not in `data/vehicle-types.json` — from
-  `missionmagician.capabilitiesByType` in the report, or from the player's
-  `/api/vehicles` — goes in with its name and its flags.
+  `capabilitiesByType` in either report, or from the player's `/api/vehicles` —
+  goes in with its name and its flags. **A count is not an answer**: the
+  mission panel's own report used to carry `vehicleTypesLearnt: 11` and nothing
+  else, so three rounds of it could be handed over and add nothing. It carries
+  `capabilitiesByType`, `typeNames` and `notInDataset` now, because that is the
+  button in the mission window and therefore the one that gets pressed.
 - A **requirement key** in `missionmagician.unmatchedRequirements` gets an entry
   in `MM_REQUIREMENTS`, or stays listed as unmatched on purpose with a reason.
 - **Mission types** the catalogue does not carry mean `data/missions.json` is

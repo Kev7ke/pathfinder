@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.25
+// @version      0.0.26
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.25',
+    version: '0.0.26',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -3595,6 +3595,18 @@ async function mmCopyState(ctx, plan, panel) {
         vehiclesInRange: page.rows.length,
         followUpTabPresent: page.followUpOffered,
         vehicleTypesLearnt: Object.keys(mmKnownTypes()).length,
+        /* The types themselves, not just how many. A count cannot be added to
+         * data/vehicle-types.json, and this is the button that gets pressed —
+         * it is in the mission window, where the question comes up. Type ids,
+         * names and flag names; nothing about the vehicles carrying them. */
+        capabilitiesByType: mmKnownTypes(),
+        typeNames: Object.fromEntries(Object.entries(mmLearntTypes())
+            .filter(([, t]) => t.name).map(([id, t]) => [id, t.name])),
+        /* Which of them this repo does not ship, so the gap is the answer
+         * rather than something to work out by comparing two lists. */
+        notInDataset: Object.keys(mmKnownTypes())
+            .filter((id) => !MM_SHIPPED_TYPES[id]?.capabilities)
+            .map(Number).sort((a, b) => a - b),
         panelPlaced: !!panel,
         /* The two tables nothing here has ever seen with something in them:
          * what is at the mission, and what the follow-up tab offers. If either

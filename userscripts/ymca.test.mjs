@@ -1020,6 +1020,21 @@ assert.ok(/Cancel 1 unused/.test(hazCancel),
 await mission.click('#ymca-mm-panel [data-do="cancel"]');
 const hazBack = await mission.evaluate(() => window.__backalarms);
 console.log('hazmat sent back  :', JSON.stringify(hazBack));
+// The panel's own report has to carry the types, not a count of them: a count cannot be added to
+// data/vehicle-types.json, and this is the button that actually gets pressed.
+const handover = await mission.evaluate(async () => {
+  let copied = null;
+  navigator.clipboard.writeText = async (t) => { copied = t; };
+  document.querySelector('#ymca-mm-panel [data-do="report"]').click();
+  await new Promise((r) => setTimeout(r, 400));
+  return JSON.parse(copied);
+});
+console.log('handover          :', JSON.stringify(handover.capabilitiesByType),
+  '| not shipped:', JSON.stringify(handover.notInDataset));
+assert.ok(Object.keys(handover.capabilitiesByType).length > 0,
+  'the report carries what each type can do, not how many types there are');
+assert.ok(handover.notInDataset.includes(9),
+  'and says which of them this repo does not ship yet');
 assert.deepEqual(hazBack, ['93'], 'a pumper goes home, never a HazMat');
 // Out of the way: the next block builds its own scene table, and two with this id would merge.
 await mission.evaluate(() => document.getElementById('mission_vehicle_at_mission')?.remove());
