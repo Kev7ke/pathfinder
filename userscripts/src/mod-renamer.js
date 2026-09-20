@@ -16,15 +16,28 @@ const WRITE_DELAY_MS = 350;
 const BACKUP_KEEP = 10;
 
 /**
- * Vehicle type names that ship with YMCA, read out of a real en_US fleet.
- * Only the types that fleet owned, so it is a starting point; unknown ids fall
- * through to "Type <id>" and the preview warns before writing one. A name
- * typed in the dialog always wins.
+ * The names the repo ships with, from data/vehicle-types.json.
+ *
+ * Everything the game sells is read from its own buy pages by
+ * Diagnostics -> Vehicle types and kept in one store both this and
+ * MissionMagician read, so a type added by a game update names itself the first
+ * time that button is pressed rather than waiting to be typed in here.
  */
-const BUILTIN_VEHICLE_TYPES = {
-    3: 'Battalion chief unit', 5: 'ALS Ambulance', 6: 'Mobile air', 7: 'Water Tanker',
-    10: 'Patrol Car', 13: 'Quint', 18: 'Rescue Engine', 27: 'BLS Ambulance', 33: 'Pumper Tanker',
-};
+const BUILTIN_VEHICLE_TYPES = Object.fromEntries(
+    Object.entries(__VEHICLE_TYPES__).map(([id, t]) => [id, t.name]));
+
+/** id -> name, learnt from the game and shared across modules. */
+const LEARNT_TYPES_KEY = 'ymca-vehicle-types';
+
+function learntVehicleName(id) {
+    try {
+        const all = JSON.parse(localStorage.getItem(LEARNT_TYPES_KEY)) || {};
+        const one = all[String(id)];
+        return (one && one.name) || null;
+    } catch (e) {
+        return null;
+    }
+}
 
 /**
  * Station type names, confirmed against the game rather than inferred: each
@@ -117,6 +130,8 @@ YMCA.register({
             const id = String(v.vehicle_type ?? '');
             if (v.vehicle_type_caption) return { id, name: v.vehicle_type_caption, named: true, fixed: true };
             if (typeNames[id]) return { id, name: typeNames[id], named: true };
+            const fromGame = learntVehicleName(id);
+            if (fromGame) return { id, name: fromGame, named: true, fromGame: true };
             if (BUILTIN_VEHICLE_TYPES[id]) return { id, name: BUILTIN_VEHICLE_TYPES[id], named: true, builtin: true };
             return { id, name: `Type ${id}`, named: false };
         };

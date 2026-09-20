@@ -94,6 +94,24 @@ await pg.evaluate(() => {
       return new Response(form(`/vehicles/${v.id}`, 'vehicle[caption]', v.caption),
         { headers: { 'content-type': 'text/html' } });
     }
+    m = url.match(/^\/buildings\/(\d+)$/);
+    if (m) {
+      return new Response(`<html><body><a href="/buildings/${m[1]}/vehicles/new">Buy vehicle</a>
+        </body></html>`, { headers: { 'content-type': 'text/html' } });
+    }
+    m = url.match(/^\/buildings\/(\d+)\/vehicles\/new$/);
+    if (m) {
+      // A fire station sells engines and ladders; a police station sells patrol cars.
+      const fire = `<select name="vehicle[vehicle_type]">
+        <option value="33">Pumper Tanker (50,000 Credits)</option>
+        <option value="13">Quint</option>
+        <option value="99">Hovercraft Wrangler</option></select>`;
+      const police = `<select name="vehicle[vehicle_type]">
+        <option value="10">Patrol Car</option></select>`;
+      const b = buildings.find((x) => x.id === Number(m[1]));
+      return new Response(`<html><body>${b && b.building_type === 5 ? police : fire}</body></html>`,
+        { headers: { 'content-type': 'text/html' } });
+    }
     m = url.match(/^\/buildings\/(\d+)\/edit$/);
     if (m) {
       const bl = buildings.find((x) => x.id === Number(m[1]));
@@ -213,7 +231,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.16');
+assert.equal(report.ymca, '0.0.17');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -221,6 +239,29 @@ assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
 assert.ok(!JSON.stringify(report).includes('Central Dispatch'),
   'the problem report must not carry building names');
 console.log('report endpoints  :', JSON.stringify(report.endpoints));
+
+// ---- the vehicle catalogue, read from the game's own buy pages ----
+// Learning names one mission at a time needs somebody to keep playing until a type happens to
+// be in range. The buy page lists every one of them, with the id the game uses for it.
+await pg.click('[data-do="vehicles"]');
+await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('missingFromDataset'));
+const fleet = JSON.parse(await pg.inputValue('#ymca-diag-out'));
+console.log('vehicle types     :', JSON.stringify(fleet.types.map((t) => [t.id, t.name, t.youOwn])));
+assert.ok(fleet.types.some((t) => t.id === 13 && t.name === 'Quint'),
+  'the buy page names every type it sells, so nothing has to be played through to find out');
+assert.ok(fleet.types.some((t) => t.id === 10 && t.name === 'Patrol Car'),
+  'and a different kind of station sells different vehicles, so each kind is asked');
+assert.ok(fleet.types.some((t) => t.id === 33 && t.name === 'Pumper Tanker'),
+  'the price in brackets is not part of the name');
+console.log('not in dataset    :', JSON.stringify(fleet.missingFromDataset));
+assert.deepEqual(fleet.missingFromDataset, [99],
+  'a type the repo does not carry is named, so it can be added without comparing two lists');
+assert.ok(!JSON.stringify(fleet).includes('FS01'), 'no station name may leave in the fleet export');
+// And it lands where every module reads it, not just in the clipboard.
+const shared = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-vehicle-types')));
+assert.equal(shared['99'].name, 'Hovercraft Wrangler',
+  'a name learnt once must be a name the Renamer has too');
+console.log('shared store      :', JSON.stringify(shared['99']));
 
 // ---- one report carries what used to be four buttons ----
 console.log('report gathers    :',

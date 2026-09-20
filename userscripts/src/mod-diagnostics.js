@@ -22,6 +22,11 @@ const ENDPOINTS = [
     { path: '/api/vehicle_states', label: 'vehicleStates' },
 ];
 
+/* The type ids data/vehicle-types.json already carries, so the vehicle export
+ * can say which of the player's types are new rather than making somebody
+ * compare two lists by eye. */
+const SHIPPED_VEHICLE_TYPE_IDS = __VEHICLE_TYPE_IDS__;
+
 /** Drop what no planner reads. Icons alone are three paths per mission. */
 function slimMissions(data) {
     return (Array.isArray(data) ? data : Object.values(data)).map((m) => ({
@@ -61,10 +66,14 @@ YMCA.register({
 
       <div class="ymca-card">
         <b>Hand over game data</b>
-        <p class="ymca-sub" style="margin:4px 0 10px">The full export is the one to attach when
-          the dataset should be rebuilt. It carries your player name, your alliance and your
-          building coordinates, so share it only where you are happy to.</p>
+        <p class="ymca-sub" style="margin:4px 0 10px"><b>Vehicle types</b> is the one to send when
+          a vehicle YMCA does not know turns up: nothing can be counted by a type it cannot name.
+          It carries ids, names and what each type can do, and nothing about your account.<br>
+          <b>Download everything</b> is for rebuilding the dataset. That one carries your player
+          name, your alliance and your building coordinates, so share it only where you are happy
+          to.</p>
         <button class="ymca-btn primary" data-do="export-all">Download everything</button>
+        <button class="ymca-btn" data-do="vehicles">Vehicle types</button>
         <button class="ymca-btn" data-do="missions">Mission list only</button>
       </div>
 
@@ -254,21 +263,7 @@ async function run(what, ctx, put) {
     }
 
     if (what === 'vehicles') {
-        const [V, B] = await Promise.all([ctx.game('/api/vehicles'), ctx.game('/api/buildings')]);
-        const host = new Map(B.map((b) => [b.id, b.building_type]));
-        const byType = new Map();
-        for (const v of V) {
-            const t = String(v.vehicle_type ?? '');
-            if (!byType.has(t)) byType.set(t, { id: Number(t), vehicles: 0, hosts: new Set(), caption: null });
-            const row = byType.get(t);
-            row.vehicles++;
-            row.hosts.add(host.get(v.building_id));
-            if (v.vehicle_type_caption) row.caption = v.vehicle_type_caption;
-        }
-        put([...byType.values()].sort((a, b) => a.id - b.id).map((r) => ({
-            id: r.id, vehicles: r.vehicles, customCaption: r.caption,
-            onBuildingTypes: [...r.hosts],
-        })), 'the vehicle types');
+        put(await vehicleCatalogue(ctx), 'the vehicle types');
         return;
     }
 
@@ -424,15 +419,149 @@ function moduleStore(moduleId) {
          * to fix, and it should arrive without anyone having to notice it. */
         let types = {};
         try {
-            types = JSON.parse(localStorage.getItem('ymca-missionmagician-types')) || {};
+            const raw = JSON.parse(localStorage.getItem('ymca-missionmagician-types')) || {};
+            types = Object.fromEntries(Object.entries(raw).map(([id, t]) =>
+                [id, Array.isArray(t) ? { caps: t, name: null } : t]));
         } catch (e) { /* nothing learnt yet */ }
         return {
             vehicleTypesLearnt: Object.keys(types).length,
-            capabilitiesByType: types,
+            learntTypes: types,
+            capabilitiesByType: Object.fromEntries(Object.entries(types)
+                .map(([id, t]) => [id, Array.isArray(t) ? t : (t.caps || [])])),
             unmatchedRequirements: read('unmatched', []),
             settings: read('cfg', null),
         };
     }
 
     return null;
+}
+
+/**
+ * Every vehicle type the game will sell, by the id it uses for it.
+ *
+ * Learning names one mission at a time is no way to build a catalogue: it needs
+ * somebody to keep playing until a type happens to be in range, and a type
+ * added by a game update would stay nameless until it was. The buy page already
+ * lists them all — a `<select>` of every vehicle a building can buy, with the
+ * id as the option's value and the name as its text. That is the whole answer,
+ * and it is one page per kind of building.
+ *
+ * Nothing here is guessed at. The buy page is found by following the building's
+ * own link to it, so a game that moves it is followed rather than broken. What
+ * could not be reached is named in the result.
+ */
+async function vehicleCatalogue(ctx) {
+    const buildings = await ctx.game('/api/buildings');
+
+    /* One building of each kind: a fire station and an ambulance station sell
+     * different vehicles, two fire stations sell the same ones. */
+    const perKind = new Map();
+    for (const b of buildings) {
+        if (!perKind.has(b.building_type)) perKind.set(b.building_type, b.id);
+    }
+
+    const types = new Map();
+    const reached = [];
+    const failed = [];
+
+    for (const [kind, buildingId] of perKind) {
+        try {
+            const options = await buyableAt(buildingId);
+            if (!options.length) { failed.push({ buildingType: kind, why: 'no vehicle list on that page' }); continue; }
+            reached.push({ buildingType: kind, offers: options.length });
+            for (const { id, name } of options) {
+                const row = types.get(id) || { id, name, soldBy: [] };
+                if (!row.name && name) row.name = name;
+                if (!row.soldBy.includes(kind)) row.soldBy.push(kind);
+                types.set(id, row);
+            }
+        } catch (err) {
+            failed.push({ buildingType: kind, why: err.message });
+        }
+        await ctx.sleep(120);
+    }
+
+    // What the account actually owns, and what a mission window has taught.
+    const vehicles = await ctx.game('/api/vehicles');
+    const owned = new Map();
+    for (const v of vehicles) {
+        const t = Number(v.vehicle_type);
+        if (Number.isFinite(t)) owned.set(t, (owned.get(t) || 0) + 1);
+    }
+    const learnt = moduleStore('missionmagician')?.learntTypes || {};
+    for (const id of [...owned.keys(), ...Object.keys(learnt).map(Number)]) {
+        if (!types.has(id)) types.set(id, { id, name: learnt[String(id)]?.name || null, soldBy: [] });
+    }
+
+    const rows = [...types.values()].sort((a, b) => a.id - b.id).map((r) => ({
+        id: r.id,
+        name: r.name || learnt[String(r.id)]?.name || null,
+        capabilities: learnt[String(r.id)]?.caps || null,
+        soldByBuildingTypes: r.soldBy,
+        youOwn: owned.get(r.id) || 0,
+        inDataset: SHIPPED_VEHICLE_TYPE_IDS.includes(String(r.id)),
+    }));
+
+    /* Written where every module reads it, so a name learnt once is a name the
+     * Renamer and MissionMagician both have from then on. */
+    try {
+        const store = {};
+        for (const r of rows) {
+            if (r.name || r.capabilities) store[r.id] = { name: r.name, caps: r.capabilities };
+        }
+        localStorage.setItem('ymca-vehicle-types', JSON.stringify(store));
+    } catch (e) { /* private window: the copy below still carries it */ }
+
+    return {
+        note: 'vehicle type ids and their names, read from the game’s own buy pages. '
+            + 'Nothing about the account beyond how many of each it owns.',
+        ymca: YMCA.version,
+        types: rows,
+        missingFromDataset: rows.filter((r) => !r.inDataset).map((r) => r.id),
+        stillUnnamed: rows.filter((r) => !r.name).map((r) => r.id),
+        buyPagesRead: reached,
+        buyPagesFailed: failed,
+    };
+}
+
+/**
+ * The vehicles a building will sell you, from its own buy page.
+ *
+ * The building page is asked for its link rather than a path being assumed;
+ * only if it offers none is the usual one tried, and a failure there is
+ * reported rather than swallowed.
+ */
+async function buyableAt(buildingId) {
+    const get = async (url) => {
+        const res = await fetch(url, { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`HTTP ${res.status} on ${url.replace(/\d+/g, '#')}`);
+        return new DOMParser().parseFromString(await res.text(), 'text/html');
+    };
+
+    const page = await get(`/buildings/${buildingId}`);
+    const link = page.querySelector('a[href*="vehicles/new"], a[href*="vehicle_market"]');
+    const doc = link
+        ? await get(new URL(link.getAttribute('href'), location.origin).pathname)
+        : await get(`/buildings/${buildingId}/vehicles/new`);
+
+    const out = [];
+    for (const option of doc.querySelectorAll('select option')) {
+        const id = Number(option.value);
+        const name = option.textContent.trim().replace(/\s*\([^)]*\)\s*$/, '');
+        if (!Number.isFinite(id) || id <= 0 || !name) continue;
+        if (out.some((o) => o.id === id)) continue;
+        out.push({ id, name });
+    }
+    /* A page with one option per vehicle as a radio or a link rather than a
+     * select: read those the same way. */
+    if (!out.length) {
+        for (const el of doc.querySelectorAll('[vehicle_type_id], [data-vehicle-type-id]')) {
+            const id = Number(el.getAttribute('vehicle_type_id') || el.getAttribute('data-vehicle-type-id'));
+            const name = (el.getAttribute('title') || el.textContent || '').trim().slice(0, 60);
+            if (!Number.isFinite(id) || id <= 0) continue;
+            if (out.some((o) => o.id === id)) continue;
+            out.push({ id, name: name || null });
+        }
+    }
+    return out;
 }

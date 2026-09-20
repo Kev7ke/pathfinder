@@ -261,21 +261,42 @@ function mmKnownTypes() {
     const known = {};
     for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) known[id] = t.capabilities || [];
     // What this game taught wins: the player's own server is the truth here.
-    return Object.assign(known, learnt);
+    for (const [id, t] of Object.entries(learnt)) known[id] = Array.isArray(t) ? t : (t.caps || []);
+    return known;
 }
 
 function mmLearnTypes(vehicles) {
-    const known = mmKnownTypes();
+    let learnt = {};
+    try {
+        learnt = JSON.parse(localStorage.getItem(MM_TYPES_KEY)) || {};
+    } catch (e) { /* nothing learnt yet */ }
+
     let changed = false;
     for (const v of vehicles) {
-        if (!v.typeId || known[v.typeId]) continue;
-        known[v.typeId] = MM_FLAGS.filter((f) => v.has(f));
+        if (!v.typeId) continue;
+        const had = learnt[v.typeId];
+        const caps = MM_FLAGS.filter((f) => v.has(f));
+        // Older stores kept a bare array of flags; keep reading those.
+        const before = Array.isArray(had) ? { caps: had, name: null } : had;
+        if (before && before.name && before.caps.join('|') === caps.join('|')) continue;
+        learnt[v.typeId] = { caps, name: v.typeName || before?.name || null };
         changed = true;
     }
     if (changed) {
-        try { localStorage.setItem(MM_TYPES_KEY, JSON.stringify(known)); } catch (e) { /* private window */ }
+        try { localStorage.setItem(MM_TYPES_KEY, JSON.stringify(learnt)); } catch (e) { /* private window */ }
     }
-    return known;
+    return mmKnownTypes();
+}
+
+/** What has been learnt, with its names, for handing back. */
+function mmLearntTypes() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(MM_TYPES_KEY)) || {};
+        return Object.fromEntries(Object.entries(raw).map(([id, t]) =>
+            [id, Array.isArray(t) ? { caps: t, name: null } : t]));
+    } catch (e) {
+        return {};
+    }
 }
 
 /**
@@ -477,6 +498,10 @@ function mmVehicle(row) {
         box,
         id: box.value,
         typeId: num('vehicle_type_id'),
+        /* The row says what the type is called and the checkbox says which id it
+         * is, on the same row — the only place in the game the two appear
+         * together. Everything else has to be told. */
+        typeName: row.getAttribute('vehicle_type') || null,
         seconds: Number.isFinite(seconds) ? seconds : null,
         distance: Number(row.getAttribute('data-distance')) || 0,
         water: num('wasser_amount'),

@@ -471,6 +471,24 @@ lists what is confirmed, what is still open, and how each answer was reached.
 capability flags the game puts on their checkboxes. It is what the tools fall
 back on before they have seen a type themselves.
 
+### Naming a vehicle type
+
+**The game sells every vehicle it has, and the buy page lists them.** A
+building's own page links to `…/vehicles/new`, which is a `<select>` of every
+type that building can buy: the id is the option's value, the name is its text.
+One page per *kind* of building covers the lot — a fire station and an ambulance
+station sell different vehicles, two fire stations sell the same ones.
+
+That is **Diagnostics → Vehicle types**, and it is the answer to "what is type
+99". Learning names from mission windows still happens — the row carries
+`vehicle_type` next to the checkbox's `vehicle_type_id`, and it is the only
+place the two meet — but it is a fallback, not the method: it needs somebody to
+keep playing until a type happens to be in range, and a type added by a game
+update would stay nameless until it was.
+
+Names land in `ymca-vehicle-types`, which every module reads, so a name learnt
+once is a name the Renamer has too.
+
 ### Every report is a dataset update
 
 **When a report comes back carrying something the repo does not have, put it in

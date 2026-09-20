@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.16';
+export const VERSION = '0.0.17';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -163,10 +163,12 @@ function build() {
         read('userscripts/src/shell.js').replace('__VERSION__', VERSION),
         '// ---------- modules ----------',
         read('userscripts/src/mod-stepops.js'),
-        read('userscripts/src/mod-renamer.js'),
+        read('userscripts/src/mod-renamer.js').replace('__VEHICLE_TYPES__', vehicleTypes),
         read('userscripts/src/mod-missionmagician.js').replace('__VEHICLE_TYPES__', vehicleTypes),
         read('userscripts/src/mod-trackops.js'),
-        read('userscripts/src/mod-diagnostics.js'),
+        read('userscripts/src/mod-diagnostics.js')
+            .replace('__VEHICLE_TYPE_IDS__',
+                JSON.stringify(Object.keys(JSON.parse(read('data/vehicle-types.json')).types))),
         BOOT,
         '})();\n',
     ];
