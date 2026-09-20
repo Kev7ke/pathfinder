@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.32
+// @version      0.0.33
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.32',
+    version: '0.0.33',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1541,7 +1541,7 @@ const BACKUP_KEEP = 10;
  * time that button is pressed rather than waiting to be typed in here.
  */
 const BUILTIN_VEHICLE_TYPES = Object.fromEntries(
-    Object.entries({"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine","capabilities":["fire","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw","elw1_or_elw2","elw1_or_elw_drone"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["rtw","any_rtw","ktw_or_rtw","ktw_or_rtw_2","ambulance_or_rapid_responder"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser","gwl2wasser_only","gwl2wasser_all","water_damage_pump"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat","capabilities":["gwgefahrgut","gw_gefahrgut_only"]},"10":{"name":"Patrol car","capabilities":["fustw","fustw_or_police_motorcycle","police_car_or_service_group_leader"]},"12":{"name":"MCV"},"13":{"name":"Quint","capabilities":["fire","dlk","dlk_or_tm50","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"15":{"name":"Fly-Car"},"16":{"name":"SWAT Armoured Vehicle"},"17":{"name":"Large ARFF Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw","ab_ruest_rw","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"19":{"name":"K-9 Unit"},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"23":{"name":"Police Motorcycle"},"26":{"name":"SWAT SUV"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire","gwl2wasser","gwl2wasser_only","gwl2wasser_all","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"43":{"name":"FBI Investigation Wagon"},"45":{"name":"FBI Bomb Technician Vehicle"},"46":{"name":"FBI Surveillance Drone"},"47":{"name":"Police Supervisor / Sheriff Unit"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"55":{"name":"Patrol Boat"},"56":{"name":"Warden's Truck"},"57":{"name":"EMS Mass Casualty Trailer (large)"},"58":{"name":"EMS Mass Casualty Trailer (small)"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender"},"80":{"name":"Medium ARFF Crash Tender"},"81":{"name":"Small K9 Carrier"},"82":{"name":"Large K9 Carrier"},"83":{"name":"Riot Police Van"},"84":{"name":"Riot Police Bus"},"85":{"name":"Riot Police Trailer"},"86":{"name":"Police Crew Carrier"},"87":{"name":"Police Prisoner Van"},"88":{"name":"Police ATV Trailer"},"89":{"name":"Police MCV"},"90":{"name":"Tactical Rescue Truck"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"101":{"name":"Police Traffic Control Unit"},"102":{"name":"Police Traffic Blocker Unit"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"108":{"name":"Police Wrecker"},"109":{"name":"CCTU"},"110":{"name":"Tactical Rescue Truck with Boat"},"111":{"name":"Police Water Rescue Boat Trailer"},"112":{"name":"Police Water Rescue Double Boat Trailer"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"119":{"name":"Small Police Equipment Trailer"},"120":{"name":"Large Police Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC"},"128":{"name":"FBPC"},"129":{"name":"USARC"},"130":{"name":"HazMat"},"131":{"name":"ICPC"},"132":{"name":"CWFT"},"133":{"name":"FWDC"},"134":{"name":"FRC"}}).map(([id, t]) => [id, t.name]));
+    Object.entries({"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine","capabilities":["fire","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw","elw1_or_elw2","elw1_or_elw_drone"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["rtw","any_rtw","ktw_or_rtw","ktw_or_rtw_2","ambulance_or_rapid_responder"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser","gwl2wasser_only","gwl2wasser_all","water_damage_pump"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat","capabilities":["gwgefahrgut","gw_gefahrgut_only"]},"10":{"name":"Patrol car","capabilities":["fustw","fustw_or_police_motorcycle","police_car_or_service_group_leader"]},"12":{"name":"MCV","capabilities":["elw1_or_elw2","elw2","elw2_or_ab_elw","elw1_or_elw_drone","elw2_or_elw2_drone"]},"13":{"name":"Quint","capabilities":["fire","dlk","dlk_or_tm50","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"15":{"name":"Fly-Car"},"16":{"name":"SWAT Armoured Vehicle"},"17":{"name":"Large ARFF Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw","ab_ruest_rw","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"19":{"name":"K-9 Unit"},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"23":{"name":"Police Motorcycle"},"26":{"name":"SWAT SUV"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire","gwl2wasser","gwl2wasser_only","gwl2wasser_all","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"43":{"name":"FBI Investigation Wagon"},"45":{"name":"FBI Bomb Technician Vehicle"},"46":{"name":"FBI Surveillance Drone"},"47":{"name":"Police Supervisor / Sheriff Unit"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"55":{"name":"Patrol Boat"},"56":{"name":"Warden's Truck"},"57":{"name":"EMS Mass Casualty Trailer (large)"},"58":{"name":"EMS Mass Casualty Trailer (small)"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender"},"80":{"name":"Medium ARFF Crash Tender"},"81":{"name":"Small K9 Carrier"},"82":{"name":"Large K9 Carrier"},"83":{"name":"Riot Police Van"},"84":{"name":"Riot Police Bus"},"85":{"name":"Riot Police Trailer"},"86":{"name":"Police Crew Carrier"},"87":{"name":"Police Prisoner Van"},"88":{"name":"Police ATV Trailer"},"89":{"name":"Police MCV"},"90":{"name":"Tactical Rescue Truck"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"101":{"name":"Police Traffic Control Unit"},"102":{"name":"Police Traffic Blocker Unit"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"108":{"name":"Police Wrecker"},"109":{"name":"CCTU"},"110":{"name":"Tactical Rescue Truck with Boat"},"111":{"name":"Police Water Rescue Boat Trailer"},"112":{"name":"Police Water Rescue Double Boat Trailer"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"119":{"name":"Small Police Equipment Trailer"},"120":{"name":"Large Police Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC"},"128":{"name":"FBPC"},"129":{"name":"USARC"},"130":{"name":"HazMat"},"131":{"name":"ICPC"},"132":{"name":"CWFT"},"133":{"name":"FWDC"},"134":{"name":"FRC"}}).map(([id, t]) => [id, t.name]));
 
 /** id -> name, learnt from the game and shared across modules. */
 const LEARNT_TYPES_KEY = 'ymca-vehicle-types';
@@ -2014,6 +2014,15 @@ const MM_REQUIREMENTS = {
     ambulances: { flag: 'any_rtw', label: 'Ambulances', icon: 'cross', source: 'the "Rescue Unit" AAO selects on any_rtw=1' },
     heavy_rescue_vehicles: { flag: 'rw', label: 'Heavy rescue', icon: 'arm', source: 'the "F-HRV" AAO selects on rw=1' },
     mobile_air_vehicles: { flag: 'gwa', label: 'Mobile air', icon: 'wind', source: 'the "F-MA" AAO selects on gwa=1' },
+    /* Read from one page carrying both, not guessed from the name. In the same
+     * selection table the MCV's checkbox carries `elw2` and the battalion chief
+     * unit's does not — it carries `elw` and `elw1_or_elw2` — so `elw2` is what
+     * separates them. `mobile_command_vehicles` derived to nothing, because
+     * stripping `_vehicles` leaves `mobile_command`, which is not a flag. */
+    mobile_command_vehicles: {
+        flag: 'elw2', label: 'Mobile command', icon: 'star',
+        source: 'the MCV is flagged elw2 where the battalion chief unit is only elw',
+    },
     platform_trucks: { flag: 'dlk', label: 'Platform trucks', icon: 'ladder', source: 'the "F-PlT" AAO selects on dlk=1' },
     water_tankers: { flag: 'gwl2wasser_only', label: 'Water tankers', icon: 'tank', source: 'the "F-WaTa" AAO' },
     /* The game calls this one two different things and says so itself: mission
@@ -2073,20 +2082,16 @@ const MM_REQUIREMENTS = {
  * *transport to hospital* afterwards, which is a different question and not
  * this one.
  */
-function mmPatients(record) {
-    /* The window says it three ways and which one is showing depends on where
-     * the mission has got to, so all three are read in order of how sure each is.
-     *
-     *  1. What is still missing — "1x We need: Ambulance". Rendered only while
-     *     an ambulance is actually wanted, so surest when it is there.
-     *  2. The patient panel's own header — "1 Patient". Present whenever the
-     *     mission has patients at all, including while a first responder is
-     *     already on the way and nothing is being flagged as missing. This is
-     *     the one that was missing, and why an ambulance went unasked for.
-     *  3. One element per patient, the same number said a third way.
-     *
-     * Only then `additional.possible_patient`, which is the most this mission
-     * *can* produce rather than what it did. */
+/**
+ * Every reading the window offers, each one on its own.
+ *
+ * THE SELECTOR LIST WAS A BUG. `querySelectorAll('#a strong, #b strong')`
+ * answers in DOCUMENT order, not in the order the selectors are written, and
+ * `#patient_button_form` sits before `#patient_button_text` in the page. So
+ * "most sure first" was never what happened — whichever element the page put
+ * first won. They are separate queries now, tried in the order written.
+ */
+function mmPatientReadings(record) {
     const firstNumber = (sel, re) => {
         for (const el of document.querySelectorAll(sel)) {
             const m = re.exec((el.textContent || '').trim());
@@ -2094,24 +2099,49 @@ function mmPatients(record) {
         }
         return null;
     };
+    return {
+        /* The patient panel's own header counts every patient at the mission,
+         * treated or not, and keeps counting them until they are taken away. */
+        stated: firstNumber('#patient_button_text strong', /^(\d+)\b/),
+        statedInForm: firstNumber('#patient_button_form strong', /^(\d+)\b/),
+        /* One element per patient, the same number said a third way. */
+        each: document.querySelectorAll('.mission_patient, [id^="patient_form_"]').length,
+        /* "1x We need: Ambulance" is how many *more* are wanted, not the total. */
+        missing: firstNumber('#patient_missing_requirements strong', /^(\d+)\s*x/i),
+        /* The most this mission CAN produce, which is not what it did. */
+        possible: Number(record?.additional?.possible_patient || record?.patients) || 0,
+        missingBlocks: [...document.querySelectorAll('#patient_missing_requirements')]
+            .map((el) => (getComputedStyle(el).display === 'none' ? 'hidden' : 'shown')),
+    };
+}
 
-    /* The patient panel's own header counts every patient at the mission,
-     * treated or not, and keeps counting them until they are taken away. That
-     * is the number this wants. */
-    const stated = firstNumber('#patient_button_text strong, #patient_button_form strong', /^(\d+)\b/);
-    if (stated) return { count: stated, total: true, from: 'window' };
-
-    const each = document.querySelectorAll('.mission_patient, [id^="patient_form_"]').length;
-    if (each) return { count: each, total: true, from: 'rows' };
-
-    /* "1x We need: Ambulance" is how many *more* are wanted, not how many the
-     * mission has. Subtracting what is already there from it would ask for one
-     * ambulance and then answer itself with the one already treating somebody. */
-    const missing = firstNumber('#patient_missing_requirements strong', /^(\d+)\s*x/i);
-    if (missing) return { count: missing, total: false, from: 'missing' };
-
-    const possible = Number(record?.additional?.possible_patient || record?.patients) || 0;
-    return possible ? { count: possible, total: true, from: 'catalogue' } : null;
+/**
+ * How many ambulances the patients want.
+ *
+ * `requirements` says nothing about patients; the catalogue carries them under
+ * `additional.possible_patient` as the most this mission can produce. The
+ * window knows the real number for this instance and says it three ways, so
+ * all three are read in the order of how sure each is.
+ *
+ * THE CATALOGUE FIGURE NO LONGER SENDS ANYTHING. `possible_patient` is the
+ * most a mission *can* produce — 8 on a tunnel fire — and ticking eight
+ * ambulances because eight were possible is exactly the inference this repo
+ * does not make. It is `measured: false`, it is said under the table in those
+ * words, and nothing is picked for it.
+ *
+ * One ambulance per patient. `chances.patient_transport` is the chance of a
+ * *transport to hospital* afterwards, which is a different question.
+ */
+function mmPatients(record) {
+    const r = mmPatientReadings(record);
+    if (r.stated) return { count: r.stated, total: true, from: 'window', measured: true };
+    if (r.statedInForm) {
+        return { count: r.statedInForm, total: true, from: 'window', measured: true };
+    }
+    if (r.each) return { count: r.each, total: true, from: 'rows', measured: true };
+    if (r.missing) return { count: r.missing, total: false, from: 'missing', measured: true };
+    return r.possible
+        ? { count: r.possible, total: true, from: 'catalogue', measured: false } : null;
 }
 
 /** Where the window keeps its patients, for a window that keeps them elsewhere. */
@@ -2120,10 +2150,12 @@ function mmPatientProbe() {
         .map((el) => String(el[attr] || '').replace(/\d+/g, '#')))].filter(Boolean).slice(0, 15);
     return {
         detected: mmPatients(null),
+        /* Each reading on its own. "from: window" was not enough to say which
+         * element produced a count nobody could see on the mission — numbers
+         * and element names only, never what the window says around them. */
+        readings: mmPatientReadings(null),
         patientIdShapes: shapes('[id*="patient"]', 'id'),
         patientClasses: shapes('[class*="patient"]', 'className'),
-        missingBlockHidden: [...document.querySelectorAll('#patient_missing_requirements')]
-            .map((el) => getComputedStyle(el).display === 'none'),
     };
 }
 
@@ -2306,7 +2338,7 @@ const MM_TYPES_KEY = 'ymca-missionmagician-types';
  * covers until it has watched enough selection tables to learn the type — so
  * every report that names a new type belongs in that file.
  */
-const MM_SHIPPED_TYPES = {"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine","capabilities":["fire","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw","elw1_or_elw2","elw1_or_elw_drone"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["rtw","any_rtw","ktw_or_rtw","ktw_or_rtw_2","ambulance_or_rapid_responder"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser","gwl2wasser_only","gwl2wasser_all","water_damage_pump"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat","capabilities":["gwgefahrgut","gw_gefahrgut_only"]},"10":{"name":"Patrol car","capabilities":["fustw","fustw_or_police_motorcycle","police_car_or_service_group_leader"]},"12":{"name":"MCV"},"13":{"name":"Quint","capabilities":["fire","dlk","dlk_or_tm50","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"15":{"name":"Fly-Car"},"16":{"name":"SWAT Armoured Vehicle"},"17":{"name":"Large ARFF Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw","ab_ruest_rw","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"19":{"name":"K-9 Unit"},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"23":{"name":"Police Motorcycle"},"26":{"name":"SWAT SUV"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire","gwl2wasser","gwl2wasser_only","gwl2wasser_all","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"43":{"name":"FBI Investigation Wagon"},"45":{"name":"FBI Bomb Technician Vehicle"},"46":{"name":"FBI Surveillance Drone"},"47":{"name":"Police Supervisor / Sheriff Unit"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"55":{"name":"Patrol Boat"},"56":{"name":"Warden's Truck"},"57":{"name":"EMS Mass Casualty Trailer (large)"},"58":{"name":"EMS Mass Casualty Trailer (small)"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender"},"80":{"name":"Medium ARFF Crash Tender"},"81":{"name":"Small K9 Carrier"},"82":{"name":"Large K9 Carrier"},"83":{"name":"Riot Police Van"},"84":{"name":"Riot Police Bus"},"85":{"name":"Riot Police Trailer"},"86":{"name":"Police Crew Carrier"},"87":{"name":"Police Prisoner Van"},"88":{"name":"Police ATV Trailer"},"89":{"name":"Police MCV"},"90":{"name":"Tactical Rescue Truck"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"101":{"name":"Police Traffic Control Unit"},"102":{"name":"Police Traffic Blocker Unit"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"108":{"name":"Police Wrecker"},"109":{"name":"CCTU"},"110":{"name":"Tactical Rescue Truck with Boat"},"111":{"name":"Police Water Rescue Boat Trailer"},"112":{"name":"Police Water Rescue Double Boat Trailer"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"119":{"name":"Small Police Equipment Trailer"},"120":{"name":"Large Police Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC"},"128":{"name":"FBPC"},"129":{"name":"USARC"},"130":{"name":"HazMat"},"131":{"name":"ICPC"},"132":{"name":"CWFT"},"133":{"name":"FWDC"},"134":{"name":"FRC"}};
+const MM_SHIPPED_TYPES = {"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine","capabilities":["fire","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw","elw1_or_elw2","elw1_or_elw_drone"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["rtw","any_rtw","ktw_or_rtw","ktw_or_rtw_2","ambulance_or_rapid_responder"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser","gwl2wasser_only","gwl2wasser_all","water_damage_pump"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat","capabilities":["gwgefahrgut","gw_gefahrgut_only"]},"10":{"name":"Patrol car","capabilities":["fustw","fustw_or_police_motorcycle","police_car_or_service_group_leader"]},"12":{"name":"MCV","capabilities":["elw1_or_elw2","elw2","elw2_or_ab_elw","elw1_or_elw_drone","elw2_or_elw2_drone"]},"13":{"name":"Quint","capabilities":["fire","dlk","dlk_or_tm50","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"15":{"name":"Fly-Car"},"16":{"name":"SWAT Armoured Vehicle"},"17":{"name":"Large ARFF Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw","ab_ruest_rw","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"19":{"name":"K-9 Unit"},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"23":{"name":"Police Motorcycle"},"26":{"name":"SWAT SUV"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire","gwl2wasser","gwl2wasser_only","gwl2wasser_all","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"43":{"name":"FBI Investigation Wagon"},"45":{"name":"FBI Bomb Technician Vehicle"},"46":{"name":"FBI Surveillance Drone"},"47":{"name":"Police Supervisor / Sheriff Unit"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"55":{"name":"Patrol Boat"},"56":{"name":"Warden's Truck"},"57":{"name":"EMS Mass Casualty Trailer (large)"},"58":{"name":"EMS Mass Casualty Trailer (small)"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender"},"80":{"name":"Medium ARFF Crash Tender"},"81":{"name":"Small K9 Carrier"},"82":{"name":"Large K9 Carrier"},"83":{"name":"Riot Police Van"},"84":{"name":"Riot Police Bus"},"85":{"name":"Riot Police Trailer"},"86":{"name":"Police Crew Carrier"},"87":{"name":"Police Prisoner Van"},"88":{"name":"Police ATV Trailer"},"89":{"name":"Police MCV"},"90":{"name":"Tactical Rescue Truck"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"101":{"name":"Police Traffic Control Unit"},"102":{"name":"Police Traffic Blocker Unit"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"108":{"name":"Police Wrecker"},"109":{"name":"CCTU"},"110":{"name":"Tactical Rescue Truck with Boat"},"111":{"name":"Police Water Rescue Boat Trailer"},"112":{"name":"Police Water Rescue Double Boat Trailer"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"119":{"name":"Small Police Equipment Trailer"},"120":{"name":"Large Police Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC"},"128":{"name":"FBPC"},"129":{"name":"USARC"},"130":{"name":"HazMat"},"131":{"name":"ICPC"},"132":{"name":"CWFT"},"133":{"name":"FWDC"},"134":{"name":"FRC"}};
 
 function mmKnownTypes() {
     let learnt = {};
@@ -2773,7 +2805,7 @@ async function mmPlan(page, ctx, cfg) {
          * counted into the ambulance line rather than shown beside it — one each
          * unless told otherwise. An `ambulances` requirement and the patients
          * are the same ambulances, so the larger of the two stands. */
-        if (patients) {
+        if (patients && patients.measured) {
             const perPatient = cfg.ambulancePerPatient === false ? 1 : patients.count;
             const existing = wants.find(([key]) => key === 'ambulances');
             if (existing) existing[1] = Math.max(existing[1], perPatient);
@@ -3963,7 +3995,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
       <td>${ctx.esc(l.label)}${mmIcon(l.icon)}${
     l.key === 'patients' && plan.patients
         ? `<small> &middot; ${plan.patients.count} patient${
-            plan.patients.count > 1 ? 's' : ''}</small>` : ''}${
+            plan.patients.count > 1 ? 's' : ''}, as this window states</small>` : ''}${
     /* Nothing here maps this one; the flag was read off the checkboxes in this
      * very table. It counts the same, and it says which it is. */
     l.derived ? `<small title="matched on the game's own ${ctx.esc(l.derived)} flag,
@@ -3997,6 +4029,10 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         ${plan.crewTraining.map((t) => `Crew: <b>${t.count}</b> with
           ${ctx.esc(t.label)} training`).join('; ')} &mdash; they ride on whatever is sent.
         <span data-crew-seats>${mmSeatSentence()}</span></p>` : ''}
+
+      ${plan.patients && !plan.patients.measured ? `<p class="text-muted" style="margin:0 0 8px">
+        The catalogue says this mission can produce up to <b>${plan.patients.count}</b> patients.
+        This window has not said how many it has, so no ambulance is picked for them.</p>` : ''}
 
       ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.scene.total} already at the mission or on the way, subtracted above${
@@ -4410,18 +4446,24 @@ YMCA.register({
         <b>What you have run</b>
         <table id="to-table" style="margin-top:8px">
           <thead><tr><th class="ymca-num">Yours</th><th class="ymca-num">Nearby</th>
-            <th>Mission</th><th class="ymca-num">Listed</th></tr></thead>
+            <th>Mission</th><th class="ymca-num">Listed</th>
+            <th class="ymca-num" title="what the ledger says this mission paid">Paid</th></tr></thead>
           <tbody>${rows.map((r) => `
             <tr><td class="ymca-num">${r.yours || '<span class="ymca-dim">&ndash;</span>'}</td>
               <td class="ymca-num">${r.runs}</td>
               <td>${r.icon ? `<img src="${ctx.esc(r.icon)}" width="16" height="16" alt=""
                 style="vertical-align:-3px;margin-right:6px">` : ''}${ctx.esc(r.name)}</td>
               <td class="ymca-num">${r.listed === null
-        ? '<span class="ymca-warn">none listed</span>' : ctx.fmt(r.listed)}</td></tr>`).join('')}
+        ? '<span class="ymca-warn">none listed</span>' : ctx.fmt(r.listed)}</td>
+              <td class="ymca-num" data-paid="${ctx.esc(toNameKey(r.name))}"
+                ><span class="ymca-dim">reading\u2026</span></td></tr>`).join('')}
           </tbody>
         </table>
-        <p class="ymca-sub" style="margin-top:8px">Rows where the game lists nothing are the ones
-          worth having &mdash; those are what the planner is guessing at.</p>
+        <p class="ymca-sub" style="margin-top:8px"><b>Listed</b> is the game's own figure from
+          the mission list. <b>Paid</b> is what its own ledger wrote down, averaged over the
+          lines named after that mission &mdash; measured, not paired with anything. Rows where
+          the game lists nothing are the ones worth having: those are what the planner is
+          guessing at.</p>
       </div>` : `
       <div class="ymca-card">
         <b>Nothing counted yet</b>
@@ -4439,6 +4481,20 @@ YMCA.register({
         <textarea id="to-out" rows="10" readonly style="width:100%;margin-top:10px;
           font-family:ui-monospace,monospace;font-size:11.5px"></textarea>
       </div>`;
+
+        /* The ledger is read on open rather than on a button, because a column
+         * that says "reading\u2026" until somebody presses something is a column
+         * nobody reads. The button stays: it is how the ledger's own table and
+         * the copy are asked for. */
+        toReadLedger().then(({ rows }) => {
+            toFillPaid(el, ctx, toSummariseLedger(rows));
+        }).catch((err) => {
+            el.querySelectorAll('[data-paid]').forEach((cell) => {
+                cell.innerHTML = '<span class="ymca-dim" title="the ledger could not be read"'
+                    + '>&ndash;</span>';
+            });
+            ctx.log.warn('credits ledger unreadable on open', err.message);
+        });
 
         /* The span changes what every number on the panel means, so the panel is
          * built again rather than patched in six places. */
@@ -4468,6 +4524,7 @@ YMCA.register({
                     const sum = toSummariseLedger(rows);
                     status.textContent = `${sum.lines} lines from ${path}.`;
                     el.querySelector('#to-ledger').innerHTML = toLedgerHtml(sum, ctx);
+                    toFillPaid(el, ctx, sum);
                     ctx.log.info('read the credits ledger', `${sum.lines} lines, ${sum.missions.length} kinds`);
                     if (copy) {
                         ctx.clipboard(JSON.stringify({
@@ -4574,6 +4631,34 @@ function toSummarise(log, listed) {
         .sort((a, b) => b.runs - a.runs);
 }
 
+/**
+ * Write the ledger's own figure into every row of the run table.
+ *
+ * THIS IS MEASURED AND THE COLUMN BESIDE IT IS NOT THE SAME THING. The balance
+ * delta was withdrawn because a rise cannot be told apart from a daily task
+ * landing in the same second. A ledger line is the game writing down what it
+ * paid and what it paid it for, so averaging those is reading rather than
+ * inferring — and the count is shown beside it, because one line is not an
+ * average.
+ *
+ * A mission with no line yet says so rather than showing a zero: nothing run
+ * since the ledger page begins is not the same as nothing paid.
+ */
+let toLastLedger = null;
+
+function toFillPaid(el, ctx, sum) {
+    toLastLedger = sum;
+    const byName = new Map(sum.missions.map((m) => [toNameKey(m.name), m]));
+    for (const cell of el.querySelectorAll('[data-paid]')) {
+        const m = byName.get(cell.dataset.paid);
+        cell.innerHTML = m
+            ? `${ctx.fmt(m.average)} <span class="ymca-dim" style="font-size:11px"
+                title="${m.runs} line${m.runs > 1 ? 's' : ''} in the ledger">\u00d7${m.runs}</span>`
+            : '<span class="ymca-dim" title="no line named after it on this page of the ledger"'
+                + '>&ndash;</span>';
+    }
+}
+
 /** The ledger, as a table: what each mission paid, and how much it varied. */
 function toLedgerHtml(sum, ctx) {
     if (!sum.missions.length && !sum.patients.lines) {
@@ -4613,6 +4698,12 @@ function toExport(log, listed) {
         missionsYours: log.filter((e) => e.mine).length,
         missionsWhoseOwnerIsUnknown: log.filter((e) => e.mine === undefined).length,
         missionsMeasured: log.filter((e) => e.alone && e.delta > 0).length,
+        /* What the game wrote down, by name, so what a mission really pays can
+         * go into data/missions.json instead of being asked for again. Names
+         * and amounts, which are the game's own constants. */
+        paidByName: toLastLedger ? toLastLedger.missions.map((m) => ({
+            name: m.name, lines: m.runs, average: m.average, low: m.low, high: m.high,
+        })) : null,
         payoutReadingRetired: 'a balance rise cannot be told apart from a daily reward',
         byMissionType: rows.map((r) => ({
             type: Number(r.type) || r.type,
@@ -4714,6 +4805,16 @@ async function toReadLedger() {
         }
     }
     throw new Error(lastError || 'no credits page answered');
+}
+
+/**
+ * One name, spelled one way.
+ *
+ * The catalogue names a mission and the ledger names the line after it, so the
+ * two meet on the name — but only once case and spacing stop mattering.
+ */
+function toNameKey(name) {
+    return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -5171,25 +5272,28 @@ YMCA.register({
  * next vehicle in status 5 after each pick, so the whole queue is clicked
  * through in one place. That is what this is for.
  *
- * IT DOES NOT WORK YET, AND THAT IS ON PURPOSE.
+ * WHICH FIELD CARRIES THE STATUS IS ANSWERED. The first fleet capture came
+ * back with `fms_real` and `fms_show` on every vehicle, both running 1 to 6
+ * across a fleet of 83, so the status is the game's own field and 5 is a value
+ * it really takes. Nothing here guesses at it any more, and the capture button
+ * that found it stays for the day the field is renamed. `hospital_*` and
+ * `police_cell_*` sit on the same record, which is where the two branches of
+ * status 5 are told apart.
  *
- * What is missing is the markup of the game's own vehicle window while it is
- * transporting: what holds the hospitals, what a pick actually is, and what
- * the page does afterwards. Nobody here has seen one. Guessing a selector that
- * clicks a destination on somebody's behalf is exactly the thing this repo
- * does not do — a wrong guess sends a patient to the wrong hospital and there
- * is no undo for that.
+ * So FINDING the vehicles works: the list below is read from `/api/vehicles`.
  *
- * So it ships the way MissionMagician did for three rounds: the switch, a
- * plain warning, and the button that collects the missing piece. Press it on a
- * transporting vehicle and the answer comes back as structure — path shapes,
- * element names, form fields. Never a hospital name, never a patient, never an
- * address.
+ * WHAT DOES NOT WORK YET IS THE PICKING. The markup of the game's own vehicle
+ * window while it is transporting has not been seen — what holds the
+ * destinations, what a pick actually is, and what the page does afterwards.
+ * Guessing a selector that clicks a destination on somebody's behalf is
+ * exactly the thing this repo does not do: a wrong guess sends a patient to
+ * the wrong hospital and there is no undo for that. So the list links to each
+ * vehicle and stops there, and the capture button collects the missing piece —
+ * structure only, never a hospital name, a patient or an address.
  *
- * WHICH FIELD CARRIES THE STATUS IS ALSO UNKNOWN, so the capture does not
- * assume one. It reads the fleet and reports every field whose values across
- * the whole fleet are few and small — which is what a status looks like and
- * what an id does not. That names the field rather than betting on `fms`.
+ * THE FIRST CAPTURE WAS TAKEN ON THE MAP, which is why it came back with 67
+ * building links and no destinations. The panel says where it is being pressed
+ * now, so that round trip is not repeated.
  * ------------------------------------------------------------------------ */
 
 /** Digits out: a path is reported as a shape, not as a particular vehicle. */
@@ -5243,6 +5347,20 @@ function hfCapturePage() {
 }
 
 /**
+ * The fields the first capture found carrying the status, in the order they
+ * are trusted. `fms_real` is what the vehicle IS; `fms_show` is what the game
+ * displays, which can lag it.
+ */
+const HF_STATUS_FIELDS = ['fms_real', 'fms_show'];
+const HF_TRANSPORTING = 5;
+
+/** Your vehicles in status 5, as the game's own field reports them. */
+function hfTransporting(vehicles) {
+    return (vehicles || []).filter((v) => HF_STATUS_FIELDS
+        .some((f) => Number(v?.[f]) === HF_TRANSPORTING));
+}
+
+/**
  * What the fleet says about status, without saying anything about the fleet.
  *
  * A field is reported only when the whole fleet has few distinct values for it
@@ -5282,51 +5400,79 @@ function hfCaptureFleet(vehicles) {
 }
 
 function hfPanel(el, ctx) {
+    const onVehiclePage = /^\/vehicles\/\d+/.test(location.pathname);
     el.innerHTML = `
-    <div class="ymca-note warn"><b>HighFive does not work yet.</b>
-      What it needs is the markup of one of your vehicles while it is transporting, and nobody
-      here has seen one. Guessing which link is a hospital would mean guessing where a patient
-      goes, and that cannot be taken back.</div>
-
     <div class="ymca-card">
-      <b>What it will do</b>
-      <p class="ymca-dim" style="margin:6px 0 0">Show the pick-a-destination window for a vehicle
-        in status 5 &mdash; hospital for the ambulance service, prison for the police &mdash; and
-        move straight to the next vehicle in status 5 once you have picked, so a queue of
-        transports is clicked through in one place instead of one page at a time.</p>
+      <b>Transporting right now</b>
+      <p class="ymca-dim" style="margin:6px 0 9px">Your vehicles in status 5, read from the
+        game's own <code>fms_real</code>. Each one opens where the destination is picked.</p>
+      <div id="hf-list"><span class="ymca-dim">Reading your fleet\u2026</span></div>
+      <button class="ymca-btn" data-do="again" style="margin-top:10px">Read it again</button>
     </div>
+
+    <div class="ymca-note warn"><b>Picking for you does not work yet.</b>
+      Finding the vehicles does \u2014 that is the list above. What is missing is the markup of
+      one of your vehicles <em>while it is transporting</em>, so nothing here can move you on to
+      the next one after you have picked. Guessing which link is a hospital would mean guessing
+      where a patient goes, and that cannot be taken back.</div>
 
     <div class="ymca-card">
       <b>Send the missing piece</b>
-      <p class="ymca-dim" style="margin:6px 0 9px">Open a vehicle of yours that is
-        <b>transporting</b> &mdash; the page where the game asks you to pick a hospital or a
-        prison. Leave that page open, open YMCA from the navbar, and press this. It copies
-        <em>structure</em>: path shapes, element names, form field names. No hospital names, no
-        patients, no addresses, no vehicle names.</p>
+      <p class="ymca-dim" style="margin:6px 0 9px">Open one of the vehicles above, leave that
+        page open, open YMCA from the navbar and press this. It copies <em>structure</em>: path
+        shapes, element names, form field names. No hospital names, no patients, no addresses,
+        no vehicle names.</p>
       <div class="ymca-row">
-        <button class="ymca-btn primary" data-do="capture">Copy this vehicle window</button>
+        <button class="ymca-btn ${onVehiclePage ? 'primary' : ''}" data-do="capture"
+          >Copy this vehicle window</button>
         <button class="ymca-btn" data-do="fleet">Copy what your fleet says about status</button>
       </div>
-      <p class="ymca-dim" style="margin:9px 0 0;font-size:12px" id="hf-where"></p>
+      <p class="${onVehiclePage ? 'ymca-dim' : 'ymca-warn'}" style="margin:9px 0 0;font-size:12px"
+        id="hf-where"></p>
     </div>`;
 
-    el.querySelector('#hf-where').textContent = `You are on ${hfShape(location.pathname)}.`;
+    /* Where it is being pressed, said before it is pressed. The first capture
+     * came back from the map with 67 building links and no destinations, and
+     * that was a whole round trip spent on a button that should have said so. */
+    el.querySelector('#hf-where').textContent = onVehiclePage
+        ? `You are on ${hfShape(location.pathname)} \u2014 this is the page to capture.`
+        : `You are on ${hfShape(location.pathname)}, which is not a vehicle page. Capturing from `
+          + 'here answers nothing about transporting; open a vehicle above first.';
+
+    const paint = async () => {
+        const list = el.querySelector('#hf-list');
+        try {
+            const moving = hfTransporting(await ctx.game('/api/vehicles'));
+            list.innerHTML = moving.length
+                ? `<div class="ymca-pick">${moving.map((v) => `<div><a href="/vehicles/${
+                    encodeURIComponent(v.id)}" class="ymca-accent">${ctx.esc(v.caption || `#${v.id}`)
+                }</a> <small>${ctx.esc(v.vehicle_type_caption || '')}</small></div>`).join('')}</div>
+          <p class="ymca-dim" style="margin:8px 0 0;font-size:12px">${moving.length}
+            transporting.</p>`
+                : '<span class="ymca-dim">Nothing of yours is in status 5 right now.</span>';
+        } catch (err) {
+            list.innerHTML = `<span class="ymca-bad">Your fleet could not be read (${
+                ctx.esc(err.message)}).</span>`;
+        }
+    };
+    paint();
 
     el.addEventListener('click', async (e) => {
         const btn = e.target.closest('[data-do]');
         if (!btn) return;
+        if (btn.dataset.do === 'again') { paint(); return; }
         if (btn.dataset.do === 'capture') {
-            const report = { ymca: YMCA.version, what: 'highfive-window', at: new Date().toISOString(), ...hfCapturePage() };
+            const report = { ymca: YMCA.version, what: 'highfive-window', at: new Date().toISOString(), onVehiclePage, ...hfCapturePage() };
             ctx.store.write('lastCapture', report);
             ctx.log.info('captured a vehicle window', report.path);
-            ctx.clipboard(JSON.stringify(report, null, 2), 'the vehicle window’s structure');
+            ctx.clipboard(JSON.stringify(report, null, 2), 'the vehicle window\u2019s structure');
             return;
         }
         if (btn.dataset.do === 'fleet') {
-            ctx.status('Reading your fleet…');
+            ctx.status('Reading your fleet\u2026');
             try {
                 const vehicles = await ctx.game('/api/vehicles');
-                const report = { ymca: YMCA.version, what: 'highfive-fleet', at: new Date().toISOString(), ...hfCaptureFleet(vehicles || []) };
+                const report = { ymca: YMCA.version, what: 'highfive-fleet', at: new Date().toISOString(), transporting: hfTransporting(vehicles).length, ...hfCaptureFleet(vehicles || []) };
                 ctx.store.write('lastFleet', report);
                 ctx.clipboard(JSON.stringify(report, null, 2), 'what your fleet says about status');
             } catch (err) {
@@ -5383,7 +5529,7 @@ const ENDPOINTS = [
 /* The type ids data/vehicle-types.json already carries, so the vehicle export
  * can say which of the player's types are new rather than making somebody
  * compare two lists by eye. */
-const SHIPPED_VEHICLE_TYPES = {"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine","capabilities":["fire","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw","elw1_or_elw2","elw1_or_elw_drone"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["rtw","any_rtw","ktw_or_rtw","ktw_or_rtw_2","ambulance_or_rapid_responder"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser","gwl2wasser_only","gwl2wasser_all","water_damage_pump"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat","capabilities":["gwgefahrgut","gw_gefahrgut_only"]},"10":{"name":"Patrol car","capabilities":["fustw","fustw_or_police_motorcycle","police_car_or_service_group_leader"]},"12":{"name":"MCV"},"13":{"name":"Quint","capabilities":["fire","dlk","dlk_or_tm50","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"15":{"name":"Fly-Car"},"16":{"name":"SWAT Armoured Vehicle"},"17":{"name":"Large ARFF Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw","ab_ruest_rw","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"19":{"name":"K-9 Unit"},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"23":{"name":"Police Motorcycle"},"26":{"name":"SWAT SUV"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire","gwl2wasser","gwl2wasser_only","gwl2wasser_all","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"43":{"name":"FBI Investigation Wagon"},"45":{"name":"FBI Bomb Technician Vehicle"},"46":{"name":"FBI Surveillance Drone"},"47":{"name":"Police Supervisor / Sheriff Unit"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"55":{"name":"Patrol Boat"},"56":{"name":"Warden's Truck"},"57":{"name":"EMS Mass Casualty Trailer (large)"},"58":{"name":"EMS Mass Casualty Trailer (small)"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender"},"80":{"name":"Medium ARFF Crash Tender"},"81":{"name":"Small K9 Carrier"},"82":{"name":"Large K9 Carrier"},"83":{"name":"Riot Police Van"},"84":{"name":"Riot Police Bus"},"85":{"name":"Riot Police Trailer"},"86":{"name":"Police Crew Carrier"},"87":{"name":"Police Prisoner Van"},"88":{"name":"Police ATV Trailer"},"89":{"name":"Police MCV"},"90":{"name":"Tactical Rescue Truck"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"101":{"name":"Police Traffic Control Unit"},"102":{"name":"Police Traffic Blocker Unit"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"108":{"name":"Police Wrecker"},"109":{"name":"CCTU"},"110":{"name":"Tactical Rescue Truck with Boat"},"111":{"name":"Police Water Rescue Boat Trailer"},"112":{"name":"Police Water Rescue Double Boat Trailer"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"119":{"name":"Small Police Equipment Trailer"},"120":{"name":"Large Police Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC"},"128":{"name":"FBPC"},"129":{"name":"USARC"},"130":{"name":"HazMat"},"131":{"name":"ICPC"},"132":{"name":"CWFT"},"133":{"name":"FWDC"},"134":{"name":"FRC"}};
+const SHIPPED_VEHICLE_TYPES = {"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine","capabilities":["fire","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw","elw1_or_elw2","elw1_or_elw_drone"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["rtw","any_rtw","ktw_or_rtw","ktw_or_rtw_2","ambulance_or_rapid_responder"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser","gwl2wasser_only","gwl2wasser_all","water_damage_pump"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat","capabilities":["gwgefahrgut","gw_gefahrgut_only"]},"10":{"name":"Patrol car","capabilities":["fustw","fustw_or_police_motorcycle","police_car_or_service_group_leader"]},"12":{"name":"MCV","capabilities":["elw1_or_elw2","elw2","elw2_or_ab_elw","elw1_or_elw_drone","elw2_or_elw2_drone"]},"13":{"name":"Quint","capabilities":["fire","dlk","dlk_or_tm50","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"15":{"name":"Fly-Car"},"16":{"name":"SWAT Armoured Vehicle"},"17":{"name":"Large ARFF Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw","ab_ruest_rw","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"19":{"name":"K-9 Unit"},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"23":{"name":"Police Motorcycle"},"26":{"name":"SWAT SUV"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire","gwl2wasser","gwl2wasser_only","gwl2wasser_all","lf_only","water_damage_pump","crew_carrier_or_fire_engine","road_rescue_or_fire_engine"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"43":{"name":"FBI Investigation Wagon"},"45":{"name":"FBI Bomb Technician Vehicle"},"46":{"name":"FBI Surveillance Drone"},"47":{"name":"Police Supervisor / Sheriff Unit"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"55":{"name":"Patrol Boat"},"56":{"name":"Warden's Truck"},"57":{"name":"EMS Mass Casualty Trailer (large)"},"58":{"name":"EMS Mass Casualty Trailer (small)"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender"},"80":{"name":"Medium ARFF Crash Tender"},"81":{"name":"Small K9 Carrier"},"82":{"name":"Large K9 Carrier"},"83":{"name":"Riot Police Van"},"84":{"name":"Riot Police Bus"},"85":{"name":"Riot Police Trailer"},"86":{"name":"Police Crew Carrier"},"87":{"name":"Police Prisoner Van"},"88":{"name":"Police ATV Trailer"},"89":{"name":"Police MCV"},"90":{"name":"Tactical Rescue Truck"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"101":{"name":"Police Traffic Control Unit"},"102":{"name":"Police Traffic Blocker Unit"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"108":{"name":"Police Wrecker"},"109":{"name":"CCTU"},"110":{"name":"Tactical Rescue Truck with Boat"},"111":{"name":"Police Water Rescue Boat Trailer"},"112":{"name":"Police Water Rescue Double Boat Trailer"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"119":{"name":"Small Police Equipment Trailer"},"120":{"name":"Large Police Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC"},"128":{"name":"FBPC"},"129":{"name":"USARC"},"130":{"name":"HazMat"},"131":{"name":"ICPC"},"132":{"name":"CWFT"},"133":{"name":"FWDC"},"134":{"name":"FRC"}};
 const SHIPPED_VEHICLE_TYPE_IDS = Object.keys(SHIPPED_VEHICLE_TYPES);
 
 /** Drop what no planner reads. Icons alone are three paths per mission. */

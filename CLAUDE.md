@@ -137,20 +137,32 @@ button that collects the missing piece. MissionMagician was in that state for
 three rounds of captures before it ticked anything, and its capture button is
 still there for a window built differently from the one it was written against.
 
-**HighFive is the one in that state now.** Status 5 is a vehicle transporting —
-an ambulance to a hospital, a patrol car to a prison — and the point is to pick
-the destination and land straight on the next one, the way LSS-Manager does.
-What is missing is the markup of the game's own vehicle window while it is
-transporting: what holds the destinations, what a pick actually is, and what the
-page does afterwards. **Guessing which link is a hospital is guessing where a
-patient goes, and there is no undo for that**, so it ships switched off, with a
-plain warning and two capture buttons. One reads the page YMCA is open over —
-YMCA's window is a lightbox, so the vehicle page behind it is still in the
-document and the capture needs no injection to reach it. The other asks the
-fleet **which field carries the status**, by reporting every field whose values
-across the whole fleet are few and small; an id is never tallied however small
-it happens to be, so a status names itself without the player's own identifiers
-riding along.
+**HighFive is half answered, and says which half.** Status 5 is a vehicle
+transporting — an ambulance to a hospital, a patrol car to a prison — and the
+point is to pick the destination and land straight on the next one, the way
+LSS-Manager does. *Finding* the vehicles works; *picking* for the player does
+not, and the panel separates the two rather than calling itself broken.
+
+**`fms_real` and `fms_show` carry the status**, and the first fleet capture
+settled it: both run 1 to 6 across a fleet of 83, so 5 is a value the field
+really takes. `fms_real` is what the vehicle is, `fms_show` what the game
+displays. `hospital_free_space`, `hospital_max_distance`, `hospital_own`,
+`police_cell_free_space` and `police_cell_max_price` sit on the same
+`/api/vehicles` record, which is where the two branches of status 5 are told
+apart. **That capture found the field without being told its name**, by
+reporting every field whose values across the whole fleet are few and small; an
+id is never tallied however small it happens to be, so a status names itself
+without the player's own identifiers riding along.
+
+What is still missing is the markup of the game's own vehicle window *while it
+is transporting*: what holds the destinations, what a pick actually is, and what
+the page does afterwards. **Guessing which link is a hospital is guessing where a
+patient goes, and there is no undo for that**, so the list links to each vehicle
+and stops.
+
+**A capture button says where it is being pressed, before it is pressed.** The
+first one was taken on the map and came back with 67 building links and no
+destinations — a whole round trip spent on a button that could have said so.
 
 **When a guess turns out wrong, write down what was wrong in the module's
 header.** TrackOps guessed twice — first that the game polls over HTTP, then
@@ -240,6 +252,18 @@ while an ambulance is actually wanted; `#patient_button_text` ("1 Patient"),
 which is there whenever the mission has patients, including while a first
 responder is already on its way; and one element per patient. Read all of them —
 reading only the first misses every call where nothing is being flagged.
+
+**A selector list answers in document order, not in the order it is written.**
+`querySelectorAll('#patient_button_text strong, #patient_button_form strong')`
+reads whichever of the two the page holds first — and `#patient_button_form`
+sits before `#patient_button_text` — so "most sure first" was never what
+happened. Readings that are ranked have to be separate queries.
+
+**`possible_patient` does not dispatch anything.** It is the most a mission
+*can* produce — 8 on a tunnel fire — and ticking eight ambulances because eight
+were possible is the inference this repo does not make. It is marked
+`measured: false`, said under the table in those words, and nothing is picked
+for it. Only what the window itself states sends an ambulance.
 
 **"1x We need: Ambulance" is a shortfall, not a total.** The patient panel's
 header counts every patient at the mission, treated or not, and that is the
@@ -649,7 +673,12 @@ the log without a module having to remember to log it.
   across 102 missions it put a 320-credit call at 3,716. **A reading that cannot
   be made sound is withdrawn, not caveated.** The deltas are still recorded and
   exported, labelled as balance movements rather than payouts, and nothing
-  averages them.
+  averages them. **The ledger is the other half of that rule and it is
+  measured**: `/credits/overview` is the game writing down what it paid and what
+  it paid it for, so a line named after a mission is a reading, not a pairing.
+  TrackOps shows it per row as **Paid**, beside the game's own **Listed**
+  figure, with the number of lines the average is made of — and it still goes no
+  further than TrackOps until asked.
 - **Do not tell the player about a setting they chose.** The vehicle range in a
   mission window is theirs and starts at its widest; "not enough in range, widen
   it" is a tool second-guessing a deliberate choice.

@@ -66,6 +66,15 @@ const MM_REQUIREMENTS = {
     ambulances: { flag: 'any_rtw', label: 'Ambulances', icon: 'cross', source: 'the "Rescue Unit" AAO selects on any_rtw=1' },
     heavy_rescue_vehicles: { flag: 'rw', label: 'Heavy rescue', icon: 'arm', source: 'the "F-HRV" AAO selects on rw=1' },
     mobile_air_vehicles: { flag: 'gwa', label: 'Mobile air', icon: 'wind', source: 'the "F-MA" AAO selects on gwa=1' },
+    /* Read from one page carrying both, not guessed from the name. In the same
+     * selection table the MCV's checkbox carries `elw2` and the battalion chief
+     * unit's does not — it carries `elw` and `elw1_or_elw2` — so `elw2` is what
+     * separates them. `mobile_command_vehicles` derived to nothing, because
+     * stripping `_vehicles` leaves `mobile_command`, which is not a flag. */
+    mobile_command_vehicles: {
+        flag: 'elw2', label: 'Mobile command', icon: 'star',
+        source: 'the MCV is flagged elw2 where the battalion chief unit is only elw',
+    },
     platform_trucks: { flag: 'dlk', label: 'Platform trucks', icon: 'ladder', source: 'the "F-PlT" AAO selects on dlk=1' },
     water_tankers: { flag: 'gwl2wasser_only', label: 'Water tankers', icon: 'tank', source: 'the "F-WaTa" AAO' },
     /* The game calls this one two different things and says so itself: mission
@@ -125,20 +134,16 @@ const MM_REQUIREMENTS = {
  * *transport to hospital* afterwards, which is a different question and not
  * this one.
  */
-function mmPatients(record) {
-    /* The window says it three ways and which one is showing depends on where
-     * the mission has got to, so all three are read in order of how sure each is.
-     *
-     *  1. What is still missing — "1x We need: Ambulance". Rendered only while
-     *     an ambulance is actually wanted, so surest when it is there.
-     *  2. The patient panel's own header — "1 Patient". Present whenever the
-     *     mission has patients at all, including while a first responder is
-     *     already on the way and nothing is being flagged as missing. This is
-     *     the one that was missing, and why an ambulance went unasked for.
-     *  3. One element per patient, the same number said a third way.
-     *
-     * Only then `additional.possible_patient`, which is the most this mission
-     * *can* produce rather than what it did. */
+/**
+ * Every reading the window offers, each one on its own.
+ *
+ * THE SELECTOR LIST WAS A BUG. `querySelectorAll('#a strong, #b strong')`
+ * answers in DOCUMENT order, not in the order the selectors are written, and
+ * `#patient_button_form` sits before `#patient_button_text` in the page. So
+ * "most sure first" was never what happened — whichever element the page put
+ * first won. They are separate queries now, tried in the order written.
+ */
+function mmPatientReadings(record) {
     const firstNumber = (sel, re) => {
         for (const el of document.querySelectorAll(sel)) {
             const m = re.exec((el.textContent || '').trim());
@@ -146,24 +151,49 @@ function mmPatients(record) {
         }
         return null;
     };
+    return {
+        /* The patient panel's own header counts every patient at the mission,
+         * treated or not, and keeps counting them until they are taken away. */
+        stated: firstNumber('#patient_button_text strong', /^(\d+)\b/),
+        statedInForm: firstNumber('#patient_button_form strong', /^(\d+)\b/),
+        /* One element per patient, the same number said a third way. */
+        each: document.querySelectorAll('.mission_patient, [id^="patient_form_"]').length,
+        /* "1x We need: Ambulance" is how many *more* are wanted, not the total. */
+        missing: firstNumber('#patient_missing_requirements strong', /^(\d+)\s*x/i),
+        /* The most this mission CAN produce, which is not what it did. */
+        possible: Number(record?.additional?.possible_patient || record?.patients) || 0,
+        missingBlocks: [...document.querySelectorAll('#patient_missing_requirements')]
+            .map((el) => (getComputedStyle(el).display === 'none' ? 'hidden' : 'shown')),
+    };
+}
 
-    /* The patient panel's own header counts every patient at the mission,
-     * treated or not, and keeps counting them until they are taken away. That
-     * is the number this wants. */
-    const stated = firstNumber('#patient_button_text strong, #patient_button_form strong', /^(\d+)\b/);
-    if (stated) return { count: stated, total: true, from: 'window' };
-
-    const each = document.querySelectorAll('.mission_patient, [id^="patient_form_"]').length;
-    if (each) return { count: each, total: true, from: 'rows' };
-
-    /* "1x We need: Ambulance" is how many *more* are wanted, not how many the
-     * mission has. Subtracting what is already there from it would ask for one
-     * ambulance and then answer itself with the one already treating somebody. */
-    const missing = firstNumber('#patient_missing_requirements strong', /^(\d+)\s*x/i);
-    if (missing) return { count: missing, total: false, from: 'missing' };
-
-    const possible = Number(record?.additional?.possible_patient || record?.patients) || 0;
-    return possible ? { count: possible, total: true, from: 'catalogue' } : null;
+/**
+ * How many ambulances the patients want.
+ *
+ * `requirements` says nothing about patients; the catalogue carries them under
+ * `additional.possible_patient` as the most this mission can produce. The
+ * window knows the real number for this instance and says it three ways, so
+ * all three are read in the order of how sure each is.
+ *
+ * THE CATALOGUE FIGURE NO LONGER SENDS ANYTHING. `possible_patient` is the
+ * most a mission *can* produce — 8 on a tunnel fire — and ticking eight
+ * ambulances because eight were possible is exactly the inference this repo
+ * does not make. It is `measured: false`, it is said under the table in those
+ * words, and nothing is picked for it.
+ *
+ * One ambulance per patient. `chances.patient_transport` is the chance of a
+ * *transport to hospital* afterwards, which is a different question.
+ */
+function mmPatients(record) {
+    const r = mmPatientReadings(record);
+    if (r.stated) return { count: r.stated, total: true, from: 'window', measured: true };
+    if (r.statedInForm) {
+        return { count: r.statedInForm, total: true, from: 'window', measured: true };
+    }
+    if (r.each) return { count: r.each, total: true, from: 'rows', measured: true };
+    if (r.missing) return { count: r.missing, total: false, from: 'missing', measured: true };
+    return r.possible
+        ? { count: r.possible, total: true, from: 'catalogue', measured: false } : null;
 }
 
 /** Where the window keeps its patients, for a window that keeps them elsewhere. */
@@ -172,10 +202,12 @@ function mmPatientProbe() {
         .map((el) => String(el[attr] || '').replace(/\d+/g, '#')))].filter(Boolean).slice(0, 15);
     return {
         detected: mmPatients(null),
+        /* Each reading on its own. "from: window" was not enough to say which
+         * element produced a count nobody could see on the mission — numbers
+         * and element names only, never what the window says around them. */
+        readings: mmPatientReadings(null),
         patientIdShapes: shapes('[id*="patient"]', 'id'),
         patientClasses: shapes('[class*="patient"]', 'className'),
-        missingBlockHidden: [...document.querySelectorAll('#patient_missing_requirements')]
-            .map((el) => getComputedStyle(el).display === 'none'),
     };
 }
 
@@ -825,7 +857,7 @@ async function mmPlan(page, ctx, cfg) {
          * counted into the ambulance line rather than shown beside it — one each
          * unless told otherwise. An `ambulances` requirement and the patients
          * are the same ambulances, so the larger of the two stands. */
-        if (patients) {
+        if (patients && patients.measured) {
             const perPatient = cfg.ambulancePerPatient === false ? 1 : patients.count;
             const existing = wants.find(([key]) => key === 'ambulances');
             if (existing) existing[1] = Math.max(existing[1], perPatient);
@@ -2015,7 +2047,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
       <td>${ctx.esc(l.label)}${mmIcon(l.icon)}${
     l.key === 'patients' && plan.patients
         ? `<small> &middot; ${plan.patients.count} patient${
-            plan.patients.count > 1 ? 's' : ''}</small>` : ''}${
+            plan.patients.count > 1 ? 's' : ''}, as this window states</small>` : ''}${
     /* Nothing here maps this one; the flag was read off the checkboxes in this
      * very table. It counts the same, and it says which it is. */
     l.derived ? `<small title="matched on the game's own ${ctx.esc(l.derived)} flag,
@@ -2049,6 +2081,10 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         ${plan.crewTraining.map((t) => `Crew: <b>${t.count}</b> with
           ${ctx.esc(t.label)} training`).join('; ')} &mdash; they ride on whatever is sent.
         <span data-crew-seats>${mmSeatSentence()}</span></p>` : ''}
+
+      ${plan.patients && !plan.patients.measured ? `<p class="text-muted" style="margin:0 0 8px">
+        The catalogue says this mission can produce up to <b>${plan.patients.count}</b> patients.
+        This window has not said how many it has, so no ambulance is picked for them.</p>` : ''}
 
       ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.scene.total} already at the mission or on the way, subtracted above${

@@ -8,25 +8,28 @@
  * next vehicle in status 5 after each pick, so the whole queue is clicked
  * through in one place. That is what this is for.
  *
- * IT DOES NOT WORK YET, AND THAT IS ON PURPOSE.
+ * WHICH FIELD CARRIES THE STATUS IS ANSWERED. The first fleet capture came
+ * back with `fms_real` and `fms_show` on every vehicle, both running 1 to 6
+ * across a fleet of 83, so the status is the game's own field and 5 is a value
+ * it really takes. Nothing here guesses at it any more, and the capture button
+ * that found it stays for the day the field is renamed. `hospital_*` and
+ * `police_cell_*` sit on the same record, which is where the two branches of
+ * status 5 are told apart.
  *
- * What is missing is the markup of the game's own vehicle window while it is
- * transporting: what holds the hospitals, what a pick actually is, and what
- * the page does afterwards. Nobody here has seen one. Guessing a selector that
- * clicks a destination on somebody's behalf is exactly the thing this repo
- * does not do — a wrong guess sends a patient to the wrong hospital and there
- * is no undo for that.
+ * So FINDING the vehicles works: the list below is read from `/api/vehicles`.
  *
- * So it ships the way MissionMagician did for three rounds: the switch, a
- * plain warning, and the button that collects the missing piece. Press it on a
- * transporting vehicle and the answer comes back as structure — path shapes,
- * element names, form fields. Never a hospital name, never a patient, never an
- * address.
+ * WHAT DOES NOT WORK YET IS THE PICKING. The markup of the game's own vehicle
+ * window while it is transporting has not been seen — what holds the
+ * destinations, what a pick actually is, and what the page does afterwards.
+ * Guessing a selector that clicks a destination on somebody's behalf is
+ * exactly the thing this repo does not do: a wrong guess sends a patient to
+ * the wrong hospital and there is no undo for that. So the list links to each
+ * vehicle and stops there, and the capture button collects the missing piece —
+ * structure only, never a hospital name, a patient or an address.
  *
- * WHICH FIELD CARRIES THE STATUS IS ALSO UNKNOWN, so the capture does not
- * assume one. It reads the fleet and reports every field whose values across
- * the whole fleet are few and small — which is what a status looks like and
- * what an id does not. That names the field rather than betting on `fms`.
+ * THE FIRST CAPTURE WAS TAKEN ON THE MAP, which is why it came back with 67
+ * building links and no destinations. The panel says where it is being pressed
+ * now, so that round trip is not repeated.
  * ------------------------------------------------------------------------ */
 
 /** Digits out: a path is reported as a shape, not as a particular vehicle. */
@@ -80,6 +83,20 @@ function hfCapturePage() {
 }
 
 /**
+ * The fields the first capture found carrying the status, in the order they
+ * are trusted. `fms_real` is what the vehicle IS; `fms_show` is what the game
+ * displays, which can lag it.
+ */
+const HF_STATUS_FIELDS = ['fms_real', 'fms_show'];
+const HF_TRANSPORTING = 5;
+
+/** Your vehicles in status 5, as the game's own field reports them. */
+function hfTransporting(vehicles) {
+    return (vehicles || []).filter((v) => HF_STATUS_FIELDS
+        .some((f) => Number(v?.[f]) === HF_TRANSPORTING));
+}
+
+/**
  * What the fleet says about status, without saying anything about the fleet.
  *
  * A field is reported only when the whole fleet has few distinct values for it
@@ -119,51 +136,79 @@ function hfCaptureFleet(vehicles) {
 }
 
 function hfPanel(el, ctx) {
+    const onVehiclePage = /^\/vehicles\/\d+/.test(location.pathname);
     el.innerHTML = `
-    <div class="ymca-note warn"><b>HighFive does not work yet.</b>
-      What it needs is the markup of one of your vehicles while it is transporting, and nobody
-      here has seen one. Guessing which link is a hospital would mean guessing where a patient
-      goes, and that cannot be taken back.</div>
-
     <div class="ymca-card">
-      <b>What it will do</b>
-      <p class="ymca-dim" style="margin:6px 0 0">Show the pick-a-destination window for a vehicle
-        in status 5 &mdash; hospital for the ambulance service, prison for the police &mdash; and
-        move straight to the next vehicle in status 5 once you have picked, so a queue of
-        transports is clicked through in one place instead of one page at a time.</p>
+      <b>Transporting right now</b>
+      <p class="ymca-dim" style="margin:6px 0 9px">Your vehicles in status 5, read from the
+        game's own <code>fms_real</code>. Each one opens where the destination is picked.</p>
+      <div id="hf-list"><span class="ymca-dim">Reading your fleet\u2026</span></div>
+      <button class="ymca-btn" data-do="again" style="margin-top:10px">Read it again</button>
     </div>
+
+    <div class="ymca-note warn"><b>Picking for you does not work yet.</b>
+      Finding the vehicles does \u2014 that is the list above. What is missing is the markup of
+      one of your vehicles <em>while it is transporting</em>, so nothing here can move you on to
+      the next one after you have picked. Guessing which link is a hospital would mean guessing
+      where a patient goes, and that cannot be taken back.</div>
 
     <div class="ymca-card">
       <b>Send the missing piece</b>
-      <p class="ymca-dim" style="margin:6px 0 9px">Open a vehicle of yours that is
-        <b>transporting</b> &mdash; the page where the game asks you to pick a hospital or a
-        prison. Leave that page open, open YMCA from the navbar, and press this. It copies
-        <em>structure</em>: path shapes, element names, form field names. No hospital names, no
-        patients, no addresses, no vehicle names.</p>
+      <p class="ymca-dim" style="margin:6px 0 9px">Open one of the vehicles above, leave that
+        page open, open YMCA from the navbar and press this. It copies <em>structure</em>: path
+        shapes, element names, form field names. No hospital names, no patients, no addresses,
+        no vehicle names.</p>
       <div class="ymca-row">
-        <button class="ymca-btn primary" data-do="capture">Copy this vehicle window</button>
+        <button class="ymca-btn ${onVehiclePage ? 'primary' : ''}" data-do="capture"
+          >Copy this vehicle window</button>
         <button class="ymca-btn" data-do="fleet">Copy what your fleet says about status</button>
       </div>
-      <p class="ymca-dim" style="margin:9px 0 0;font-size:12px" id="hf-where"></p>
+      <p class="${onVehiclePage ? 'ymca-dim' : 'ymca-warn'}" style="margin:9px 0 0;font-size:12px"
+        id="hf-where"></p>
     </div>`;
 
-    el.querySelector('#hf-where').textContent = `You are on ${hfShape(location.pathname)}.`;
+    /* Where it is being pressed, said before it is pressed. The first capture
+     * came back from the map with 67 building links and no destinations, and
+     * that was a whole round trip spent on a button that should have said so. */
+    el.querySelector('#hf-where').textContent = onVehiclePage
+        ? `You are on ${hfShape(location.pathname)} \u2014 this is the page to capture.`
+        : `You are on ${hfShape(location.pathname)}, which is not a vehicle page. Capturing from `
+          + 'here answers nothing about transporting; open a vehicle above first.';
+
+    const paint = async () => {
+        const list = el.querySelector('#hf-list');
+        try {
+            const moving = hfTransporting(await ctx.game('/api/vehicles'));
+            list.innerHTML = moving.length
+                ? `<div class="ymca-pick">${moving.map((v) => `<div><a href="/vehicles/${
+                    encodeURIComponent(v.id)}" class="ymca-accent">${ctx.esc(v.caption || `#${v.id}`)
+                }</a> <small>${ctx.esc(v.vehicle_type_caption || '')}</small></div>`).join('')}</div>
+          <p class="ymca-dim" style="margin:8px 0 0;font-size:12px">${moving.length}
+            transporting.</p>`
+                : '<span class="ymca-dim">Nothing of yours is in status 5 right now.</span>';
+        } catch (err) {
+            list.innerHTML = `<span class="ymca-bad">Your fleet could not be read (${
+                ctx.esc(err.message)}).</span>`;
+        }
+    };
+    paint();
 
     el.addEventListener('click', async (e) => {
         const btn = e.target.closest('[data-do]');
         if (!btn) return;
+        if (btn.dataset.do === 'again') { paint(); return; }
         if (btn.dataset.do === 'capture') {
-            const report = { ymca: YMCA.version, what: 'highfive-window', at: new Date().toISOString(), ...hfCapturePage() };
+            const report = { ymca: YMCA.version, what: 'highfive-window', at: new Date().toISOString(), onVehiclePage, ...hfCapturePage() };
             ctx.store.write('lastCapture', report);
             ctx.log.info('captured a vehicle window', report.path);
-            ctx.clipboard(JSON.stringify(report, null, 2), 'the vehicle window’s structure');
+            ctx.clipboard(JSON.stringify(report, null, 2), 'the vehicle window\u2019s structure');
             return;
         }
         if (btn.dataset.do === 'fleet') {
-            ctx.status('Reading your fleet…');
+            ctx.status('Reading your fleet\u2026');
             try {
                 const vehicles = await ctx.game('/api/vehicles');
-                const report = { ymca: YMCA.version, what: 'highfive-fleet', at: new Date().toISOString(), ...hfCaptureFleet(vehicles || []) };
+                const report = { ymca: YMCA.version, what: 'highfive-fleet', at: new Date().toISOString(), transporting: hfTransporting(vehicles).length, ...hfCaptureFleet(vehicles || []) };
                 ctx.store.write('lastFleet', report);
                 ctx.clipboard(JSON.stringify(report, null, 2), 'what your fleet says about status');
             } catch (err) {

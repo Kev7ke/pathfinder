@@ -64,7 +64,10 @@ window.__hired = [];
     { id: 13, caption: 'Old C', building_id: 3, vehicle_type: 10 },
     // A type the repo does not ship: exactly what the sweep exists for.
     { id: 14, caption: 'Old D', building_id: 1, vehicle_type: 904 },
-  ];
+  ].map((v) => Object.assign(v, { fms_real: 2, fms_show: 2, vehicle_type_caption: 'Quint' }));
+  // One of them is transporting: fms_real 5 is what HighFive looks for.
+  vehicles[2].fms_real = 5;
+  vehicles[2].fms_show = 5;
   const mission = (id, name, credits, pre, filter) => ({
     id: String(id), name, place: '', place_array: [], average_credits: credits,
     icons: ['/a.png'], requirements: { firetrucks: 1 }, chances: {},
@@ -86,6 +89,17 @@ window.__hired = [];
       'ambulance_station_missions'),
   ];
 
+  /* The credits ledger: amount, description, date, with a dot for thousands.
+     One daily task, which must be left out, and two runs of one mission so the
+     Paid column has an average to make. */
+  const ledger = `<html><body><table><tbody>
+    <tr><td>+1.450</td><td>Forest fire</td><td>08/11/2026 10:01</td></tr>
+    <tr><td>+1.550</td><td>Forest fire</td><td>08/11/2026 10:44</td></tr>
+    <tr><td>+13.500</td><td>Completed task "Treat 6 patients"</td><td>08/11/2026 11:00</td></tr>
+    <tr><td>+575</td><td>Patient Treatment and Transport</td><td>08/11/2026 11:02</td></tr>
+    <tr><td>-5.000</td><td>Vehicle bought</td><td>08/11/2026 11:05</td></tr>
+  </tbody></table></body></html>`;
+
   const form = (action, field, value) => `<html><body><form action="${action}" method="post">
     <input name="authenticity_token" value="CSRF-XYZ">
     <input name="${field}" value="${value}">
@@ -95,6 +109,9 @@ window.__hired = [];
     url = String(url);
     if (url === '/api/buildings') return new Response(JSON.stringify(buildings));
     if (url === '/api/vehicles') return new Response(JSON.stringify(vehicles));
+    if (url === '/credits/overview') {
+      return new Response(ledger, { headers: { 'content-type': 'text/html' } });
+    }
     if (url === '/einsaetze.json') return new Response(JSON.stringify(missions));
     if (url === '/api/credits') return new Response(JSON.stringify({ credits_user_current: 500000 }));
     let m = url.match(/^\/vehicles\/(\d+)\/edit$/);
@@ -1318,6 +1335,17 @@ for (const [span, expect, why] of [
 await pg.click('[data-span="all"]');
 await pg.waitForTimeout(250);
 
+// ---- what a mission really paid, from the ledger the game writes itself ----
+// The log's one mission type is 3 — "Forest fire" — which the ledger names twice, at 1,450 and
+// 1,550. The daily task and the vehicle purchase in the same table are not missions.
+await pg.waitForFunction(() =>
+  !/reading/i.test(document.querySelector('[data-paid]')?.textContent || 'reading'));
+const paid = await pg.$$eval('#to-table tbody tr', (rows) => rows.map((r) =>
+  [...r.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim())));
+console.log('paid column       :', JSON.stringify(paid));
+assert.ok(/1,500/.test(paid[0][4]), 'the ledger averages the two Forest fire lines');
+assert.ok(/2/.test(paid[0][4]), 'and says how many lines that average is made of');
+
 // ---- ElementFriend: the switchboard ----
 await pg.click('#ymca-back');
 await pg.click('.ymca-tile[data-mod="elementfriend"]');
@@ -1354,7 +1382,11 @@ await pg.click('.ymca-tile[data-mod="elementfriend"]');
 await pg.click('.ymca-tile.el[data-el="highfive"] b');
 await pg.waitForSelector('[data-do="capture"]');
 const hfText = (await pg.textContent('#ef-body')).replace(/\s+/g, ' ');
-assert.ok(/does not work yet/i.test(hfText), 'HighFive should say plainly that it does not work');
+assert.ok(/does not work yet/i.test(hfText), 'HighFive should say plainly what does not work');
+await pg.waitForSelector('#hf-list a');
+const transporting = await pg.$$eval('#hf-list a', (a) => a.map((x) => x.textContent.trim()));
+console.log('transporting      :', JSON.stringify(transporting));
+assert.deepEqual(transporting, ['Old C'], 'only the vehicle whose fms_real is 5 is transporting');
 await pg.click('[data-do="fleet"]');
 await pg.waitForFunction(() => localStorage.getItem('ymca-highfive-lastFleet'));
 const hfFleet = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-highfive-lastFleet')));

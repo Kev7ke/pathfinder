@@ -88,7 +88,15 @@
     "12": {
       "name": "MCV",
       "longName": "Mobile command vehicle",
-      "category": "Other vehicles"
+      "category": "Other vehicles",
+      "capabilities": [
+        "elw1_or_elw2",
+        "elw2",
+        "elw2_or_ab_elw",
+        "elw1_or_elw_drone",
+        "elw2_or_elw2_drone"
+      ],
+      "source": "flags read off this type\u2019s checkbox in a mission window, report 0.0.32"
     },
     "13": {
       "name": "Quint",

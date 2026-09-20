@@ -137,18 +137,24 @@ YMCA.register({
         <b>What you have run</b>
         <table id="to-table" style="margin-top:8px">
           <thead><tr><th class="ymca-num">Yours</th><th class="ymca-num">Nearby</th>
-            <th>Mission</th><th class="ymca-num">Listed</th></tr></thead>
+            <th>Mission</th><th class="ymca-num">Listed</th>
+            <th class="ymca-num" title="what the ledger says this mission paid">Paid</th></tr></thead>
           <tbody>${rows.map((r) => `
             <tr><td class="ymca-num">${r.yours || '<span class="ymca-dim">&ndash;</span>'}</td>
               <td class="ymca-num">${r.runs}</td>
               <td>${r.icon ? `<img src="${ctx.esc(r.icon)}" width="16" height="16" alt=""
                 style="vertical-align:-3px;margin-right:6px">` : ''}${ctx.esc(r.name)}</td>
               <td class="ymca-num">${r.listed === null
-        ? '<span class="ymca-warn">none listed</span>' : ctx.fmt(r.listed)}</td></tr>`).join('')}
+        ? '<span class="ymca-warn">none listed</span>' : ctx.fmt(r.listed)}</td>
+              <td class="ymca-num" data-paid="${ctx.esc(toNameKey(r.name))}"
+                ><span class="ymca-dim">reading\u2026</span></td></tr>`).join('')}
           </tbody>
         </table>
-        <p class="ymca-sub" style="margin-top:8px">Rows where the game lists nothing are the ones
-          worth having &mdash; those are what the planner is guessing at.</p>
+        <p class="ymca-sub" style="margin-top:8px"><b>Listed</b> is the game's own figure from
+          the mission list. <b>Paid</b> is what its own ledger wrote down, averaged over the
+          lines named after that mission &mdash; measured, not paired with anything. Rows where
+          the game lists nothing are the ones worth having: those are what the planner is
+          guessing at.</p>
       </div>` : `
       <div class="ymca-card">
         <b>Nothing counted yet</b>
@@ -166,6 +172,20 @@ YMCA.register({
         <textarea id="to-out" rows="10" readonly style="width:100%;margin-top:10px;
           font-family:ui-monospace,monospace;font-size:11.5px"></textarea>
       </div>`;
+
+        /* The ledger is read on open rather than on a button, because a column
+         * that says "reading\u2026" until somebody presses something is a column
+         * nobody reads. The button stays: it is how the ledger's own table and
+         * the copy are asked for. */
+        toReadLedger().then(({ rows }) => {
+            toFillPaid(el, ctx, toSummariseLedger(rows));
+        }).catch((err) => {
+            el.querySelectorAll('[data-paid]').forEach((cell) => {
+                cell.innerHTML = '<span class="ymca-dim" title="the ledger could not be read"'
+                    + '>&ndash;</span>';
+            });
+            ctx.log.warn('credits ledger unreadable on open', err.message);
+        });
 
         /* The span changes what every number on the panel means, so the panel is
          * built again rather than patched in six places. */
@@ -195,6 +215,7 @@ YMCA.register({
                     const sum = toSummariseLedger(rows);
                     status.textContent = `${sum.lines} lines from ${path}.`;
                     el.querySelector('#to-ledger').innerHTML = toLedgerHtml(sum, ctx);
+                    toFillPaid(el, ctx, sum);
                     ctx.log.info('read the credits ledger', `${sum.lines} lines, ${sum.missions.length} kinds`);
                     if (copy) {
                         ctx.clipboard(JSON.stringify({
@@ -301,6 +322,34 @@ function toSummarise(log, listed) {
         .sort((a, b) => b.runs - a.runs);
 }
 
+/**
+ * Write the ledger's own figure into every row of the run table.
+ *
+ * THIS IS MEASURED AND THE COLUMN BESIDE IT IS NOT THE SAME THING. The balance
+ * delta was withdrawn because a rise cannot be told apart from a daily task
+ * landing in the same second. A ledger line is the game writing down what it
+ * paid and what it paid it for, so averaging those is reading rather than
+ * inferring — and the count is shown beside it, because one line is not an
+ * average.
+ *
+ * A mission with no line yet says so rather than showing a zero: nothing run
+ * since the ledger page begins is not the same as nothing paid.
+ */
+let toLastLedger = null;
+
+function toFillPaid(el, ctx, sum) {
+    toLastLedger = sum;
+    const byName = new Map(sum.missions.map((m) => [toNameKey(m.name), m]));
+    for (const cell of el.querySelectorAll('[data-paid]')) {
+        const m = byName.get(cell.dataset.paid);
+        cell.innerHTML = m
+            ? `${ctx.fmt(m.average)} <span class="ymca-dim" style="font-size:11px"
+                title="${m.runs} line${m.runs > 1 ? 's' : ''} in the ledger">\u00d7${m.runs}</span>`
+            : '<span class="ymca-dim" title="no line named after it on this page of the ledger"'
+                + '>&ndash;</span>';
+    }
+}
+
 /** The ledger, as a table: what each mission paid, and how much it varied. */
 function toLedgerHtml(sum, ctx) {
     if (!sum.missions.length && !sum.patients.lines) {
@@ -340,6 +389,12 @@ function toExport(log, listed) {
         missionsYours: log.filter((e) => e.mine).length,
         missionsWhoseOwnerIsUnknown: log.filter((e) => e.mine === undefined).length,
         missionsMeasured: log.filter((e) => e.alone && e.delta > 0).length,
+        /* What the game wrote down, by name, so what a mission really pays can
+         * go into data/missions.json instead of being asked for again. Names
+         * and amounts, which are the game's own constants. */
+        paidByName: toLastLedger ? toLastLedger.missions.map((m) => ({
+            name: m.name, lines: m.runs, average: m.average, low: m.low, high: m.high,
+        })) : null,
         payoutReadingRetired: 'a balance rise cannot be told apart from a daily reward',
         byMissionType: rows.map((r) => ({
             type: Number(r.type) || r.type,
@@ -441,6 +496,16 @@ async function toReadLedger() {
         }
     }
     throw new Error(lastError || 'no credits page answered');
+}
+
+/**
+ * One name, spelled one way.
+ *
+ * The catalogue names a mission and the ledger names the line after it, so the
+ * two meet on the name — but only once case and spacing stop mattering.
+ */
+function toNameKey(name) {
+    return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 /**
