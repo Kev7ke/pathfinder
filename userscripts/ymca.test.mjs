@@ -1130,9 +1130,11 @@ await pg.waitForSelector('#to-table');
 const summary = await pg.$$eval('#to-table tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('trackops table    :', JSON.stringify(summary));
-assert.equal(summary[0][1], 'Forest fire', 'the mission type id was not resolved to its name');
-assert.equal(summary[0][0], '1', 'the run count is the point of the table now');
-assert.equal(summary[0][2], '9,000', 'the game\'s own listed figure sits beside it');
+assert.equal(summary[0][2], 'Forest fire', 'the mission type id was not resolved to its name');
+assert.equal(summary[0][1], '1', 'the count of what ended nearby');
+assert.equal(summary[0][0], '\u2013',
+  'and none of them known to be yours, because nothing was dispatched to this one');
+assert.equal(summary[0][3], '9,000', 'the game\'s own listed figure sits beside it');
 // The payout reading is retired: nothing in the table may present one.
 assert.ok(!summary[0].includes('2,340'), 'no averaged payout may be shown');
 
@@ -1217,7 +1219,41 @@ assert.ok(/825/.test(patientLine),
   'patient treatment and transport is its own income, and the mission list does not carry it');
 console.log('ledger            : every line says what it was for, so nothing has to be guessed');
 
-console.log('page errors       :', errs.length ? errs : 'none');
+// ---- whose mission was it, and when ----
+// missionDelete says a mission ended, not that you were in it. An alliance call somebody else
+// handled ends on your map the same way, and counting those made "what you have run" a count of
+// what the alliance has run. A mission is yours when one of your own vehicles was at it.
+await pg.evaluate(() => {
+  const now = Date.now();
+  localStorage.setItem('ymca-trackops-log', JSON.stringify([
+    { at: now - 40 * 24 * 3600e3, mission: '900', type: 3, delta: null, alone: true, mine: true },
+    { at: now - 10 * 24 * 3600e3, mission: '901', type: 3, delta: null, alone: true, mine: true },
+    { at: now - 3 * 24 * 3600e3, mission: '902', type: 3, delta: null, alone: true, mine: true },
+    { at: now - 60e3, mission: '903', type: 3, delta: null, alone: true, mine: false },
+  ]));
+});
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="trackops"]');
+await pg.waitForSelector('#to-table');
+const spanOf = async () => (await pg.textContent('.ymca-card')).replace(/\s+/g, ' ').trim();
+console.log('span all          :', (await spanOf()).slice(0, 80));
+assert.ok(/3 of yours/.test(await spanOf()),
+  'four ended nearby, three of them yours: the alliance call is not one you ran');
+for (const [span, expect, why] of [
+  ['month', '2 of yours', 'the 40-day-old one falls outside a 30-day window'],
+  ['week', '1 of yours', 'and the 10-day-old one outside a 7-day one'],
+  ['day', '0 of yours', 'today leaves only the alliance call, which is not yours'],
+]) {
+  await pg.click(`[data-span="${span}"]`);
+  await pg.waitForTimeout(250);
+  const text = await spanOf();
+  console.log('span', span.padEnd(14), ':', text.slice(0, 70));
+  assert.ok(text.includes(expect), why);
+}
+await pg.click('[data-span="all"]');
+await pg.waitForTimeout(250);
+
+console.log('page errors       :', errs.length ? errs.slice(0, 3) : 'none');
 assert.equal(errs.length, 0);
 console.log('\nALL ASSERTIONS PASSED');
 await b.close();

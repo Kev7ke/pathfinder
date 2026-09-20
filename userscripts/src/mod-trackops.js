@@ -87,19 +87,33 @@ YMCA.register({
          * runs, and the retry below gives up rather than spinning forever. Opening the tool is
          * the natural second chance — and the one moment the player would notice it missing. */
         if (cfg.recording) toAttach();
-        const log = toRead(TO_LOG_KEY, []);
+        const whole = toRead(TO_LOG_KEY, []);
         const listed = await toListedCredits(ctx);
+        const span = TO_SPANS[cfg.span] ? cfg.span : 'all';
+        const log = toWithin(whole, span);
         const rows = toSummarise(log, listed);
+        const yours = log.filter((e) => e.mine).length;
+        const unknown = log.filter((e) => e.mine === undefined).length;
 
         el.innerHTML = `
       <div class="ymca-card">
-        <b>Since ${log.length ? new Date(log[0].at).toLocaleDateString() : 'you turned it on'}</b>
-        <p style="font-size:26px;font-weight:700;margin:8px 0 2px">${log.length}
-          <span class="ymca-dim" style="font-size:14px;font-weight:400">missions finished</span></p>
-        <p class="ymca-dim">Across ${rows.length} kinds of mission.</p>
+        <b>Since ${whole.length ? new Date(whole[0].at).toLocaleDateString() : 'you turned it on'}</b>
+        <p style="font-size:26px;font-weight:700;margin:8px 0 2px">${yours}
+          <span class="ymca-dim" style="font-size:14px;font-weight:400">of yours</span>
+          <span class="ymca-dim" style="font-size:14px;font-weight:400">&middot; ${log.length}
+          finished nearby</span></p>
+        <p class="ymca-dim">Across ${rows.length} kinds of mission${
+    unknown ? `, ${unknown} recorded before TrackOps could tell whose they were` : ''}.</p>
+        <div style="margin:10px 0 0">${Object.entries(TO_SPANS).map(([key, v]) =>
+    `<button class="ymca-btn${key === span ? ' primary' : ''}" data-span="${key}"
+            >${v.label}</button>`).join(' ')}</div>
         <label style="display:block;margin:10px 0 0"><input type="checkbox" data-cfg="recording"
           ${cfg.recording ? 'checked' : ''}> Keep recording</label>
       </div>
+
+      <div class="ymca-note"><b>Yours means one of your vehicles was at it.</b> An alliance call
+        somebody else handled ends on your map exactly like one of your own, so both numbers are
+        shown: the game announced the ending, YMCA saw your vehicle.</div>
 
       <div class="ymca-card">
         <b>What missions actually paid</b>
@@ -121,11 +135,13 @@ YMCA.register({
       <div class="ymca-card">
         <b>What you have run</b>
         <table id="to-table" style="margin-top:8px">
-          <thead><tr><th class="ymca-num">Run</th><th>Mission</th>
-            <th class="ymca-num">Listed</th></tr></thead>
+          <thead><tr><th class="ymca-num">Yours</th><th class="ymca-num">Nearby</th>
+            <th>Mission</th><th class="ymca-num">Listed</th></tr></thead>
           <tbody>${rows.map((r) => `
-            <tr><td class="ymca-num">${r.runs}</td>
-              <td>${ctx.esc(r.name)}</td>
+            <tr><td class="ymca-num">${r.yours || '<span class="ymca-dim">&ndash;</span>'}</td>
+              <td class="ymca-num">${r.runs}</td>
+              <td>${r.icon ? `<img src="${ctx.esc(r.icon)}" width="16" height="16" alt=""
+                style="vertical-align:-3px;margin-right:6px">` : ''}${ctx.esc(r.name)}</td>
               <td class="ymca-num">${r.listed === null
         ? '<span class="ymca-warn">none listed</span>' : ctx.fmt(r.listed)}</td></tr>`).join('')}
           </tbody>
@@ -149,6 +165,15 @@ YMCA.register({
         <textarea id="to-out" rows="10" readonly style="width:100%;margin-top:10px;
           font-family:ui-monospace,monospace;font-size:11.5px"></textarea>
       </div>`;
+
+        /* The span changes what every number on the panel means, so the panel is
+         * built again rather than patched in six places. */
+        el.addEventListener('click', (e) => {
+            const pick = e.target.closest('[data-span]');
+            if (!pick) return;
+            toWrite(TO_CFG_KEY, Object.assign(toCfg(), { span: pick.dataset.span }));
+            YMCA.modules.find((m) => m.id === 'trackops').mount(el, ctx);
+        });
 
         el.addEventListener('change', (e) => {
             if (e.target.dataset.cfg !== 'recording') return;
@@ -218,11 +243,30 @@ async function toListedCredits(ctx) {
             name: m.name,
             // null and 0 both mean "the game does not say", which is the gap being filled.
             listed: m.average_credits || null,
+            /* The game ships its own artwork for every mission and names it in
+             * the catalogue: three states, green through red. The first is the
+             * quiet one, which is what a list wants. */
+            icon: Array.isArray(m.icons) && m.icons.length ? m.icons[0] : null,
         }]));
     } catch (err) {
         ctx.log.warn('could not read the mission list, so nothing can be named', err.message);
         return {};
     }
+}
+
+/** Only what happened inside the window the player asked for. */
+const TO_SPANS = {
+    all: { label: 'All', ms: null },
+    day: { label: 'Today', ms: 24 * 3600e3 },
+    week: { label: '7 days', ms: 7 * 24 * 3600e3 },
+    month: { label: '30 days', ms: 30 * 24 * 3600e3 },
+};
+
+function toWithin(log, span) {
+    const ms = TO_SPANS[span]?.ms;
+    if (!ms) return log;
+    const from = Date.now() - ms;
+    return log.filter((e) => e.at >= from);
 }
 
 function toSummarise(log, listed) {
@@ -234,13 +278,18 @@ function toSummarise(log, listed) {
                 type: key,
                 name: listed[key]?.name || `Mission type ${key}`,
                 listed: listed[key] ? listed[key].listed : null,
+                icon: listed[key]?.icon || null,
                 runs: 0,
+                yours: 0,
                 measured: 0,
                 total: 0,
             });
         }
         const row = byType.get(key);
         row.runs += 1;
+        /* `mine` is absent on everything recorded before TrackOps started
+         * looking, so it is counted as unknown rather than as a no. */
+        if (entry.mine) row.yours += 1;
         if (entry.alone && entry.delta > 0) {
             row.measured += 1;
             row.total += entry.delta;
@@ -287,12 +336,15 @@ function toExport(log, listed) {
         ymca: YMCA.version,
         measuredFrom: log.length ? new Date(log[0].at).toISOString().slice(0, 10) : null,
         missionsEnded: log.length,
+        missionsYours: log.filter((e) => e.mine).length,
+        missionsWhoseOwnerIsUnknown: log.filter((e) => e.mine === undefined).length,
         missionsMeasured: log.filter((e) => e.alone && e.delta > 0).length,
         payoutReadingRetired: 'a balance rise cannot be told apart from a daily reward',
         byMissionType: rows.map((r) => ({
             type: Number(r.type) || r.type,
             name: r.name,
             runs: r.runs,
+            yours: r.yours,
             /* Kept, and kept labelled. A balance rise near a mission ending is
              * not that mission's payout — a daily task reward lands the same
              * way — so these are observations of the balance, not of a payout,
@@ -464,6 +516,37 @@ async function toReadBalance() {
  * duplicated mission measured nothing. A mission can only end once, so the
  * instance id is remembered and a repeat is dropped.
  */
+/**
+ * Missions one of your own vehicles was sent to.
+ *
+ * `missionDelete` says a mission ended, not that you were in it. An alliance
+ * call somebody else handled ends on your map exactly like one of yours, and
+ * counting those made "what you have run" a count of what your alliance has
+ * run.
+ *
+ * Written from inside the mission window, where the answer is plain: the ids in
+ * `/api/vehicles` are yours, and `#mission_vehicle_at_mission` says which
+ * vehicles are there. An id in both is your vehicle at that mission. Pressing
+ * one of the game's dispatch buttons says the same thing a moment earlier.
+ *
+ * Nothing is inferred from the map: a mission you never opened and never sent
+ * to is simply not marked, and the panel counts it as unknown rather than as
+ * yours.
+ */
+const TO_MINE_KEY = 'ymca-trackops-mine';
+const TO_MINE_MAX = 400;
+
+function toMarkMine(missionId) {
+    const id = String(missionId || '');
+    if (!id) return;
+    const mine = toRead(TO_MINE_KEY, []);
+    if (mine.includes(id)) return;
+    mine.push(id);
+    toWrite(TO_MINE_KEY, mine.slice(-TO_MINE_MAX));
+}
+
+const toIsMine = (id) => toRead(TO_MINE_KEY, []).includes(String(id));
+
 function toMissionEnded(missionId) {
     const id = String(missionId);
     const at = Date.now();
@@ -477,7 +560,11 @@ function toMissionEnded(missionId) {
     const type = panel?.getAttribute('mission_type_id') || null;
     if (type === null) return; // not one of ours, or already gone
 
-    const entry = { mission: id, at, type: Number(type) || type, delta: null, alone: toPending.length === 0 };
+    const entry = {
+        mission: id, at, type: Number(type) || type, delta: null,
+        alone: toPending.length === 0,
+        mine: toIsMine(id),
+    };
     /* Something else already waiting means a balance change could belong to
      * either, so neither is trusted for the averages — it is still counted. */
     if (toPending.length) for (const other of toPending) other.alone = false;
@@ -488,7 +575,7 @@ function toMissionEnded(missionId) {
         const log = toRead(TO_LOG_KEY, []);
         log.push({
             at: entry.at, mission: entry.mission, type: entry.type,
-            delta: entry.delta, alone: entry.alone,
+            delta: entry.delta, alone: entry.alone, mine: entry.mine,
         });
         toWrite(TO_LOG_KEY, log.slice(-TO_LOG_MAX));
     }, TO_SETTLE_MS);
@@ -561,6 +648,67 @@ function toDetach() {
     toOriginals = null;
     toHooked = false;
 }
+
+/**
+ * Inside a mission window: was one of your own vehicles there?
+ *
+ * Two signals, both measured, neither asking the player anything.
+ *
+ * Pressing any of the game's five dispatch controls sends what is ticked, and
+ * what is ticked is yours — the selection table only ever lists your own
+ * vehicles. That marks the mission immediately.
+ *
+ * The other is for a mission you joined earlier and reopened: `/api/vehicles`
+ * is your fleet, `#mission_vehicle_at_mission` and `#mission_vehicle_driving`
+ * are the vehicles there and on the way, and an id in both is yours. The fleet
+ * list is the one YMCA already caches, so this costs no extra request.
+ */
+const TO_DISPATCH = '#mission-form input[name="commit"], .alert_next, .alert_next_alliance,'
+    + ' #mission_alarm_btn, #mission_alarm_btn_mobile';
+
+YMCA.inject('trackops', (ctx) => {
+    const info = document.getElementById('mission_general_info');
+    if (!info || !document.getElementById('mission-form')) return;
+
+    const missionId = (/\/missions\/(\d+)/.exec(location.pathname) || [])[1]
+        || info.getAttribute('mission_id') || null;
+    if (!missionId) return;
+
+    document.addEventListener('click', (e) => {
+        if (!e.target?.closest?.(TO_DISPATCH)) return;
+        toMarkMine(missionId);
+        ctx.log.info('trackops', `mission ${missionId} is yours — you dispatched to it`);
+    }, true);
+
+    /* And for one you are already in. Re-checked as the tables fill, because
+     * the vehicles at a mission arrive after the page does. */
+    const check = async () => {
+        if (toIsMine(missionId)) return;
+        let fleet;
+        try {
+            // `shrink` is handed the whole answer, not each row, and only the ids are wanted.
+            fleet = await ctx.gameCached('/api/vehicles', 6 * 3600e3,
+                (data) => (Array.isArray(data) ? data.map((v) => String(v.id)) : []));
+        } catch (err) { return; }
+        const own = new Set(Array.isArray(fleet) ? fleet.map(String) : []);
+        if (!own.size) return;
+        const rows = document.querySelectorAll(
+            '#mission_vehicle_at_mission tbody tr[id^="vehicle_row"], '
+            + '#mission_vehicle_driving tbody tr[id^="vehicle_row"]');
+        for (const row of rows) {
+            if (own.has(row.id.replace('vehicle_row_', ''))) {
+                toMarkMine(missionId);
+                ctx.log.info('trackops', `mission ${missionId} is yours — your vehicle is there`);
+                return;
+            }
+        }
+    };
+    check();
+    const watcher = new MutationObserver(() => check());
+    watcher.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => watcher.disconnect(), 120000);
+    return true;
+});
 
 /* The game defines its functions as the page finishes loading, which can be
  * after this file runs. Try now, then a few times, then give up quietly —

@@ -157,6 +157,20 @@ time inside the mission and a module that belongs there simply runs there. No
 reaching across from the parent, ever. Inside the frame there is no navbar, so
 it is the floating button that opens it.
 
+**`missionDelete` says a mission ended, not that you were in it.** An alliance
+call somebody else handled ends on your map exactly like one of your own, so
+counting endings alone counts what the alliance has run. A mission is yours when
+one of your own vehicles was at it, and that is answered from inside the mission
+window: `/api/vehicles` is your fleet, `#mission_vehicle_at_mission` and
+`#mission_vehicle_driving` say what is there, and an id in both is yours.
+Pressing a dispatch control says the same a moment earlier. Nothing is inferred
+from the map — a mission never opened and never sent to is unknown, not yours,
+and the panel counts it that way.
+
+**The mission catalogue ships the game's own artwork.** `icons` on a record in
+`/einsaetze.json` is three paths, green through red, and they are served by the
+game, so a list can use `icons[0]` directly.
+
 **The game keeps a ledger and names every line.** `/credits/overview` is a
 table of amount, description and date: `+575 Patient Treatment and Transport`,
 `+1.450 Bar Fight`, `+13.500 Completed task "Treat 6 patients"`, `-5.000 Vehicle
