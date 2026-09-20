@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.20
+// @version      0.0.21
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.20',
+    version: '0.0.21',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2682,6 +2682,7 @@ async function mmPlan(page, ctx, cfg) {
             if (!rule) {
                 lines.push({ key, label: mmPretty(key), wanted, found: null, unmatched: true });
                 mmRememberUnmatched(key, page.missionType);
+                mmPublishMappedFlags();
                 continue;
             }
             const onScene = mmSceneCount(scene, rule);
@@ -2751,6 +2752,18 @@ async function mmPlan(page, ctx, cfg) {
  * warning in the panel and mention it. Key and mission type only — both are the
  * game's own names for things.
  */
+/* Which flags a requirement here already asks for, written where Diagnostics
+ * can read it: the report names the flags nothing asks for yet, and whatever
+ * answers an unmatched requirement is among them. Diagnostics reads stored
+ * state rather than reaching into this module, so it is published rather than
+ * imported. */
+function mmPublishMappedFlags() {
+    try {
+        localStorage.setItem('ymca-missionmagician-mappedFlags',
+            JSON.stringify(MM_NAMED_FLAGS));
+    } catch (e) { /* private window */ }
+}
+
 function mmRememberUnmatched(key, missionType) {
     const store = 'ymca-missionmagician-unmatched';
     try {
@@ -3367,8 +3380,8 @@ function mmSurplus(plan) {
     /* Only requirements that can be judged. An unmatched one is unknown, and
      * nothing is sent back on the strength of a requirement nobody can check. */
     const checks = plan.lines
-        .filter((l) => !l.unmatched && !l.unit && MM_REQUIREMENTS[l.key])
-        .map((l) => ({ wanted: l.wanted, rule: MM_REQUIREMENTS[l.key] }));
+        .filter((l) => !l.unmatched && !l.unit && l.rule)
+        .map((l) => ({ wanted: l.wanted, rule: l.rule }));
     if (!checks.length) return [];
 
     const covers = (flags, rule) => (rule.anyOf
@@ -3380,7 +3393,12 @@ function mmSurplus(plan) {
      * no ambulance line to be measured against, and sending it away because
      * nothing asked for it is exactly the wrong reading. */
     const judged = new Set(checks.flatMap(({ rule }) => rule.anyOf || [rule.flag]));
-    const accountable = (v) => v.flags.every((f) => judged.has(f));
+    /* Judged against the flags a requirement can ask for. The game also writes
+     * composites of its own — `road_rescue_or_fire_engine`, `ktw_or_rtw` — and
+     * counting those as unaccounted-for would mean nothing is ever spare. */
+    const meaningful = new Set([...MM_NAMED_FLAGS, ...judged]);
+    const accountable = (v) =>
+        v.flags.filter((f) => meaningful.has(f)).every((f) => judged.has(f));
     const met = (kept) => checks.every(({ wanted, rule }) =>
         kept.filter((v) => covers(v.flags, rule)).length >= wanted);
 
@@ -4584,12 +4602,32 @@ function moduleStore(moduleId) {
             types = Object.fromEntries(Object.entries(raw).map(([id, t]) =>
                 [id, Array.isArray(t) ? { caps: t, name: null } : t]));
         } catch (e) { /* nothing learnt yet */ }
+        const capsByType = Object.fromEntries(Object.entries(types)
+            .map(([id, t]) => [id, Array.isArray(t) ? t : (t.caps || [])]));
+
+        /* Every capability name the game has been seen to write, and which types
+         * carry it. A requirement nothing maps is answered by one of these, so
+         * the two lists together are the whole of what a mapping needs — one
+         * press of this button rather than a question per family. */
+        const vocabulary = {};
+        for (const [id, caps] of Object.entries(capsByType)) {
+            for (const flag of caps) (vocabulary[flag] ||= []).push(Number(id));
+        }
+        const unmatched = read('unmatched', []) || [];
+        // Published by MissionMagician into its own store, so this stays a reader.
+        const claimed = new Set(read('mappedFlags', []) || []);
+
         return {
             vehicleTypesLearnt: Object.keys(types).length,
             learntTypes: types,
-            capabilitiesByType: Object.fromEntries(Object.entries(types)
-                .map(([id, t]) => [id, Array.isArray(t) ? t : (t.caps || [])])),
-            unmatchedRequirements: read('unmatched', []),
+            capabilitiesByType: capsByType,
+            flagVocabulary: Object.fromEntries(Object.entries(vocabulary)
+                .sort(([a], [b]) => a.localeCompare(b))),
+            /* The flags no requirement asks for yet: whatever answers an
+             * unmatched key is among them. */
+            flagsNoRequirementUses: Object.keys(vocabulary)
+                .filter((f) => !claimed.has(f)).sort(),
+            unmatchedRequirements: unmatched,
             settings: read('cfg', null),
         };
     }

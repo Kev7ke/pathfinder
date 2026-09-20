@@ -423,12 +423,32 @@ function moduleStore(moduleId) {
             types = Object.fromEntries(Object.entries(raw).map(([id, t]) =>
                 [id, Array.isArray(t) ? { caps: t, name: null } : t]));
         } catch (e) { /* nothing learnt yet */ }
+        const capsByType = Object.fromEntries(Object.entries(types)
+            .map(([id, t]) => [id, Array.isArray(t) ? t : (t.caps || [])]));
+
+        /* Every capability name the game has been seen to write, and which types
+         * carry it. A requirement nothing maps is answered by one of these, so
+         * the two lists together are the whole of what a mapping needs — one
+         * press of this button rather than a question per family. */
+        const vocabulary = {};
+        for (const [id, caps] of Object.entries(capsByType)) {
+            for (const flag of caps) (vocabulary[flag] ||= []).push(Number(id));
+        }
+        const unmatched = read('unmatched', []) || [];
+        // Published by MissionMagician into its own store, so this stays a reader.
+        const claimed = new Set(read('mappedFlags', []) || []);
+
         return {
             vehicleTypesLearnt: Object.keys(types).length,
             learntTypes: types,
-            capabilitiesByType: Object.fromEntries(Object.entries(types)
-                .map(([id, t]) => [id, Array.isArray(t) ? t : (t.caps || [])])),
-            unmatchedRequirements: read('unmatched', []),
+            capabilitiesByType: capsByType,
+            flagVocabulary: Object.fromEntries(Object.entries(vocabulary)
+                .sort(([a], [b]) => a.localeCompare(b))),
+            /* The flags no requirement asks for yet: whatever answers an
+             * unmatched key is among them. */
+            flagsNoRequirementUses: Object.keys(vocabulary)
+                .filter((f) => !claimed.has(f)).sort(),
+            unmatchedRequirements: unmatched,
             settings: read('cfg', null),
         };
     }

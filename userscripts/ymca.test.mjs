@@ -931,6 +931,42 @@ const hazTicked = await mission.evaluate(() =>
 console.log('hazmat ticked     :', JSON.stringify(hazTicked));
 assert.deepEqual(hazTicked, ['80', '81', '82'], 'and it is the game\'s own boxes that get ticked');
 
+// A requirement read off the page has to count when vehicles are sent back too, or a HazMat
+// would go home from a HazMat call because nothing here named the line keeping it there.
+await mission.evaluate(() => {
+  window.__backalarms = [];
+  window.confirm = () => true;
+  // No patients on this one, so the ambulance line is out of the way and the HazMats are the point.
+  for (const el of document.querySelectorAll(
+    '#patient_button_text, .mission_patient, #patient_missing_requirements')) el.remove();
+  const t = document.createElement('table');
+  t.id = 'mission_vehicle_at_mission';
+  const at = (rowId, typeId) => `<tr id="vehicle_row_${rowId}"><td vehicle_type_id="${typeId}">
+    <a class="btn-backalarm-ajax" href="#">back</a></td></tr>`;
+  // Two HazMats and two pumpers, against 2 hazmat + 1 engine: one pumper is spare.
+  t.innerHTML = `<tbody>${at(90, 9)}${at(91, 9)}${at(92, 33)}${at(93, 33)}</tbody>`;
+  document.getElementById('col_right').append(t);
+  for (const a of document.querySelectorAll('.btn-backalarm-ajax')) {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.__backalarms.push(a.closest('tr').id.replace('vehicle_row_', ''));
+    });
+  }
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(1500);
+
+const hazCancel = await mission.textContent('#ymca-mm-panel [data-do="cancel"]');
+console.log('hazmat cancel     :', hazCancel.trim(), '(wants 2 hazmat + 1 engine, 2+2 are there)');
+assert.ok(/Cancel 1 unused/.test(hazCancel),
+  'one pumper is spare; the two HazMats are held by a line nothing here mapped');
+await mission.click('#ymca-mm-panel [data-do="cancel"]');
+const hazBack = await mission.evaluate(() => window.__backalarms);
+console.log('hazmat sent back  :', JSON.stringify(hazBack));
+assert.deepEqual(hazBack, ['93'], 'a pumper goes home, never a HazMat');
+// Out of the way: the next block builds its own scene table, and two with this id would merge.
+await mission.evaluate(() => document.getElementById('mission_vehicle_at_mission')?.remove());
+
 // ---- follow-up switches off however the mission was dispatched ----
 // Only one of the game's five dispatch controls submits the form. Dispatch and Next, the alliance
 // one that shares as it goes, and both navbar buttons are <a href="#"> that post by themselves,
@@ -972,7 +1008,7 @@ await mission.evaluate(() => {
     requirements: { platform_trucks: 1, firetrucks: 2 },
   }];
   localStorage.removeItem('ymca-cache-/einsaetze.json');
-  document.getElementById('patient_missing_requirements').remove();
+  document.getElementById('patient_missing_requirements')?.remove();
   document.getElementById('mission_general_info').setAttribute('data-mission-type', '211');
   const t = document.createElement('table');
   t.id = 'mission_vehicle_at_mission';

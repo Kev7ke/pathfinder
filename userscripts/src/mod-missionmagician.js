@@ -822,6 +822,7 @@ async function mmPlan(page, ctx, cfg) {
             if (!rule) {
                 lines.push({ key, label: mmPretty(key), wanted, found: null, unmatched: true });
                 mmRememberUnmatched(key, page.missionType);
+                mmPublishMappedFlags();
                 continue;
             }
             const onScene = mmSceneCount(scene, rule);
@@ -891,6 +892,18 @@ async function mmPlan(page, ctx, cfg) {
  * warning in the panel and mention it. Key and mission type only — both are the
  * game's own names for things.
  */
+/* Which flags a requirement here already asks for, written where Diagnostics
+ * can read it: the report names the flags nothing asks for yet, and whatever
+ * answers an unmatched requirement is among them. Diagnostics reads stored
+ * state rather than reaching into this module, so it is published rather than
+ * imported. */
+function mmPublishMappedFlags() {
+    try {
+        localStorage.setItem('ymca-missionmagician-mappedFlags',
+            JSON.stringify(MM_NAMED_FLAGS));
+    } catch (e) { /* private window */ }
+}
+
 function mmRememberUnmatched(key, missionType) {
     const store = 'ymca-missionmagician-unmatched';
     try {
@@ -1507,8 +1520,8 @@ function mmSurplus(plan) {
     /* Only requirements that can be judged. An unmatched one is unknown, and
      * nothing is sent back on the strength of a requirement nobody can check. */
     const checks = plan.lines
-        .filter((l) => !l.unmatched && !l.unit && MM_REQUIREMENTS[l.key])
-        .map((l) => ({ wanted: l.wanted, rule: MM_REQUIREMENTS[l.key] }));
+        .filter((l) => !l.unmatched && !l.unit && l.rule)
+        .map((l) => ({ wanted: l.wanted, rule: l.rule }));
     if (!checks.length) return [];
 
     const covers = (flags, rule) => (rule.anyOf
@@ -1520,7 +1533,12 @@ function mmSurplus(plan) {
      * no ambulance line to be measured against, and sending it away because
      * nothing asked for it is exactly the wrong reading. */
     const judged = new Set(checks.flatMap(({ rule }) => rule.anyOf || [rule.flag]));
-    const accountable = (v) => v.flags.every((f) => judged.has(f));
+    /* Judged against the flags a requirement can ask for. The game also writes
+     * composites of its own — `road_rescue_or_fire_engine`, `ktw_or_rtw` — and
+     * counting those as unaccounted-for would mean nothing is ever spare. */
+    const meaningful = new Set([...MM_NAMED_FLAGS, ...judged]);
+    const accountable = (v) =>
+        v.flags.filter((f) => meaningful.has(f)).every((f) => judged.has(f));
     const met = (kept) => checks.every(({ wanted, rule }) =>
         kept.filter((v) => covers(v.flags, rule)).length >= wanted);
 
