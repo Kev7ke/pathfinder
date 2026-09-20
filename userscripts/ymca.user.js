@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.18
+// @version      0.0.19
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.18',
+    version: '0.0.19',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1454,7 +1454,7 @@ const BACKUP_KEEP = 10;
  * time that button is pressed rather than waiting to be typed in here.
  */
 const BUILTIN_VEHICLE_TYPES = Object.fromEntries(
-    Object.entries({"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine"},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["any_rtw"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser_only"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat"},"10":{"name":"Patrol Car","capabilities":["fustw_or_police_motorcycle"]},"12":{"name":"MCV","longName":"Mobile command vehicle"},"13":{"name":"Quint","capabilities":["fire","dlk"],"longName":"Quint Fire Truck"},"15":{"name":"Fly-Car"},"17":{"name":"Large ARFF Crash Tender","longName":"Large Aircraft Rescue and Firefighting Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw"]},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC","longName":"Wildland Mobile Command Center"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender","longName":"Small Aircraft Rescue and Firefighting Crash Tender"},"80":{"name":"Medium ARFF Crash Tender","longName":"Medium Aircraft Rescue and Firefighting Crash Tender"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"109":{"name":"CCTU","longName":"Critical Care Transport Unit"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC","longName":"Water Tanker Container"},"128":{"name":"FBPC","longName":"Fire Breath Protection Container"},"129":{"name":"USARC","longName":"Urban Search and Rescue Container"},"130":{"name":"HazMat"},"131":{"name":"ICPC","longName":"Incident Command Post Container"},"132":{"name":"CWFT","longName":"Combined Water and Foam Tanker"},"133":{"name":"FWDC","longName":"Flood and Water Damage Container"},"134":{"name":"FRC","longName":"Fire Rolling Container"}}).map(([id, t]) => [id, t.name]));
+    Object.entries({"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine"},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["any_rtw"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser_only"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat"},"10":{"name":"Patrol car","capabilities":["fustw_or_police_motorcycle"]},"12":{"name":"MCV"},"13":{"name":"Quint","capabilities":["fire","dlk"]},"15":{"name":"Fly-Car"},"16":{"name":"SWAT Armoured Vehicle"},"17":{"name":"Large ARFF Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw"]},"19":{"name":"K-9 Unit"},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"23":{"name":"Police Motorcycle"},"26":{"name":"SWAT SUV"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire","gwl2wasser_only"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"43":{"name":"FBI Investigation Wagon"},"45":{"name":"FBI Bomb Technician Vehicle"},"46":{"name":"FBI Surveillance Drone"},"47":{"name":"Police Supervisor / Sheriff Unit"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"55":{"name":"Patrol Boat"},"56":{"name":"Warden's Truck"},"57":{"name":"EMS Mass Casualty Trailer (large)"},"58":{"name":"EMS Mass Casualty Trailer (small)"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender"},"80":{"name":"Medium ARFF Crash Tender"},"81":{"name":"Small K9 Carrier"},"82":{"name":"Large K9 Carrier"},"83":{"name":"Riot Police Van"},"84":{"name":"Riot Police Bus"},"85":{"name":"Riot Police Trailer"},"86":{"name":"Police Crew Carrier"},"87":{"name":"Police Prisoner Van"},"88":{"name":"Police ATV Trailer"},"89":{"name":"Police MCV"},"90":{"name":"Tactical Rescue Truck"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"101":{"name":"Police Traffic Control Unit"},"102":{"name":"Police Traffic Blocker Unit"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"108":{"name":"Police Wrecker"},"109":{"name":"CCTU"},"110":{"name":"Tactical Rescue Truck with Boat"},"111":{"name":"Police Water Rescue Boat Trailer"},"112":{"name":"Police Water Rescue Double Boat Trailer"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"119":{"name":"Small Police Equipment Trailer"},"120":{"name":"Large Police Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC"},"128":{"name":"FBPC"},"129":{"name":"USARC"},"130":{"name":"HazMat"},"131":{"name":"ICPC"},"132":{"name":"CWFT"},"133":{"name":"FWDC"},"134":{"name":"FRC"}}).map(([id, t]) => [id, t.name]));
 
 /** id -> name, learnt from the game and shared across modules. */
 const LEARNT_TYPES_KEY = 'ymca-vehicle-types';
@@ -2111,7 +2111,7 @@ const MM_TYPES_KEY = 'ymca-missionmagician-types';
  * covers until it has watched enough selection tables to learn the type — so
  * every report that names a new type belongs in that file.
  */
-const MM_SHIPPED_TYPES = {"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine"},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["any_rtw"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser_only"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat"},"10":{"name":"Patrol Car","capabilities":["fustw_or_police_motorcycle"]},"12":{"name":"MCV","longName":"Mobile command vehicle"},"13":{"name":"Quint","capabilities":["fire","dlk"],"longName":"Quint Fire Truck"},"15":{"name":"Fly-Car"},"17":{"name":"Large ARFF Crash Tender","longName":"Large Aircraft Rescue and Firefighting Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw"]},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC","longName":"Wildland Mobile Command Center"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender","longName":"Small Aircraft Rescue and Firefighting Crash Tender"},"80":{"name":"Medium ARFF Crash Tender","longName":"Medium Aircraft Rescue and Firefighting Crash Tender"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"109":{"name":"CCTU","longName":"Critical Care Transport Unit"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC","longName":"Water Tanker Container"},"128":{"name":"FBPC","longName":"Fire Breath Protection Container"},"129":{"name":"USARC","longName":"Urban Search and Rescue Container"},"130":{"name":"HazMat"},"131":{"name":"ICPC","longName":"Incident Command Post Container"},"132":{"name":"CWFT","longName":"Combined Water and Foam Tanker"},"133":{"name":"FWDC","longName":"Flood and Water Damage Container"},"134":{"name":"FRC","longName":"Fire Rolling Container"}};
+const MM_SHIPPED_TYPES = {"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine"},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["any_rtw"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser_only"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat"},"10":{"name":"Patrol car","capabilities":["fustw_or_police_motorcycle"]},"12":{"name":"MCV"},"13":{"name":"Quint","capabilities":["fire","dlk"]},"15":{"name":"Fly-Car"},"16":{"name":"SWAT Armoured Vehicle"},"17":{"name":"Large ARFF Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw"]},"19":{"name":"K-9 Unit"},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"23":{"name":"Police Motorcycle"},"26":{"name":"SWAT SUV"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire","gwl2wasser_only"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"43":{"name":"FBI Investigation Wagon"},"45":{"name":"FBI Bomb Technician Vehicle"},"46":{"name":"FBI Surveillance Drone"},"47":{"name":"Police Supervisor / Sheriff Unit"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"55":{"name":"Patrol Boat"},"56":{"name":"Warden's Truck"},"57":{"name":"EMS Mass Casualty Trailer (large)"},"58":{"name":"EMS Mass Casualty Trailer (small)"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender"},"80":{"name":"Medium ARFF Crash Tender"},"81":{"name":"Small K9 Carrier"},"82":{"name":"Large K9 Carrier"},"83":{"name":"Riot Police Van"},"84":{"name":"Riot Police Bus"},"85":{"name":"Riot Police Trailer"},"86":{"name":"Police Crew Carrier"},"87":{"name":"Police Prisoner Van"},"88":{"name":"Police ATV Trailer"},"89":{"name":"Police MCV"},"90":{"name":"Tactical Rescue Truck"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"101":{"name":"Police Traffic Control Unit"},"102":{"name":"Police Traffic Blocker Unit"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"108":{"name":"Police Wrecker"},"109":{"name":"CCTU"},"110":{"name":"Tactical Rescue Truck with Boat"},"111":{"name":"Police Water Rescue Boat Trailer"},"112":{"name":"Police Water Rescue Double Boat Trailer"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"119":{"name":"Small Police Equipment Trailer"},"120":{"name":"Large Police Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC"},"128":{"name":"FBPC"},"129":{"name":"USARC"},"130":{"name":"HazMat"},"131":{"name":"ICPC"},"132":{"name":"CWFT"},"133":{"name":"FWDC"},"134":{"name":"FRC"}};
 
 function mmKnownTypes() {
     let learnt = {};
@@ -2126,8 +2126,18 @@ function mmKnownTypes() {
     for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) {
         if (Array.isArray(t.capabilities)) known[id] = t.capabilities;
     }
-    // What this game taught wins: the player's own server is the truth here.
-    for (const [id, t] of Object.entries(learnt)) known[id] = Array.isArray(t) ? t : (t.caps || []);
+    /* What this game taught wins: the player's own server is the truth here.
+     *
+     * An empty set is not an answer. MM_FLAGS only holds the flags the
+     * requirements YMCA knows about ask for, so a HazMat came back with no
+     * capabilities at all — it carries flags nothing here reads yet. Storing
+     * that as "covers nothing" would let Cancel Unused send a HazMat home from
+     * a HazMat call. Unknown is the safe reading, and leaving the vehicle alone
+     * is what unknown already does. */
+    for (const [id, t] of Object.entries(learnt)) {
+        const caps = Array.isArray(t) ? t : (t.caps || []);
+        if (caps.length) known[id] = caps;
+    }
     return known;
 }
 
@@ -4031,7 +4041,7 @@ const ENDPOINTS = [
 /* The type ids data/vehicle-types.json already carries, so the vehicle export
  * can say which of the player's types are new rather than making somebody
  * compare two lists by eye. */
-const SHIPPED_VEHICLE_TYPE_IDS = ["0","1","2","3","4","5","6","7","8","9","10","12","13","15","17","18","20","21","22","27","28","29","30","31","32","33","34","38","39","40","41","48","49","50","59","60","61","62","63","64","65","66","67","68","73","74","77","78","79","80","91","92","93","94","95","96","97","98","99","100","103","104","107","109","116","117","118","126","127","128","129","130","131","132","133","134"];
+const SHIPPED_VEHICLE_TYPE_IDS = ["0","1","2","3","4","5","6","7","8","9","10","12","13","15","16","17","18","19","20","21","22","23","26","27","28","29","30","31","32","33","34","38","39","40","41","43","45","46","47","48","49","50","55","56","57","58","59","60","61","62","63","64","65","66","67","68","73","74","77","78","79","80","81","82","83","84","85","86","87","88","89","90","91","92","93","94","95","96","97","98","99","100","101","102","103","104","107","108","109","110","111","112","116","117","118","119","120","126","127","128","129","130","131","132","133","134"];
 
 /** Drop what no planner reads. Icons alone are three paths per mission. */
 function slimMissions(data) {
@@ -4468,6 +4478,7 @@ async function vehicleCatalogue(ctx) {
 
     const types = new Map();
     const reached = [];
+    const sellsNothing = [];
     const failed = [];
 
     for (const [kind, buildingId] of perKind) {
@@ -4484,7 +4495,7 @@ async function vehicleCatalogue(ctx) {
                 types.set(offer.id, row);
             }
         } catch (err) {
-            failed.push({ buildingType: kind, why: err.message });
+            (err.sellsNothing ? sellsNothing : failed).push({ buildingType: kind, why: err.message });
         }
         await ctx.sleep(120);
     }
@@ -4531,6 +4542,7 @@ async function vehicleCatalogue(ctx) {
         missingFromDataset: rows.filter((r) => !r.inDataset).map((r) => r.id),
         stillUnnamed: rows.filter((r) => !r.name).map((r) => r.id),
         buyPagesRead: reached,
+        buildingsThatSellNothing: sellsNothing,
         buyPagesFailed: failed,
     };
 }
@@ -4580,7 +4592,14 @@ async function buyableAt(buildingId) {
             } catch (err) { /* try the next */ }
         }
     }
-    if (!doc) throw new Error(`no buy page found (tried ${tried.join(', ')})`);
+    /* A dispatch center, a fire academy and a prison have no buy page at all.
+     * That is the building, not a breakage, so say which it was: a real failure
+     * reading a station that does sell vehicles has to stay visible. */
+    if (!doc) {
+        const err = new Error(`no buy page (tried ${tried.join(', ')})`);
+        err.sellsNothing = true;
+        throw err;
+    }
 
     /* Which tab a card sits in is the game's own grouping — firetrucks,
      * ambulances, containers — and worth keeping. */

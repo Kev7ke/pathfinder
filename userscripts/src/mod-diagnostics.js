@@ -462,6 +462,7 @@ async function vehicleCatalogue(ctx) {
 
     const types = new Map();
     const reached = [];
+    const sellsNothing = [];
     const failed = [];
 
     for (const [kind, buildingId] of perKind) {
@@ -478,7 +479,7 @@ async function vehicleCatalogue(ctx) {
                 types.set(offer.id, row);
             }
         } catch (err) {
-            failed.push({ buildingType: kind, why: err.message });
+            (err.sellsNothing ? sellsNothing : failed).push({ buildingType: kind, why: err.message });
         }
         await ctx.sleep(120);
     }
@@ -525,6 +526,7 @@ async function vehicleCatalogue(ctx) {
         missingFromDataset: rows.filter((r) => !r.inDataset).map((r) => r.id),
         stillUnnamed: rows.filter((r) => !r.name).map((r) => r.id),
         buyPagesRead: reached,
+        buildingsThatSellNothing: sellsNothing,
         buyPagesFailed: failed,
     };
 }
@@ -574,7 +576,14 @@ async function buyableAt(buildingId) {
             } catch (err) { /* try the next */ }
         }
     }
-    if (!doc) throw new Error(`no buy page found (tried ${tried.join(', ')})`);
+    /* A dispatch center, a fire academy and a prison have no buy page at all.
+     * That is the building, not a breakage, so say which it was: a real failure
+     * reading a station that does sell vehicles has to stay visible. */
+    if (!doc) {
+        const err = new Error(`no buy page (tried ${tried.join(', ')})`);
+        err.sellsNothing = true;
+        throw err;
+    }
 
     /* Which tab a card sits in is the game's own grouping — firetrucks,
      * ambulances, containers — and worth keeping. */

@@ -6,7 +6,13 @@ import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 
+
 const script = readFileSync(new URL('./ymca.user.js', import.meta.url), 'utf8');
+/* VERSION lives in the build and nowhere else, so the test reads it from there rather than
+ * carrying a copy that has to be bumped twice. Importing the builder would rebuild on import,
+ * so the constant is read as text. */
+const VERSION = /VERSION = '([^']+)'/.exec(
+    readFileSync(new URL('../tools/build_ymca.mjs', import.meta.url), 'utf8'))[1];
 const b = await chromium.launch({
   executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'],
 });
@@ -130,6 +136,8 @@ await pg.evaluate(() => {
         <div class="tab-content"><div role="tabpanel" class="tab-pane" id="patrol">
           ${card(10, 'Patrol car')}</div></div>`;
       const b = buildings.find((x) => x.id === Number(id));
+      // A dispatch center has no buy page at all. That is the building, not a breakage.
+      if (b && b.building_type === 1) return new Response('Not Found', { status: 404 });
       return new Response(`<html><body>${b && b.building_type === 5 ? police : fire}</body></html>`,
         { headers: { 'content-type': 'text/html' } });
     }
@@ -252,7 +260,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.18');
+assert.equal(report.ymca, VERSION, 'the report must carry the version the build stamped in');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -285,6 +293,12 @@ console.log('not in dataset    :', JSON.stringify(fleet.missingFromDataset));
 assert.deepEqual(fleet.missingFromDataset, [901],
   'a type the repo does not carry is named, so it can be added without comparing two lists');
 assert.ok(!JSON.stringify(fleet).includes('FS01'), 'no station name may leave in the fleet export');
+// A dispatch center sells nothing, and that must not read like a page that failed to load.
+console.log('sells nothing     :', JSON.stringify(fleet.buildingsThatSellNothing.map((b) => b.buildingType)),
+  'failed:', JSON.stringify(fleet.buyPagesFailed));
+assert.deepEqual(fleet.buildingsThatSellNothing.map((b) => b.buildingType), [1],
+  'a building with no buy page is reported as such, not as a failure');
+assert.deepEqual(fleet.buyPagesFailed, [], 'so a real failure stays visible on its own');
 // And it lands where every module reads it, not just in the clipboard.
 const shared = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-vehicle-types')));
 assert.equal(shared['901'].name, 'Hovercraft Wrangler',
@@ -635,6 +649,35 @@ const tickAfter = await mission.textContent('#ymca-mm-panel [data-do="select"]')
 console.log('tick after        :', tickAfter.trim());
 assert.ok(/Tick 2 vehicles/.test(tickAfter),
   'one engine is already there, so only the two Quints are still needed');
+
+// A type whose checkbox carries none of the flags YMCA reads — a HazMat is the real case — is
+// learnt with an empty capability set. Empty is not an answer: it means the flags it does carry
+// are ones nothing here asks about yet, so it has to stay unknown rather than become "covers
+// nothing", or Cancel Unused would send a HazMat home from a HazMat call.
+await mission.evaluate(() => {
+  const tr = document.createElement('tr');
+  tr.className = 'vehicle_select_table_tr';
+  tr.setAttribute('vehicle_id', '55');
+  tr.setAttribute('data-distance', '9');
+  tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_55"
+    value="55" name="vehicle_ids[]" vehicle_type_id="9" fms="2"></td>
+    <td id="vehicle_sort_55" timevalue="900">15 min.</td>`;
+  document.getElementById('vehicle_show_table_body_all').append(tr);
+  const scene = document.querySelector('#mission_vehicle_at_mission tbody');
+  const on = document.createElement('tr');
+  on.id = 'vehicle_row_98';
+  on.innerHTML = '<td vehicle_type_id="9">on scene</td>';
+  scene.append(on);
+});
+await mission.waitForTimeout(900);
+const flagless = await mission.evaluate(() =>
+  JSON.parse(localStorage.getItem('ymca-missionmagician-types'))['9']);
+console.log('flagless type     :', JSON.stringify(flagless));
+assert.deepEqual(flagless.caps, [], 'the game gave it none of the flags YMCA reads');
+const sceneNote = (await mission.textContent('#ymca-mm-panel')).replace(/\s+/g, ' ');
+console.log('scene note        :', sceneNote.slice(sceneNote.indexOf('already at the mission'), 200));
+assert.ok(/1 whose type has not been seen/.test(sceneNote),
+  'an empty flag set is unknown, not nothing, so the panel says what it cannot judge');
 
 // ---- a Rescue Engine covers heavy rescue AND an engine, by the same route ----
 // The game flags it fire+rw exactly as it flags a Quint fire+dlk, so this needs no special case;

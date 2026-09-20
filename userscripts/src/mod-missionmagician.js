@@ -266,8 +266,18 @@ function mmKnownTypes() {
     for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) {
         if (Array.isArray(t.capabilities)) known[id] = t.capabilities;
     }
-    // What this game taught wins: the player's own server is the truth here.
-    for (const [id, t] of Object.entries(learnt)) known[id] = Array.isArray(t) ? t : (t.caps || []);
+    /* What this game taught wins: the player's own server is the truth here.
+     *
+     * An empty set is not an answer. MM_FLAGS only holds the flags the
+     * requirements YMCA knows about ask for, so a HazMat came back with no
+     * capabilities at all — it carries flags nothing here reads yet. Storing
+     * that as "covers nothing" would let Cancel Unused send a HazMat home from
+     * a HazMat call. Unknown is the safe reading, and leaving the vehicle alone
+     * is what unknown already does. */
+    for (const [id, t] of Object.entries(learnt)) {
+        const caps = Array.isArray(t) ? t : (t.caps || []);
+        if (caps.length) known[id] = caps;
+    }
     return known;
 }
 

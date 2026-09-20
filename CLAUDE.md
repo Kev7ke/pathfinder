@@ -494,6 +494,22 @@ not the same as covering nothing: MissionMagician leaves a vehicle of such a
 type alone rather than judging it. Capabilities only ever come from a mission
 window's selection table, where the flags sit on the checkbox.
 
+**An empty flag set is unknown, not nothing.** `MM_FLAGS` is built from the
+requirements YMCA already knows, so a type whose checkbox carries only flags
+nothing here reads yet comes back with no capabilities at all — a HazMat is the
+real case. Stored as "covers nothing", it would let Cancel Unused send a HazMat
+home from a HazMat call. Unknown is the safe reading, and leaving the vehicle
+alone is what unknown already does.
+
+**A dispatch center, a fire academy and a prison have no buy page.** That is the
+building, not a breakage, so they are reported separately from a page that
+failed to load — otherwise a real failure on a station that *does* sell vehicles
+hides among three that never could.
+
+Three kinds of building sell vehicles: the fire station (75 types, every branch
+from airport to containers), the police station (29) and the ambulance station
+(16, all but its two mass-casualty trailers also sold by fire stations).
+
 That is **Diagnostics → Vehicle types**, and it is the answer to "what is type
 99". Learning names from mission windows still happens — the row carries
 `vehicle_type` next to the checkbox's `vehicle_type_id`, and it is the only

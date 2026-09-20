@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.18';
+export const VERSION = '0.0.19';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -146,7 +146,14 @@ function build() {
     /* The fleet the repo knows about, so a fresh install is not blind until it
      * has watched a few missions. What the player's own game teaches is merged
      * over the top of this, never under it. */
-    const vehicleTypes = JSON.stringify(JSON.parse(read('data/vehicle-types.json')).types);
+    const vehicleTypes = JSON.stringify(Object.fromEntries(
+        Object.entries(JSON.parse(read('data/vehicle-types.json')).types).map(([id, t]) => {
+            /* Only what a module asks of a type. The category and the extension it
+             * needs are worth keeping in the repo and worth nothing in the page. */
+            const lean = { name: t.name };
+            if (t.capabilities) lean.capabilities = t.capabilities;
+            return [id, lean];
+        })));
     const parts = [
         HEADER,
         "(function () {\n'use strict';\n",
