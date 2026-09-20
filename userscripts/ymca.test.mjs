@@ -1388,10 +1388,12 @@ await pg.waitForSelector('.ymca-tile.el');
 const elements = await pg.$$eval('.ymca-tile.el', (b) => b.map((x) => x.dataset.el));
 console.log('elements          :', JSON.stringify(elements));
 await pg.screenshot({ path: '/tmp/ymca-elements.png' });
-assert.deepEqual(elements, ['renamer', 'missionmagician', 'trackops', 'highfive'],
-  'every switchable module should have an element tile');
+assert.deepEqual(elements, ['renamer', 'missionmagician', 'trackops', 'highfive', 'eagleeye'],
+  'every switchable module that is not in a group should have an element tile');
+assert.equal(await pg.locator('.ymca-tile.el[data-el="shuteye"]').count(), 0,
+  'a module in a group is listed inside the group, not beside it');
 // Nothing that works is off by default: an update that hides a tool is an update that broke.
-for (const id of ['renamer', 'missionmagician', 'trackops', 'highfive']) {
+for (const id of ['renamer', 'missionmagician', 'trackops', 'highfive', 'eagleeye']) {
   assert.equal(await pg.locator(`.ymca-switch[data-sw="${id}"] input`).isChecked(), true,
     `${id} should be on until somebody says otherwise`);
 }
@@ -1453,6 +1455,68 @@ assert.deepEqual(
   { 13: 6 }, 'a crew number should be saved under MissionMagician, not under ElementFriend');
 console.log('crew numbers      : saved as typed');
 await pg.click('#ymca-back');
+
+// ---- EagleEye holds ShutEye, and the group switch carries it ----
+await pg.click('.ymca-tile[data-mod="elementfriend"]');
+await pg.waitForSelector('.ymca-tile.el[data-el="eagleeye"]');
+await pg.click('.ymca-tile.el[data-el="eagleeye"] b');
+await pg.waitForSelector('.ymca-tile.el[data-el="shuteye"]');
+console.log('inside eagleeye   : ShutEye');
+assert.equal(await pg.locator('.ymca-switch[data-sw="shuteye"] input').isChecked(), false,
+  'ShutEye is off until asked for: it hides things the player may want');
+
+// A mission panel, shaped the way the game builds one.
+await pg.evaluate(() => {
+  const panel = document.createElement('div');
+  panel.id = 'mission_panel_506247649';
+  panel.innerHTML = `<div class="panel-body"><div class="row">
+    <div class="col-xs-1"><img id="mission_vehicle_state_506247649"></div>
+    <div class="col-xs-11">
+      <div class="mission_overview_countdown" id="mission_overview_countdown_506247649"></div>
+      <div id="mission_bar_outer_506247649" class="progress mission_progress"></div>
+      <div id="mission_missing_506247649" class="alert alert-danger">Missing Vehicles</div>
+      <div id="mission_patients_506247649" class="row">8 Patient</div>
+      <div class="mission_prisoners" id="mission_prisoners_506247649"></div>
+    </div></div></div>`;
+  document.body.append(panel);
+});
+const seen = () => pg.evaluate(() => [...document.querySelectorAll('#mission_panel_506247649 '
+  + '.col-xs-11 > div')].filter((d) => getComputedStyle(d).display !== 'none').map((d) => d.id));
+console.log('panel before      :', JSON.stringify(await seen()));
+assert.equal((await seen()).length, 5, 'untouched, the game shows everything it has');
+
+await pg.click('.ymca-switch[data-sw="shuteye"]');
+await pg.waitForTimeout(150);
+console.log('panel after       :', JSON.stringify(await seen()));
+assert.deepEqual(await seen(), ['mission_bar_outer_506247649'],
+  'the progress bar stays and the rest folds away — a stylesheet, so a panel drawn later obeys');
+assert.equal(await pg.evaluate(() =>
+  getComputedStyle(document.querySelector('#mission_panel_506247649 .col-xs-1 img')).display),
+'inline', 'the artwork is in the other column and is never touched');
+
+// Put one part back, by the id the game gives it.
+await pg.click('.ymca-tile.el[data-el="shuteye"] b');
+await pg.waitForSelector('[data-part="patients"]');
+await pg.check('[data-part="patients"]');
+await pg.waitForTimeout(150);
+console.log('patients back     :', JSON.stringify(await seen()));
+assert.deepEqual(await seen(), ['mission_bar_outer_506247649', 'mission_patients_506247649'],
+  'what is put back comes back, and nothing else with it');
+
+// The group is the master switch: EagleEye off takes ShutEye with it.
+await pg.click('#ef-back');
+await pg.waitForSelector('.ymca-switch[data-sw="shuteye"]');
+await pg.evaluate(() => window.YMCA.switchElement('eagleeye', false));
+await pg.waitForTimeout(150);
+console.log('eagleeye off      :', JSON.stringify(await seen()));
+assert.equal((await seen()).length, 5, 'switching the group off takes every member with it');
+await pg.evaluate(() => {
+  window.YMCA.switchElement('eagleeye', true);
+  window.YMCA.switchElement('shuteye', false);
+  document.getElementById('mission_panel_506247649').remove();
+});
+await pg.click('#ymca-back');
+await pg.waitForSelector('.ymca-tile[data-mod]');
 
 // ---- HighFive: the game already works out which vehicle is next ----
 // A transporting vehicle's page carries #next-vehicle-fms-5, so nothing has to be searched for.
@@ -1543,6 +1607,30 @@ await pg.evaluate(() => {
 assert.equal(await pg.evaluate(() => sessionStorage.getItem('ymca-highfive-jump')), null,
   'with advancing off, a pick arms nothing');
 console.log('highfive off      : a pick arms nothing');
+
+// ---- the page a pick lands on is the proof, and it carries the button already ----
+// Remembering where "next" pointed and reading it back after the navigation had four ways to
+// fail quietly. The capture ended that: a pick lands on /vehicles/<id>/patient/<hospital>, a
+// page with no destinations and #next-vehicle-fms-5 already on it. A fresh page, because a
+// fresh page is exactly what a pick produces.
+const picked = await b.newPage({ viewport: { width: 1100, height: 900 } });
+const pickedErrs = [];
+picked.on('pageerror', (e) => pickedErrs.push(e.message));
+await picked.goto('http://localhost:8777/README.md');
+await picked.setContent(`<html><body>
+  <div class="alert alert-success">Transport assigned</div>
+  <a class="btn btn-success" id="next-vehicle-fms-5"
+    href="/README.md?next=1">Go to the next vehicle with a transport request</a>
+</body></html>`);
+await picked.evaluate(() => history.replaceState({}, '', '/vehicles/15079874/patient/41'));
+await picked.addScriptTag({ content: script });
+await picked.waitForURL(/next=1/, { timeout: 15000 });
+console.log('after a pick      :', new URL(picked.url()).pathname + new URL(picked.url()).search);
+assert.match(picked.url(), /next=1/,
+  'landing on the pick page should follow the next-vehicle button the game put there');
+console.log('picked errors     :', pickedErrs.length ? pickedErrs.slice(0, 3) : 'none');
+assert.equal(pickedErrs.length, 0);
+await picked.close();
 
 console.log('page errors       :', errs.length ? errs.slice(0, 3) : 'none');
 assert.equal(errs.length, 0);

@@ -57,6 +57,8 @@ userscripts/
     mod-trackops.js
     mod-elementfriend.js
     mod-highfive.js
+    mod-eagleeye.js
+    mod-shuteye.js
     mod-diagnostics.js
 tools/build_ymca.mjs  the bundler, and the single home of VERSION
 ```
@@ -127,6 +129,24 @@ Two fields on a module, and no others:
 | `mainTile: false` | never in the launcher. An **element tile**: its work happens in the game's own pages, so a tile on the front would open a panel that does nothing |
 | `settings(el, ctx)` | rendered when its element tile is opened. `ctx` is `YMCA.contextFor(mod.id)`, so what it writes lands in the **module's own** namespace and the module reads it back without knowing ElementFriend exists |
 
+### Groups
+
+**A switchboard that grows a row per tweak stops being a page anybody can take
+in.** A module may declare `group: '<id>'`, and then it is listed inside that
+group's tile rather than beside it. EagleEye is the first: everything under it
+changes how the game's own pages *look* and nothing under it changes what the
+game *does*.
+
+**The group is a master switch.** `YMCA.isOn` answers false for a member whose
+group is off, so switching EagleEye off takes every layout change with it
+without anybody having to remember which ones were on.
+
+**Switching off has to undo what was done.** An injection cannot be un-run, so a
+module that changes the game's own markup declares `onSwitch(on, ctx)` and the
+shell calls it on both edges. Without it a stylesheet written into the page
+stays there until the next reload, which reads as a switch that only works one
+way.
+
 ### Freshness
 
 `ctx.game()` caches for the whole page load, which is right when switching
@@ -161,6 +181,15 @@ follows it after. The destination itself is a plain
 (`#leave_without_transport_no_compensation`). Each destination carries
 `div_free_beds_<id>`, and the list is split into `#own-hospitals` and
 `#alliance-hospitals`.
+
+**The page a pick lands on is the proof, and remembering was the wrong
+mechanism.** Arming a flag before the click and reading it back after the
+navigation has four ways to fail quietly and no way to say which one happened —
+and it did fail, for a whole version, while the sorting beside it worked fine.
+The capture ended it: a pick lands on `/vehicles/<id>/patient/<hospital>`, a
+page with no destinations, no tables, and `#next-vehicle-fms-5` **already on
+it**. Nothing has to survive the navigation. "Leave without transport" is the
+same path with a negative hospital id, so it moves on the same way.
 
 **It never picks, and it never repeats the click as a fetch.** The player clicks
 the hospital; HighFive only remembers where "next" pointed and navigates there
@@ -208,6 +237,13 @@ apart. **That capture found the field without being told its name**, by
 reporting every field whose values across the whole fleet are few and small; an
 id is never tallied however small it happens to be, so a status names itself
 without the player's own identifiers riding along.
+
+**A row that could not be read used to vanish.** `mmOnScene` skipped a row with
+no `vehicle_type_id` *before* counting it, so a vehicle already on its way was
+not at the mission, not unknown and not mentioned — it simply was not there, and
+the panel asked for one more than it needed. Present-but-unreadable is a third
+answer and it has to be one: counted as there, said on screen, and carried in
+the report as `rowSaidNoType` beside the type ids that were read.
 
 **A capture button says where it is being pressed, before it is pressed.** The
 first one was taken on the map and came back with 67 building links and no
@@ -416,6 +452,24 @@ training sentence stays the game's own.
 **`average_credits` is the game's own figure**, in the catalogue the
 `#mission_help` link points at, so the panel can show what a call is worth
 without measuring anything.
+
+**Hide everything, then put back what is wanted.** ShutEye quietens the map's
+mission panels, and naming the parts to hide would mean a part the game adds
+next month is one nobody hid. The column is emptied and the progress bar named
+back in, so anything new is quiet by default — the way round that stays true.
+
+**It is a stylesheet, not a sweep.** The game redraws those panels constantly —
+they are driven by the same socket that announces a mission ending — so hiding
+elements one at a time means hiding them again every few seconds and missing the
+ones that arrive in between. One rule applies to a panel the game has not drawn
+yet.
+
+**A mission panel is `#mission_panel_<id>`.** Inside its `.panel-body` the
+artwork sits in `.col-xs-1` and everything else in `.col-xs-11`, one `<div>`
+each: `mission_overview_countdown_<id>`, `mission_bar_outer_<id>` (the progress
+bar), `mission_missing_<id>`, `mission_missing_short_<id>`,
+`mission_pump_progress_<id>`, `mission_patients_<id>` and
+`mission_prisoners_<id>`.
 
 **A met row greens itself.** Painting the whole table one colour says "something
 is missing" without saying what; a row that goes green when its own line is
@@ -663,6 +717,12 @@ game's dark theme both set a background on `td` and `th`, so a background on the
 once — the catalogue, then a mission's requirements page — and the slower, older
 one can land last and put a stale plan on screen. Take a number before the first
 await and drop the render if it is no longer the newest.
+
+**`text-muted` inside an `alert` is grey on blue.** Bootstrap's muted grey is
+meant for a white panel; in a coloured alert it is the one thing on the page
+nobody can read. Inside an alert the alert sets the colour, so nothing else
+should — dim it with `opacity` instead, which is not a colour and follows
+whatever theme the game is wearing.
 
 **Injected markup uses the game's own Bootstrap classes** — `panel`, `table`,
 `btn`, `label`, `alert` — and never YMCA's role classes, which are scoped to the

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.35
+// @version      0.0.36
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.35',
+    version: '0.0.36',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -740,13 +740,26 @@ function elementStates() {
     return readStore(LS.elements, {});
 }
 
-/** Is this module switched on? Anything not optional always is. */
+/**
+ * Is this module switched on? Anything not optional always is.
+ *
+ * A module may name a `group` — EagleEye is the first — and then its own switch
+ * is only half the answer: switching the group off switches off everything
+ * inside it, which is what makes a group worth having. One master switch for
+ * "none of these layout changes, thank you".
+ */
 YMCA.isOn = function isOn(mod) {
     const m = typeof mod === 'string' ? this.modules.find((x) => x.id === mod) : mod;
     if (!m) return false;
+    if (m.group && !this.isOn(m.group)) return false;
     if (!m.optional) return true;
     const held = elementStates()[m.id];
     return typeof held === 'boolean' ? held : m.defaultOn !== false;
+};
+
+/** The modules inside a group, in register order. */
+YMCA.inGroup = function inGroup(groupId) {
+    return this.modules.filter((m) => m.group === groupId);
 };
 
 /** The only writer is ElementFriend. */
@@ -757,7 +770,21 @@ YMCA.switchElement = function switchElement(id, on) {
     logger.info('shell', `${id} switched ${on ? 'on' : 'off'}`);
     /* Start it where it belongs, now. A switch that only takes effect after a
      * reload is a switch that reads as broken. */
-    if (on) YMCA.startInjection(id);
+    const changed = [id, ...this.inGroup(id).map((m) => m.id)];
+    for (const each of changed) {
+        if (this.isOn(each)) this.startInjection(each);
+        /* Switching OFF has to undo whatever was done to the page. An injection
+         * cannot be un-run, so a module that changes the game's own markup says
+         * how to take it back. */
+        const mod = this.modules.find((m) => m.id === each);
+        if (mod?.onSwitch) {
+            try {
+                mod.onSwitch(this.isOn(mod), YMCA.contextFor(mod.id));
+            } catch (err) {
+                logger.error(each, 'onSwitch failed', err.message);
+            }
+        }
+    }
 };
 
 /** Re-run a module's injection, if it asked for one. Set by the shell below. */
@@ -1032,6 +1059,10 @@ const ICONS = {
         + '<path d="M24 9v10M19 14h10"/>',
     trackops: '<path d="M5 29 H30"/><rect x="7" y="18" width="5" height="11"/>'
         + '<rect x="15" y="11" width="5" height="18"/><rect x="23" y="5" width="5" height="24"/>',
+    eagleeye: '<path d="M2 17s5.5-8 15-8 15 8 15 8-5.5 8-15 8-15-8-15-8Z"/>'
+        + '<circle cx="17" cy="17" r="4.5"/>',
+    shuteye: '<path d="M3 13c3 4.5 8 7.5 14 7.5S28 17.5 31 13"/><path d="M8 19l-2.5 4"/>'
+        + '<path d="M17 20.5V25"/><path d="M26 19l2.5 4"/>',
     elementfriend: '<circle cx="17" cy="17" r="4"/><path d="M17 4v5M17 25v5M4 17h5M25 17h5"/>'
         + '<path d="M8.4 8.4l3.5 3.5M22.1 22.1l3.5 3.5M25.6 8.4l-3.5 3.5M11.9 22.1l-3.5 3.5"/>',
     highfive: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'
@@ -2467,34 +2498,50 @@ function mmOnScene(known, countDriving = true) {
      * — and on an alliance call it may not even be yours. Both meet the
      * requirement, so both count by default, and the panel says which is which
      * so "why does it want one fewer than I do" has an answer on screen. */
-    const at = [...document.querySelectorAll(
-        '#mission_vehicle_at_mission tbody tr[id^="vehicle_row"]')];
-    const driving = [...document.querySelectorAll(
-        '#mission_vehicle_driving tbody tr[id^="vehicle_row"]')];
+    /* A ROW WITH NO READABLE TYPE USED TO VANISH. `continue` came before the
+     * counting, so a vehicle whose row does not carry `vehicle_type_id` was not
+     * at the mission, not unknown, and not mentioned — it simply was not there,
+     * and the panel asked for one more than it needed to. It is counted as
+     * present and unreadable now, and said on screen.
+     *
+     * The rows are taken by the id prefix OR by carrying a type id, because
+     * which of the two a row answers to is the game's business, not ours. */
+    const rowsIn = (id) => {
+        const table = document.getElementById(id);
+        if (!table) return [];
+        return [...table.querySelectorAll('tbody tr')].filter((tr) =>
+            /^vehicle_row/.test(tr.id || '') || tr.querySelector('[vehicle_type_id]'));
+    };
+    const at = rowsIn('mission_vehicle_at_mission');
+    const driving = rowsIn('mission_vehicle_driving');
 
     const counts = {};
     const vehicles = [];
+    const typeIds = [];
     let unknown = 0;
+    let unreadable = 0;
     let total = 0;
     const take = (rows) => {
-        let took = 0;
         for (const row of rows) {
-            const typeId = row.querySelector('[vehicle_type_id]')?.getAttribute('vehicle_type_id');
-            if (!typeId) continue;
-            took += 1;
             total += 1;
+            const typeId = row.querySelector('[vehicle_type_id]')?.getAttribute('vehicle_type_id');
+            if (!typeId) { unreadable += 1; unknown += 1; continue; }
+            typeIds.push(Number(typeId));
             const flags = known[typeId];
             if (!flags) { unknown += 1; continue; }
             vehicles.push(flags);
             for (const flag of flags) counts[flag] = (counts[flag] || 0) + 1;
         }
-        return took;
+        return rows.length;
     };
     const atCount = take(at);
     const drivingCount = countDriving ? take(driving) : 0;
     /* Counted or not, how many are on the way is worth saying. */
-    const drivingSeen = driving.filter((r) => r.querySelector('[vehicle_type_id]')).length;
-    return { counts, vehicles, unknown, total, atCount, drivingCount, drivingSeen, countDriving };
+    const drivingSeen = driving.length;
+    return {
+        counts, vehicles, unknown, unreadable, total, typeIds,
+        atCount, drivingCount, drivingSeen, countDriving,
+    };
 }
 
 /**
@@ -3991,6 +4038,20 @@ async function mmCopyState(ctx, plan, panel) {
             key: l.key, wanted: l.wanted, there: l.onScene, ticked: l.ticked, unmatched: !!l.unmatched,
         })),
         patients: mmPatientProbe(),
+        /* What is already at the mission, broken down. "You missed one that was
+         * on route" cannot be answered by a `there` count alone: the rows the
+         * panel saw, how many it could read a type off, and which types those
+         * were are what says whether one went missing and where. Type ids are
+         * the game's own constants. */
+        scene: plan?.scene ? {
+            atMission: plan.scene.atCount,
+            onTheWay: plan.scene.drivingSeen,
+            countingWhatIsOnTheWay: plan.scene.countDriving,
+            counted: plan.scene.total - plan.scene.unknown,
+            unknownType: plan.scene.unknown - plan.scene.unreadable,
+            rowSaidNoType: plan.scene.unreadable,
+            typeIds: plan.scene.typeIds,
+        } : null,
         vehiclesInRange: page.rows.length,
         followUpTabPresent: page.followUpOffered,
         vehicleTypesLearnt: Object.keys(mmKnownTypes()).length,
@@ -4106,8 +4167,10 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         plan.scene.drivingSeen ? `<b>${plan.scene.drivingSeen}</b> on the way${
             plan.scene.countDriving ? '' : ', not counted'}` : '']
         .filter(Boolean).join(', ')}${plan.scene.total ? ', subtracted above' : ''}${
-        plan.scene.unknown ? ` — except ${plan.scene.unknown} whose type has not been seen in a
-        selection list yet, so what they cover is not known` : ''}.</p>` : ''}
+        plan.scene.unknown ? ` — except ${plan.scene.unknown} ${plan.scene.unreadable
+            === plan.scene.unknown ? 'whose row does not say which type it is'
+            : 'whose type has not been seen in a selection list yet'}, so what they cover is
+        not known` : ''}.</p>` : ''}
 
       ${unmatched.length ? `<div class="alert alert-warning" style="padding:6px 10px">
         <b>Left alone:</b> ${unmatched.map((l) => ctx.esc(l.label)).join(', ')}.
@@ -5316,9 +5379,15 @@ if (toCfg().recording && TO_MAIN_PAGE.test(location.pathname)) {
  * knowing this page exists.
  * ------------------------------------------------------------------------ */
 
-/** The modules that carry a switch. Register order, like everything else. */
+/**
+ * The modules that carry a switch, minus the ones that belong to a group.
+ *
+ * A group is a tile of its own — EagleEye is the first — and its members are
+ * listed inside it. Otherwise the switchboard grows a row per tweak and stops
+ * being a page anybody can take in.
+ */
 function efElements() {
-    return YMCA.modules.filter((m) => m.optional);
+    return YMCA.modules.filter((m) => m.optional && !m.group);
 }
 
 function efSwitch(id, on, label) {
@@ -5392,11 +5461,11 @@ function efTiles(el, ctx) {
     });
 }
 
-function efOpen(el, ctx, mod) {
+function efOpen(el, ctx, mod, back) {
     const on = YMCA.isOn(mod);
     el.innerHTML = `
     <div class="ymca-row" style="justify-content:space-between;margin-bottom:12px">
-      <button class="ymca-btn" id="ef-back">&larr; All elements</button>
+      <button class="ymca-btn" id="ef-back">&larr; ${back ? 'Back' : 'All elements'}</button>
       ${efSwitch(mod.id, on, on ? 'On' : 'Off')}
     </div>
     <div class="ymca-card">
@@ -5405,7 +5474,9 @@ function efOpen(el, ctx, mod) {
     </div>
     <div id="ef-body"></div>`;
 
-    el.querySelector('#ef-back').addEventListener('click', () => efTiles(el, ctx));
+    el.querySelector('#ef-back').addEventListener('click', () => {
+        if (back) back(); else efTiles(el, ctx);
+    });
     efWireSwitches(el, ctx);
 
     const body = el.querySelector('#ef-body');
@@ -5962,7 +6033,7 @@ function hfOnPickPage(ctx) {
         Go straight to the next transport</label>
       ${next ? `<a class="btn btn-xs btn-success" id="hf-next"
         href="${next.getAttribute('href')}">Next transport</a>`
-        : '<span class="text-muted">This is the last transport.</span>'}
+        : '<span style="opacity:.75">This is the last transport.</span>'}
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:7px">
       ${columns.length ? `<label style="font-weight:400;margin:0">Sort by
@@ -5973,7 +6044,7 @@ function hfOnPickPage(ctx) {
         </select></label>
       <label style="font-weight:400;margin:0;cursor:pointer">
         <input type="checkbox" id="hf-down" ${cfg.sortDown ? 'checked' : ''}> biggest first</label>`
-        : '<span class="text-muted">No column in this table reads as a number.</span>'}
+        : '<span style="opacity:.75">No column in this table reads as a number.</span>'}
       <label style="font-weight:400;margin:0">Show
         <select id="hf-limit" class="input-sm">
           ${[0, 5, 10, 20, 40].map((n) => `<option value="${n}"${n === (cfg.limit || 0)
@@ -5985,7 +6056,7 @@ function hfOnPickPage(ctx) {
         ['alliance', 'The alliance\u2019s only']].map(([v, t]) => `<option value="${v}"${
         v === (cfg.who || 'all') ? ' selected' : ''}>${t}</option>`).join('')}
         </select></label>` : ''}
-      <span class="text-muted" id="hf-count"></span>
+      <span style="opacity:.75" id="hf-count"></span>
     </div>`;
 
     /* Above whatever holds the destinations. `before()` needs a parent, so a
@@ -6037,7 +6108,48 @@ function hfOnPickPage(ctx) {
     return true;
 }
 
-/** The page after a pick: go where "next" pointed, unless the game beat us. */
+/**
+ * The page a pick lands on says so itself.
+ *
+ * THE FLAG WAS THE WRONG MECHANISM. Remembering where "next" pointed, then
+ * reading it back after the navigation, has four ways to fail quietly and no
+ * way to say which one happened. The capture ended that: picking a destination
+ * lands on `/vehicles/<id>/patient/<hospital>` — a page with no destinations,
+ * no tables and `#next-vehicle-fms-5` already on it. **The page is the proof.**
+ * Nothing has to be remembered across the navigation and nothing can expire.
+ *
+ * "Leave without transport" is the same path with a negative hospital id, so it
+ * moves on the same way.
+ */
+const HF_PICKED = /^\/vehicles\/\d+\/patient\/-?\d+/;
+
+function hfAfterPick(ctx) {
+    if (!HF_PICKED.test(location.pathname)) return false;
+    const next = document.querySelector(HF_NEXT);
+    const href = next?.getAttribute('href');
+    ctx.store.write('lastPick', {
+        at: new Date().toISOString(),
+        path: hfShape(location.pathname),
+        inFrame: window.top !== window.self,
+        namesNextVehicle: !!href,
+        advance: hfCfg(ctx).advance !== false,
+    });
+    if (hfCfg(ctx).advance === false) {
+        ctx.log.info('picked, but advancing is switched off');
+        return true;
+    }
+    if (!href) {
+        ctx.log.info('picked, and this page names no next vehicle');
+        return true;
+    }
+    if (new URL(href, location.origin).pathname === location.pathname) return true;
+    ctx.log.info('picked, going to the next transport', href);
+    location.href = href;
+    return true;
+}
+
+/** The older route: a flag armed before the click, for a landing page that
+ * carries no button of its own. Harmless where the page above answered. */
 function hfFollowJump(ctx) {
     const jump = hfTakeJump();
     if (!jump) return;
@@ -6051,8 +6163,9 @@ function hfFollowJump(ctx) {
 }
 
 YMCA.inject('highfive', (ctx) => {
-    /* The jump is checked on every page, because the page a pick lands on is
-     * not something this has seen yet. It costs one read of sessionStorage. */
+    /* The page a pick lands on is the first thing asked about, because it is
+     * the one that proves a pick happened. */
+    if (hfAfterPick(ctx)) return true;
     hfFollowJump(ctx);
     /* Falsy, not true: a page that is not a vehicle is not a job done. The
      * player can switch HighFive on while looking at the map and open a
@@ -6081,6 +6194,188 @@ YMCA.register({
 
     async mount(el, ctx) { hfPanel(el, ctx); },
     settings(el, ctx) { hfPanel(el, ctx); },
+});
+
+/* --------------------------------------------------------------------------
+ * EagleEye — what the game shows you, and how much of it.
+ *
+ * A group rather than a tool. Everything under it changes how the game's own
+ * pages look and nothing under it changes what the game does, so they belong
+ * together and they belong behind one master switch: switch EagleEye off and
+ * every layout change goes with it, without having to remember which ones were
+ * on.
+ *
+ * A module joins by declaring `group: 'eagleeye'`. ElementFriend then leaves it
+ * out of its own list and shows it here instead, so the switchboard does not
+ * grow a row per tweak.
+ * ------------------------------------------------------------------------ */
+
+YMCA.register({
+    id: 'eagleeye',
+    title: 'EagleEye',
+    tagline: 'How much the game shows',
+    description: 'Changes to the way the game’s own pages look. Switch this off and every '
+        + 'one of them goes with it.',
+
+    mainTile: false,
+    optional: true,
+    defaultOn: true,
+
+    settings(el, ctx) {
+        const inside = YMCA.inGroup('eagleeye');
+        el.innerHTML = `
+      <p class="ymca-lead">Nothing in here changes what the game does &mdash; only how much of
+        it you are looking at.</p>
+      <div class="ymca-tiles">
+        ${inside.map((m) => {
+        const on = YMCA.isOn(m);
+        return `<div class="ymca-tile el ${on ? '' : 'off'}" data-el="${esc(m.id)}"
+            role="button" tabindex="0">
+            ${iconFor(m.id)}<b>${esc(m.title)}</b><span>${esc(m.tagline || '')}</span>
+            <div class="ymca-foot">
+              <span class="ymca-dim" style="font-size:12px">${m.settings
+            ? 'Open for settings' : 'Nothing to set'}</span>
+              ${efSwitch(m.id, on)}
+            </div>
+          </div>`;
+    }).join('')}
+        <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
+          <span>This is where the next ones land.</span></div>
+      </div>`;
+
+        /* A member's settings replace the whole panel, and Back comes here
+         * rather than all the way out to the switchboard. */
+        const panel = el.closest('#ymca-panel') || el;
+        const self = YMCA.modules.find((m) => m.id === 'eagleeye');
+        const open = (id) => {
+            const mod = YMCA.modules.find((m) => m.id === id);
+            if (mod) efOpen(panel, ctx, mod, () => efOpen(panel, YMCA.contextFor('eagleeye'), self));
+        };
+        el.querySelectorAll('[data-el]').forEach((tile) => {
+            tile.addEventListener('click', (e) => {
+                if (e.target.closest('.ymca-switch')) return;
+                open(tile.dataset.el);
+            });
+        });
+        efWireSwitches(el, ctx, (id, on) => {
+            el.querySelector(`[data-el="${id}"]`)?.classList.toggle('off', !on);
+        });
+    },
+});
+
+/* --------------------------------------------------------------------------
+ * ShutEye — a mission list you can read at a glance.
+ *
+ * The map's mission panels carry everything the game knows: the missing
+ * vehicles line, the patient summary, the prisoner row, the pump progress, the
+ * countdown. All of it useful, and all of it at once, which is why a screen
+ * with eighteen missions on it is a wall of red text. ShutEye leaves the
+ * artwork and the progress bar and folds the rest away.
+ *
+ * IT IS A STYLESHEET, NOT A SWEEP. The game redraws these panels constantly —
+ * they are driven by the same socket that announces a mission ending — so
+ * hiding elements one at a time means hiding them again every few seconds, and
+ * missing the ones that arrive in between. One rule in one stylesheet applies
+ * to a panel the game has not drawn yet.
+ *
+ * HIDE EVERYTHING, THEN PUT BACK WHAT IS WANTED. Naming the parts to hide means
+ * a part the game adds next month is one nobody hid. The column is emptied and
+ * the progress bar named back in, so anything new is quiet by default — which
+ * is the way round that stays true.
+ *
+ * The panel is `#mission_panel_<id>`; inside its `.panel-body` the artwork sits
+ * in `.col-xs-1` and everything else in `.col-xs-11`, one `<div>` per thing:
+ * `mission_overview_countdown_<id>`, `mission_bar_outer_<id>` (the progress
+ * bar), `mission_missing_<id>`, `mission_missing_short_<id>`,
+ * `mission_pump_progress_<id>`, `mission_patients_<id>` and
+ * `mission_prisoners_<id>`.
+ * ------------------------------------------------------------------------ */
+
+const SE_STYLE_ID = 'ymca-shuteye';
+
+/** What can be put back, by the id the game gives it. */
+const SE_PARTS = [
+    { key: 'missing', prefix: 'mission_missing_', label: 'Missing vehicles' },
+    { key: 'patients', prefix: 'mission_patients_', label: 'Patients' },
+    { key: 'prisoners', prefix: 'mission_prisoners_', label: 'Prisoners' },
+    { key: 'countdown', prefix: 'mission_overview_countdown_', label: 'Countdown' },
+    { key: 'pump', prefix: 'mission_pump_progress_', label: 'Pump progress' },
+];
+
+function seCfg(ctx) {
+    return ctx.store.read('cfg', {});
+}
+
+function seCss(cfg) {
+    const panel = 'div[id^="mission_panel_"] .panel-body .col-xs-11';
+    const back = SE_PARTS.filter((p) => cfg[p.key])
+        .map((p) => `${panel} > div[id^="${p.prefix}"]`);
+    return `${panel} > *{display:none !important}
+${[`${panel} > div[id^="mission_bar_outer_"]`, ...back].join(',\n')}{display:block !important}`;
+}
+
+/** Write the rule, or take it away. Both are one element. */
+function seApply(ctx) {
+    const on = YMCA.isOn('shuteye');
+    let style = document.getElementById(SE_STYLE_ID);
+    if (!on) {
+        style?.remove();
+        return;
+    }
+    if (!style) {
+        style = document.createElement('style');
+        style.id = SE_STYLE_ID;
+        (document.head || document.documentElement).append(style);
+    }
+    style.textContent = seCss(seCfg(ctx));
+}
+
+YMCA.inject('shuteye', (ctx) => {
+    /* Only where there are mission panels to quieten. A mission window is not
+     * the list, and a stylesheet in there would hide nothing and confuse the
+     * next person reading the page. */
+    if (window.top !== window.self) return true;
+    seApply(ctx);
+    return true;
+});
+
+YMCA.register({
+    id: 'shuteye',
+    title: 'ShutEye',
+    tagline: 'A quieter mission list',
+    description: 'Leaves the artwork and the progress bar on every mission panel and folds the '
+        + 'rest away, so a screen full of calls reads at a glance.',
+
+    group: 'eagleeye',
+    mainTile: false,
+    optional: true,
+    defaultOn: false,
+
+    /* Switching it off has to take the rule back out, and no reload should be
+     * needed for that. */
+    onSwitch(on, ctx) { seApply(ctx); },
+
+    settings(el, ctx) {
+        const cfg = seCfg(ctx);
+        el.innerHTML = `
+      <div class="ymca-note">The artwork and the progress bar always stay. Everything else is
+        hidden unless you put it back here &mdash; that way round, a panel the game starts
+        drawing next month is quiet without anybody having to notice it.</div>
+      <div class="ymca-card">
+        <b>Keep showing</b>
+        <div class="ymca-pick" style="margin-top:8px">
+          ${SE_PARTS.map((p) => `<label><input type="checkbox" data-part="${ctx.esc(p.key)}"
+            ${cfg[p.key] ? 'checked' : ''}> ${ctx.esc(p.label)}</label>`).join('')}
+        </div>
+      </div>`;
+        el.addEventListener('change', (e) => {
+            const box = e.target.closest('[data-part]');
+            if (!box) return;
+            ctx.store.write('cfg', { ...seCfg(ctx), [box.dataset.part]: box.checked });
+            seApply(ctx);
+            ctx.status(`${box.checked ? 'Showing' : 'Hiding'} ${box.dataset.part}.`);
+        });
+    },
 });
 
 /* --------------------------------------------------------------------------

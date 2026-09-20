@@ -469,34 +469,50 @@ function mmOnScene(known, countDriving = true) {
      * — and on an alliance call it may not even be yours. Both meet the
      * requirement, so both count by default, and the panel says which is which
      * so "why does it want one fewer than I do" has an answer on screen. */
-    const at = [...document.querySelectorAll(
-        '#mission_vehicle_at_mission tbody tr[id^="vehicle_row"]')];
-    const driving = [...document.querySelectorAll(
-        '#mission_vehicle_driving tbody tr[id^="vehicle_row"]')];
+    /* A ROW WITH NO READABLE TYPE USED TO VANISH. `continue` came before the
+     * counting, so a vehicle whose row does not carry `vehicle_type_id` was not
+     * at the mission, not unknown, and not mentioned — it simply was not there,
+     * and the panel asked for one more than it needed to. It is counted as
+     * present and unreadable now, and said on screen.
+     *
+     * The rows are taken by the id prefix OR by carrying a type id, because
+     * which of the two a row answers to is the game's business, not ours. */
+    const rowsIn = (id) => {
+        const table = document.getElementById(id);
+        if (!table) return [];
+        return [...table.querySelectorAll('tbody tr')].filter((tr) =>
+            /^vehicle_row/.test(tr.id || '') || tr.querySelector('[vehicle_type_id]'));
+    };
+    const at = rowsIn('mission_vehicle_at_mission');
+    const driving = rowsIn('mission_vehicle_driving');
 
     const counts = {};
     const vehicles = [];
+    const typeIds = [];
     let unknown = 0;
+    let unreadable = 0;
     let total = 0;
     const take = (rows) => {
-        let took = 0;
         for (const row of rows) {
-            const typeId = row.querySelector('[vehicle_type_id]')?.getAttribute('vehicle_type_id');
-            if (!typeId) continue;
-            took += 1;
             total += 1;
+            const typeId = row.querySelector('[vehicle_type_id]')?.getAttribute('vehicle_type_id');
+            if (!typeId) { unreadable += 1; unknown += 1; continue; }
+            typeIds.push(Number(typeId));
             const flags = known[typeId];
             if (!flags) { unknown += 1; continue; }
             vehicles.push(flags);
             for (const flag of flags) counts[flag] = (counts[flag] || 0) + 1;
         }
-        return took;
+        return rows.length;
     };
     const atCount = take(at);
     const drivingCount = countDriving ? take(driving) : 0;
     /* Counted or not, how many are on the way is worth saying. */
-    const drivingSeen = driving.filter((r) => r.querySelector('[vehicle_type_id]')).length;
-    return { counts, vehicles, unknown, total, atCount, drivingCount, drivingSeen, countDriving };
+    const drivingSeen = driving.length;
+    return {
+        counts, vehicles, unknown, unreadable, total, typeIds,
+        atCount, drivingCount, drivingSeen, countDriving,
+    };
 }
 
 /**
@@ -1993,6 +2009,20 @@ async function mmCopyState(ctx, plan, panel) {
             key: l.key, wanted: l.wanted, there: l.onScene, ticked: l.ticked, unmatched: !!l.unmatched,
         })),
         patients: mmPatientProbe(),
+        /* What is already at the mission, broken down. "You missed one that was
+         * on route" cannot be answered by a `there` count alone: the rows the
+         * panel saw, how many it could read a type off, and which types those
+         * were are what says whether one went missing and where. Type ids are
+         * the game's own constants. */
+        scene: plan?.scene ? {
+            atMission: plan.scene.atCount,
+            onTheWay: plan.scene.drivingSeen,
+            countingWhatIsOnTheWay: plan.scene.countDriving,
+            counted: plan.scene.total - plan.scene.unknown,
+            unknownType: plan.scene.unknown - plan.scene.unreadable,
+            rowSaidNoType: plan.scene.unreadable,
+            typeIds: plan.scene.typeIds,
+        } : null,
         vehiclesInRange: page.rows.length,
         followUpTabPresent: page.followUpOffered,
         vehicleTypesLearnt: Object.keys(mmKnownTypes()).length,
@@ -2108,8 +2138,10 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         plan.scene.drivingSeen ? `<b>${plan.scene.drivingSeen}</b> on the way${
             plan.scene.countDriving ? '' : ', not counted'}` : '']
         .filter(Boolean).join(', ')}${plan.scene.total ? ', subtracted above' : ''}${
-        plan.scene.unknown ? ` — except ${plan.scene.unknown} whose type has not been seen in a
-        selection list yet, so what they cover is not known` : ''}.</p>` : ''}
+        plan.scene.unknown ? ` — except ${plan.scene.unknown} ${plan.scene.unreadable
+            === plan.scene.unknown ? 'whose row does not say which type it is'
+            : 'whose type has not been seen in a selection list yet'}, so what they cover is
+        not known` : ''}.</p>` : ''}
 
       ${unmatched.length ? `<div class="alert alert-warning" style="padding:6px 10px">
         <b>Left alone:</b> ${unmatched.map((l) => ctx.esc(l.label)).join(', ')}.

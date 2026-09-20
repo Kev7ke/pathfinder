@@ -34,9 +34,15 @@
  * knowing this page exists.
  * ------------------------------------------------------------------------ */
 
-/** The modules that carry a switch. Register order, like everything else. */
+/**
+ * The modules that carry a switch, minus the ones that belong to a group.
+ *
+ * A group is a tile of its own — EagleEye is the first — and its members are
+ * listed inside it. Otherwise the switchboard grows a row per tweak and stops
+ * being a page anybody can take in.
+ */
 function efElements() {
-    return YMCA.modules.filter((m) => m.optional);
+    return YMCA.modules.filter((m) => m.optional && !m.group);
 }
 
 function efSwitch(id, on, label) {
@@ -110,11 +116,11 @@ function efTiles(el, ctx) {
     });
 }
 
-function efOpen(el, ctx, mod) {
+function efOpen(el, ctx, mod, back) {
     const on = YMCA.isOn(mod);
     el.innerHTML = `
     <div class="ymca-row" style="justify-content:space-between;margin-bottom:12px">
-      <button class="ymca-btn" id="ef-back">&larr; All elements</button>
+      <button class="ymca-btn" id="ef-back">&larr; ${back ? 'Back' : 'All elements'}</button>
       ${efSwitch(mod.id, on, on ? 'On' : 'Off')}
     </div>
     <div class="ymca-card">
@@ -123,7 +129,9 @@ function efOpen(el, ctx, mod) {
     </div>
     <div id="ef-body"></div>`;
 
-    el.querySelector('#ef-back').addEventListener('click', () => efTiles(el, ctx));
+    el.querySelector('#ef-back').addEventListener('click', () => {
+        if (back) back(); else efTiles(el, ctx);
+    });
     efWireSwitches(el, ctx);
 
     const body = el.querySelector('#ef-body');

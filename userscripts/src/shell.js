@@ -58,13 +58,26 @@ function elementStates() {
     return readStore(LS.elements, {});
 }
 
-/** Is this module switched on? Anything not optional always is. */
+/**
+ * Is this module switched on? Anything not optional always is.
+ *
+ * A module may name a `group` — EagleEye is the first — and then its own switch
+ * is only half the answer: switching the group off switches off everything
+ * inside it, which is what makes a group worth having. One master switch for
+ * "none of these layout changes, thank you".
+ */
 YMCA.isOn = function isOn(mod) {
     const m = typeof mod === 'string' ? this.modules.find((x) => x.id === mod) : mod;
     if (!m) return false;
+    if (m.group && !this.isOn(m.group)) return false;
     if (!m.optional) return true;
     const held = elementStates()[m.id];
     return typeof held === 'boolean' ? held : m.defaultOn !== false;
+};
+
+/** The modules inside a group, in register order. */
+YMCA.inGroup = function inGroup(groupId) {
+    return this.modules.filter((m) => m.group === groupId);
 };
 
 /** The only writer is ElementFriend. */
@@ -75,7 +88,21 @@ YMCA.switchElement = function switchElement(id, on) {
     logger.info('shell', `${id} switched ${on ? 'on' : 'off'}`);
     /* Start it where it belongs, now. A switch that only takes effect after a
      * reload is a switch that reads as broken. */
-    if (on) YMCA.startInjection(id);
+    const changed = [id, ...this.inGroup(id).map((m) => m.id)];
+    for (const each of changed) {
+        if (this.isOn(each)) this.startInjection(each);
+        /* Switching OFF has to undo whatever was done to the page. An injection
+         * cannot be un-run, so a module that changes the game's own markup says
+         * how to take it back. */
+        const mod = this.modules.find((m) => m.id === each);
+        if (mod?.onSwitch) {
+            try {
+                mod.onSwitch(this.isOn(mod), YMCA.contextFor(mod.id));
+            } catch (err) {
+                logger.error(each, 'onSwitch failed', err.message);
+            }
+        }
+    }
 };
 
 /** Re-run a module's injection, if it asked for one. Set by the shell below. */
@@ -350,6 +377,10 @@ const ICONS = {
         + '<path d="M24 9v10M19 14h10"/>',
     trackops: '<path d="M5 29 H30"/><rect x="7" y="18" width="5" height="11"/>'
         + '<rect x="15" y="11" width="5" height="18"/><rect x="23" y="5" width="5" height="24"/>',
+    eagleeye: '<path d="M2 17s5.5-8 15-8 15 8 15 8-5.5 8-15 8-15-8-15-8Z"/>'
+        + '<circle cx="17" cy="17" r="4.5"/>',
+    shuteye: '<path d="M3 13c3 4.5 8 7.5 14 7.5S28 17.5 31 13"/><path d="M8 19l-2.5 4"/>'
+        + '<path d="M17 20.5V25"/><path d="M26 19l2.5 4"/>',
     elementfriend: '<circle cx="17" cy="17" r="4"/><path d="M17 4v5M17 25v5M4 17h5M25 17h5"/>'
         + '<path d="M8.4 8.4l3.5 3.5M22.1 22.1l3.5 3.5M25.6 8.4l-3.5 3.5M11.9 22.1l-3.5 3.5"/>',
     highfive: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'

@@ -515,7 +515,7 @@ function hfOnPickPage(ctx) {
         Go straight to the next transport</label>
       ${next ? `<a class="btn btn-xs btn-success" id="hf-next"
         href="${next.getAttribute('href')}">Next transport</a>`
-        : '<span class="text-muted">This is the last transport.</span>'}
+        : '<span style="opacity:.75">This is the last transport.</span>'}
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:7px">
       ${columns.length ? `<label style="font-weight:400;margin:0">Sort by
@@ -526,7 +526,7 @@ function hfOnPickPage(ctx) {
         </select></label>
       <label style="font-weight:400;margin:0;cursor:pointer">
         <input type="checkbox" id="hf-down" ${cfg.sortDown ? 'checked' : ''}> biggest first</label>`
-        : '<span class="text-muted">No column in this table reads as a number.</span>'}
+        : '<span style="opacity:.75">No column in this table reads as a number.</span>'}
       <label style="font-weight:400;margin:0">Show
         <select id="hf-limit" class="input-sm">
           ${[0, 5, 10, 20, 40].map((n) => `<option value="${n}"${n === (cfg.limit || 0)
@@ -538,7 +538,7 @@ function hfOnPickPage(ctx) {
         ['alliance', 'The alliance\u2019s only']].map(([v, t]) => `<option value="${v}"${
         v === (cfg.who || 'all') ? ' selected' : ''}>${t}</option>`).join('')}
         </select></label>` : ''}
-      <span class="text-muted" id="hf-count"></span>
+      <span style="opacity:.75" id="hf-count"></span>
     </div>`;
 
     /* Above whatever holds the destinations. `before()` needs a parent, so a
@@ -590,7 +590,48 @@ function hfOnPickPage(ctx) {
     return true;
 }
 
-/** The page after a pick: go where "next" pointed, unless the game beat us. */
+/**
+ * The page a pick lands on says so itself.
+ *
+ * THE FLAG WAS THE WRONG MECHANISM. Remembering where "next" pointed, then
+ * reading it back after the navigation, has four ways to fail quietly and no
+ * way to say which one happened. The capture ended that: picking a destination
+ * lands on `/vehicles/<id>/patient/<hospital>` — a page with no destinations,
+ * no tables and `#next-vehicle-fms-5` already on it. **The page is the proof.**
+ * Nothing has to be remembered across the navigation and nothing can expire.
+ *
+ * "Leave without transport" is the same path with a negative hospital id, so it
+ * moves on the same way.
+ */
+const HF_PICKED = /^\/vehicles\/\d+\/patient\/-?\d+/;
+
+function hfAfterPick(ctx) {
+    if (!HF_PICKED.test(location.pathname)) return false;
+    const next = document.querySelector(HF_NEXT);
+    const href = next?.getAttribute('href');
+    ctx.store.write('lastPick', {
+        at: new Date().toISOString(),
+        path: hfShape(location.pathname),
+        inFrame: window.top !== window.self,
+        namesNextVehicle: !!href,
+        advance: hfCfg(ctx).advance !== false,
+    });
+    if (hfCfg(ctx).advance === false) {
+        ctx.log.info('picked, but advancing is switched off');
+        return true;
+    }
+    if (!href) {
+        ctx.log.info('picked, and this page names no next vehicle');
+        return true;
+    }
+    if (new URL(href, location.origin).pathname === location.pathname) return true;
+    ctx.log.info('picked, going to the next transport', href);
+    location.href = href;
+    return true;
+}
+
+/** The older route: a flag armed before the click, for a landing page that
+ * carries no button of its own. Harmless where the page above answered. */
 function hfFollowJump(ctx) {
     const jump = hfTakeJump();
     if (!jump) return;
@@ -604,8 +645,9 @@ function hfFollowJump(ctx) {
 }
 
 YMCA.inject('highfive', (ctx) => {
-    /* The jump is checked on every page, because the page a pick lands on is
-     * not something this has seen yet. It costs one read of sessionStorage. */
+    /* The page a pick lands on is the first thing asked about, because it is
+     * the one that proves a pick happened. */
+    if (hfAfterPick(ctx)) return true;
     hfFollowJump(ctx);
     /* Falsy, not true: a page that is not a vehicle is not a job done. The
      * player can switch HighFive on while looking at the map and open a
