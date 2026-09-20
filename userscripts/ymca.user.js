@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.33
+// @version      0.0.34
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.33',
+    version: '0.0.34',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -755,7 +755,13 @@ YMCA.switchElement = function switchElement(id, on) {
     states[id] = !!on;
     writeStore(LS.elements, states);
     logger.info('shell', `${id} switched ${on ? 'on' : 'off'}`);
+    /* Start it where it belongs, now. A switch that only takes effect after a
+     * reload is a switch that reads as broken. */
+    if (on) YMCA.startInjection(id);
 };
+
+/** Re-run a module's injection, if it asked for one. Set by the shell below. */
+YMCA.startInjection = () => {};
 
 /** Every switch, for the problem report and for ElementFriend's own tiles. */
 YMCA.elementState = function elementState() {
@@ -1163,45 +1169,89 @@ function openWindow(moduleId) {
  *
  * A throw is logged rather than left to break the game's page.
  */
-YMCA.inject = function inject(moduleId, fn) {
-    /* A switched-off module does not reach the game's page either. The switch
-     * has to mean the whole module, not only its tile — MissionMagician's
-     * panel lives in the mission window, so a switch that left it there would
-     * switch off nothing the player can see. */
-    if (!YMCA.isOn(moduleId)) {
-        logger.info(moduleId, 'not injected, switched off in ElementFriend');
-        return;
-    }
+/**
+ * What each module asked to run in the game's own page, kept so switching it on
+ * can start it there and then.
+ *
+ * Without this, switching a module on did nothing until the page was reloaded:
+ * the injection had already given up, and the player was left looking at a
+ * switch that appeared to do nothing. A switch has to take effect where it is
+ * flicked.
+ */
+const injections = new Map();
+
+function runInjection(moduleId, fn) {
+    const held = injections.get(moduleId);
+    if (held?.done) return;              // it has already done its job
+    held?.observer?.disconnect();        // never two observers for one module
+
     const ctx = context(moduleId);
-    let done = false;
+    const state = { fn, done: false, observer: null, said: false };
+    injections.set(moduleId, state);
+
     const attempt = () => {
-        if (done) return true;
+        if (state.done) return true;
+        /* A switched-off module does not reach the game's page either. The
+         * switch has to mean the whole module, not only its tile —
+         * MissionMagician's panel lives in the mission window, so a switch that
+         * left it there would switch off nothing the player can see. */
+        if (!YMCA.isOn(moduleId)) {
+            if (!state.said) { logger.info(moduleId, 'not injected, switched off'); state.said = true; }
+            return false;
+        }
         try {
-            done = !!fn(ctx);
+            state.done = !!fn(ctx);
         } catch (err) {
-            done = true;                       // a module that throws is not retried into a loop
+            state.done = true;                 // a module that throws is not retried into a loop
             logger.error(moduleId, 'injection failed', err.message);
         }
-        return done;
+        return state.done;
     };
     if (attempt()) return;
 
     /* Retry as the page fills in. Coalesced into a frame so a page building
      * itself does not run this once per node. */
     let queued = false;
-    const observer = new MutationObserver(() => {
+    state.observer = new MutationObserver(() => {
         if (queued) return;
         queued = true;
         requestAnimationFrame(() => {
             queued = false;
-            if (attempt()) observer.disconnect();
+            if (attempt()) state.observer.disconnect();
         });
     });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    state.observer.observe(document.documentElement, { childList: true, subtree: true });
 
     /* A page that never grows what was wanted stops being watched rather than
      * observing for the rest of the session. */
-    setTimeout(() => observer.disconnect(), 30000);
+    setTimeout(() => state.observer.disconnect(), 30000);
+}
+
+/**
+ * Run a module's code on the game's own page, outside YMCA's window.
+ *
+ * Almost every module only ever renders into the panel it is handed. A few
+ * belong in the game's own markup instead — MissionMagician sits inside the
+ * mission window the way LSS-Manager's helper does, because a tool you have to
+ * open a lightbox to reach is a tool you stop using. Those get a context
+ * without a mount.
+ *
+ * `fn` returns truthy once it has done its job. Until then it is tried again
+ * whenever the page grows, because **waiting for DOMContentLoaded was the
+ * mistake**: a mission window pulls in the game's application bundle and
+ * whatever else the player has installed, and the log showed the panel landing
+ * as much as sixteen seconds after the markup it needed already existed. The
+ * markup is what matters, not the last script.
+ *
+ * A throw is logged rather than left to break the game's page.
+ */
+YMCA.inject = function inject(moduleId, fn) {
+    runInjection(moduleId, fn);
+};
+
+YMCA.startInjection = (moduleId) => {
+    const held = injections.get(moduleId);
+    if (held && !held.done) runInjection(moduleId, held.fn);
 };
 
 /**
@@ -4432,6 +4482,8 @@ YMCA.register({
           mission; a daily task is named as one and left out.</p>
         <button class="ymca-btn primary" data-do="ledger">Read the credits ledger</button>
         <button class="ymca-btn" data-do="ledger-copy">Copy it</button>
+        <button class="ymca-btn" data-do="ledger-shape"
+          title="press this if the ledger will not read">Copy the credits page</button>
         <span class="ymca-status" id="to-ledger-status"></span>
         <div id="to-ledger"></div>
       </div>
@@ -4541,7 +4593,20 @@ YMCA.register({
                     }
                 }).catch((err) => {
                     status.textContent = `Could not read it: ${err.message}`;
+                    el.querySelector('#to-ledger').innerHTML = `<div class="ymca-note bad"
+              style="margin-top:8px"><b>The ledger did not read.</b> ${ctx.esc(err.message)}<br>
+              Press <b>Copy the credits page</b> and send what it gives you \u2014 it copies the
+              shape of that page and nothing that is on it.</div>`;
                     ctx.log.warn('credits ledger unreadable', err.message);
+                });
+            } else if (e.target.closest('[data-do="ledger-shape"]')) {
+                const status = el.querySelector('#to-ledger-status');
+                status.textContent = 'Reading\u2026';
+                toCaptureLedger().then((shape) => {
+                    const text = JSON.stringify(shape, null, 1);
+                    out.value = text;
+                    status.textContent = `${shape.pages.length} pages looked at.`;
+                    ctx.clipboard(text, 'the credits page\u2019s shape');
                 });
             } else if (e.target.closest('[data-do="copy"]')) {
                 const text = JSON.stringify(toExport(log, listed), null, 1);
@@ -4782,29 +4847,126 @@ const TO_NOT_A_MISSION = [
 /** Income that belongs to the ambulance service rather than to a mission name. */
 const TO_PATIENT_LINES = /^patient (treatment|transport)/i;
 
+/**
+ * Find the columns rather than assume them.
+ *
+ * The first version took cell 0 as the amount, cell 1 as the description and
+ * cell 2 as the date, and threw away any row with fewer than three cells. That
+ * is three assumptions about a page nobody here has seen, and on a real account
+ * it came back with nothing at all. So each row is asked which of its cells is
+ * a number and which carries words, and a row that answers neither is skipped
+ * rather than taking the whole read with it.
+ *
+ * Amounts use a dot for thousands, so every character that is not a digit is
+ * dropped and the sign is read separately.
+ */
+function toParseLedgerRow(tr) {
+    const cells = [...(tr.cells || tr.querySelectorAll('td, th'))];
+    if (cells.length < 2) return null;
+    const text = (c) => (c.textContent || '').replace(/\s+/g, ' ').trim();
+
+    let amount = null;
+    let amountAt = -1;
+    for (let i = 0; i < cells.length; i += 1) {
+        const t = text(cells[i]);
+        if (!/^[+\-\u2212]?\s*[\d.,]+$/.test(t) || !/\d/.test(t)) continue;
+        const digits = Number(t.replace(/\D/g, ''));
+        if (!Number.isFinite(digits) || !digits) continue;
+        amount = /^[-\u2212]/.test(t) ? -digits : digits;
+        amountAt = i;
+        break;
+    }
+    if (amount === null) return null;
+
+    /* The description is the wordiest cell that is not the amount. A date has
+     * digits and separators; a mission name has letters. */
+    let what = '';
+    for (let i = 0; i < cells.length; i += 1) {
+        if (i === amountAt) continue;
+        const t = text(cells[i]);
+        if (!/[a-z]{3}/i.test(t)) continue;
+        if (t.length > what.length) what = t;
+    }
+    if (!what) return null;
+
+    const at = text(cells[cells.length - 1]);
+    return { amount, what, at: at === what ? '' : at };
+}
+
+/** What the page looked like, for a read that came back empty. */
+function toLedgerShape(doc) {
+    const tables = [...doc.querySelectorAll('table')];
+    return {
+        tables: tables.length,
+        rows: tables.map((t) => t.querySelectorAll('tr').length),
+        /* Cell shapes only: how many, what they are called, whether each held
+         * digits or words. Never an amount and never a description. */
+        firstRow: tables.map((t) => {
+            const tr = t.querySelector('tbody tr, tr');
+            if (!tr) return null;
+            return [...(tr.cells || [])].map((c) => ({
+                tag: c.tagName.toLowerCase(),
+                class: (typeof c.className === 'string' && c.className.trim()) || undefined,
+                digits: /\d/.test(c.textContent || ''),
+                words: /[a-z]{3}/i.test(c.textContent || ''),
+            }));
+        }),
+    };
+}
+
 async function toReadLedger() {
     let lastError = null;
+    let lastShape = null;
     for (const path of TO_LEDGER_PATHS) {
         try {
             const res = await fetch(path, { credentials: 'same-origin' });
             if (!res.ok) { lastError = `HTTP ${res.status}`; continue; }
             const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
-            const rows = [...doc.querySelectorAll('table tbody tr')].map((tr) => {
-                const cells = tr.querySelectorAll('td');
-                if (cells.length < 3) return null;
-                const amount = Number(cells[0].textContent.replace(/[^\d-]/g, ''))
-                    * (/-/.test(cells[0].textContent) ? -1 : 1);
-                const what = cells[1].textContent.trim();
-                if (!Number.isFinite(amount) || !what) return null;
-                return { amount, what, at: cells[2].textContent.trim() };
-            }).filter(Boolean);
+            const rows = [...doc.querySelectorAll('table tr')]
+                .map(toParseLedgerRow).filter(Boolean);
             if (rows.length) return { path, rows };
-            lastError = 'the page answered but carried no rows';
+            lastShape = { path, ...toLedgerShape(doc) };
+            lastError = `${path} answered, but no row in it read as an amount and a description`;
         } catch (err) {
             lastError = err.message;
         }
     }
-    throw new Error(lastError || 'no credits page answered');
+    const err = new Error(lastError || 'no credits page answered');
+    err.shape = lastShape;
+    throw err;
+}
+
+/**
+ * The credits page, as structure.
+ *
+ * Pressed when the ledger will not read, so the next version knows what it is
+ * looking at. Table and cell shapes only \u2014 never an amount, never a line's
+ * description, never a balance.
+ */
+async function toCaptureLedger() {
+    const out = { ymca: YMCA.version, what: 'trackops-ledger', at: new Date().toISOString(), pages: [] };
+    for (const path of TO_LEDGER_PATHS) {
+        try {
+            const res = await fetch(path, { credentials: 'same-origin' });
+            if (!res.ok) { out.pages.push({ path, status: res.status }); continue; }
+            const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+            const rows = [...doc.querySelectorAll('table tr')].map(toParseLedgerRow).filter(Boolean);
+            out.pages.push({
+                path,
+                status: res.status,
+                rowsParsed: rows.length,
+                ...toLedgerShape(doc),
+                /* Where the rest of the ledger is: the game keeps many pages and
+                 * one of these links is how to reach them. Shapes, not targets. */
+                linkShapes: [...new Set([...doc.querySelectorAll('a[href]')]
+                    .map((a) => (a.getAttribute('href') || '').split('?')[0].replace(/\d+/g, '#')))]
+                    .filter(Boolean).slice(0, 25),
+            });
+        } catch (err) {
+            out.pages.push({ path, failed: err.message });
+        }
+    }
+    return out;
 }
 
 /**
@@ -5282,14 +5444,36 @@ YMCA.register({
  *
  * So FINDING the vehicles works: the list below is read from `/api/vehicles`.
  *
- * WHAT DOES NOT WORK YET IS THE PICKING. The markup of the game's own vehicle
- * window while it is transporting has not been seen — what holds the
- * destinations, what a pick actually is, and what the page does afterwards.
- * Guessing a selector that clicks a destination on somebody's behalf is
- * exactly the thing this repo does not do: a wrong guess sends a patient to
- * the wrong hospital and there is no undo for that. So the list links to each
- * vehicle and stops there, and the capture button collects the missing piece —
- * structure only, never a hospital name, a patient or an address.
+ * AND THE GAME ADVANCES ITSELF, which is the whole trick. A transporting
+ * vehicle's page carries
+ *
+ *     <a class="btn btn-success" id="next-vehicle-fms-5"
+ *        href="/vehicles/15079875">Go to the next vehicle with a transport request</a>
+ *
+ * so the next vehicle in status 5 is a link the game has already worked out.
+ * Nothing has to be searched for and nothing has to be guessed: HighFive reads
+ * that href before the pick and follows it after, which is the one button
+ * LSS-Manager presses for you.
+ *
+ * **IT NEVER PICKS, AND IT NEVER FETCHES THE PICK.** The destination is a plain
+ * `<a href="/vehicles/<id>/patient/<hospital>">` and the player clicks it
+ * themselves; HighFive only remembers where "next" pointed and goes there
+ * afterwards. Doing the GET on their behalf would be writing something that
+ * cannot be taken back, and a failed fetch would leave a patient untransported
+ * while the panel moved on. Navigating is not writing.
+ *
+ * The jump is one-shot and it checks first: if the game already landed on the
+ * vehicle it was going to send you to, it does nothing rather than skipping one.
+ * It also expires, so a flag left behind cannot hijack a navigation minutes
+ * later.
+ *
+ * WHAT IS STILL MISSING IS THE FILTERING. A range — "only hospitals within so
+ * far" — needs to know which cell of that table carries the distance, and the
+ * rows carry no class at all (`rowClasses: {}` on a page with 35 destinations).
+ * So the capture asks for the table's own shape and the filter waits for it.
+ * `hospital_max_distance`, `hospital_max_price` and `hospital_own` sit on the
+ * vehicle in `/api/vehicles`, which is where the game keeps that setting
+ * itself.
  *
  * THE FIRST CAPTURE WAS TAKEN ON THE MAP, which is why it came back with 67
  * building links and no destinations. The panel says where it is being pressed
@@ -5314,6 +5498,10 @@ function hfTally(list, cap) {
  * it. That is why this does not need to be injected into the game's markup to
  * work.
  */
+/** The page's own answer to "is this a vehicle waiting for a destination". */
+const HF_PICK_LINK = 'a[href*="/patient/"]';
+const HF_NEXT = '#next-vehicle-fms-5';
+
 function hfCapturePage() {
     const classOf = (el) => (typeof el.className === 'string' ? el.className.trim().slice(0, 100) : '');
 
@@ -5343,6 +5531,53 @@ function hfCapturePage() {
             .map(classOf).filter(Boolean), 25),
         tableCount: document.querySelectorAll('table').length,
         forms,
+        /* WHAT THE RANGE FILTER IS WAITING FOR. 35 destinations came back with
+         * no class on a single row, so which cell carries the distance cannot
+         * be found by name. This asks the row itself: how many cells, what each
+         * is called, and whether it holds digits or words. Never a hospital
+         * name, never a distance, never a price — only the shape of the cell
+         * one of them is in. */
+        destinations: (() => {
+            const link = document.querySelector(HF_PICK_LINK);
+            const row = link?.closest('tr');
+            const table = link?.closest('table');
+            if (!link) return 'no destination link on this page';
+            if (!row) {
+                const up = link.parentElement;
+                return { noRow: true, parent: up
+                    ? { tag: up.tagName.toLowerCase(), class: classOf(up) || undefined } : null };
+            }
+            return {
+                rows: table ? table.querySelectorAll('tr').length : null,
+                tableId: hfShape(table?.id) || undefined,
+                tableClass: classOf(table) || undefined,
+                rowAttributes: [...row.attributes].map((a) => a.name),
+                cells: [...(row.cells || [])].map((c) => ({
+                    tag: c.tagName.toLowerCase(),
+                    class: classOf(c) || undefined,
+                    attributes: [...c.attributes].map((a) => a.name),
+                    digits: /\d/.test(c.textContent || ''),
+                    words: /[a-z]{4}/i.test(c.textContent || ''),
+                    controls: [...c.querySelectorAll('a,button,input,span[id]')]
+                        .map((x) => `${x.tagName.toLowerCase()}${hfShape(x.id) ? `#${hfShape(x.id)}` : ''}.${classOf(x)}`)
+                        .slice(0, 4),
+                })),
+                /* Which of these is a section and which is a heading decides
+                 * whether "own only" can be done by hiding one thing. */
+                sections: ['own-hospitals', 'alliance-hospitals', 'showRetired', 'showBtn',
+                    'hideBtn', 'leave_without_transport_no_compensation']
+                    .map((id) => {
+                        const el = document.getElementById(id);
+                        return el ? {
+                            id,
+                            tag: el.tagName.toLowerCase(),
+                            class: classOf(el) || undefined,
+                            holdsLinks: el.querySelectorAll(HF_PICK_LINK).length,
+                        } : { id, missing: true };
+                    }),
+            };
+        })(),
+        hasNextButton: !!document.querySelector(HF_NEXT),
     };
 }
 
@@ -5410,11 +5645,19 @@ function hfPanel(el, ctx) {
       <button class="ymca-btn" data-do="again" style="margin-top:10px">Read it again</button>
     </div>
 
-    <div class="ymca-note warn"><b>Picking for you does not work yet.</b>
-      Finding the vehicles does \u2014 that is the list above. What is missing is the markup of
-      one of your vehicles <em>while it is transporting</em>, so nothing here can move you on to
-      the next one after you have picked. Guessing which link is a hospital would mean guessing
-      where a patient goes, and that cannot be taken back.</div>
+    <div class="ymca-card">
+      <b>After you pick</b>
+      <label style="display:block;margin-top:6px;font-weight:400;cursor:pointer">
+        <input type="checkbox" data-cfg="advance"> Go straight to the next transport</label>
+      <p class="ymca-dim" style="margin:6px 0 0;font-size:12px">The game works out which vehicle
+        is next and links to it; this follows that link once you have picked. It never picks for
+        you and never repeats your click \u2014 assigning a hospital cannot be undone.</p>
+    </div>
+
+    <div class="ymca-note warn"><b>Filtering the list does not work yet.</b>
+      Setting a range, so only the hospitals close enough are listed, needs to know which column
+      of that table carries the distance \u2014 and on a page with 35 of them not one row carries
+      a class. The capture below asks for the table's own shape.</div>
 
     <div class="ymca-card">
       <b>Send the missing piece</b>
@@ -5457,6 +5700,13 @@ function hfPanel(el, ctx) {
     };
     paint();
 
+    const advance = el.querySelector('[data-cfg="advance"]');
+    advance.checked = hfCfg(ctx).advance !== false;
+    advance.addEventListener('change', () => {
+        ctx.store.write('cfg', { ...hfCfg(ctx), advance: advance.checked });
+        ctx.status(advance.checked ? 'It will move you on.' : 'It will stay put.');
+    });
+
     el.addEventListener('click', async (e) => {
         const btn = e.target.closest('[data-do]');
         if (!btn) return;
@@ -5482,6 +5732,120 @@ function hfPanel(el, ctx) {
         }
     });
 }
+
+/* ------------------------------------------------- going to the next one */
+
+/**
+ * Where the jump is remembered between two page loads.
+ *
+ * sessionStorage rather than a variable, because the pick navigates: the page
+ * that reads this is not the page that wrote it. It is one-shot and it expires,
+ * so a flag left behind by a click the player thought better of cannot take
+ * over a navigation two minutes later.
+ */
+const HF_JUMP_KEY = 'ymca-highfive-jump';
+const HF_JUMP_GOOD_FOR = 30e3;
+
+function hfCfg(ctx) {
+    return ctx.store.read('cfg', { advance: true });
+}
+
+function hfArmJump(href) {
+    try {
+        sessionStorage.setItem(HF_JUMP_KEY, JSON.stringify({
+            href, path: new URL(href, location.origin).pathname, at: Date.now(),
+        }));
+    } catch (e) { /* private window: the jump simply does not happen */ }
+}
+
+function hfTakeJump() {
+    let held = null;
+    try {
+        held = JSON.parse(sessionStorage.getItem(HF_JUMP_KEY));
+        // Taken, not read: one-shot, so a jump that fails cannot loop.
+        sessionStorage.removeItem(HF_JUMP_KEY);
+    } catch (e) {
+        return null;
+    }
+    if (!held || Date.now() - held.at > HF_JUMP_GOOD_FOR) return null;
+    return held;
+}
+
+/**
+ * On a vehicle waiting for a destination: remember where "next" points, and
+ * put the switch where the player is looking.
+ *
+ * The click is only listened to. It is never taken over, never prevented and
+ * never repeated as a fetch — the player's own click is what assigns the
+ * hospital, and that cannot be undone.
+ */
+function hfOnPickPage(ctx) {
+    if (document.getElementById('hf-bar')) return true;
+    const link = document.querySelector(HF_PICK_LINK);
+    if (!link) return false;
+
+    const next = document.querySelector(HF_NEXT);
+    const cfg = hfCfg(ctx);
+
+    /* The game's own Bootstrap, never YMCA's role classes: this is the game's
+     * page and it has to follow it into whatever theme it is wearing. */
+    const bar = document.createElement('div');
+    bar.id = 'hf-bar';
+    bar.className = 'alert alert-info';
+    bar.style.margin = '6px 0';
+    bar.innerHTML = `<label style="font-weight:400;margin:0;cursor:pointer">
+      <input type="checkbox" id="hf-advance" ${cfg.advance ? 'checked' : ''}>
+      Go straight to the next transport after you pick</label>
+    ${next ? ` <a class="btn btn-xs btn-success" href="${next.getAttribute('href')}"
+      style="margin-left:10px">Next transport</a>`
+        : ' <span class="text-muted" style="margin-left:10px">This is the last one.</span>'}`;
+    /* Above whatever holds the destinations. `before()` needs a parent, so a
+     * table sitting directly in <body> falls back to going in at the top. */
+    const holder = link.closest('table') || link.closest('div');
+    if (holder && holder.parentElement) holder.before(bar);
+    else document.body.prepend(bar);
+
+    bar.querySelector('#hf-advance').addEventListener('change', (e) => {
+        ctx.store.write('cfg', { ...hfCfg(ctx), advance: e.target.checked });
+        ctx.log.info(`advance ${e.target.checked ? 'on' : 'off'}`);
+    });
+
+    document.addEventListener('click', (e) => {
+        const picked = e.target.closest(HF_PICK_LINK);
+        if (!picked || !hfCfg(ctx).advance) return;
+        const href = document.querySelector(HF_NEXT)?.getAttribute('href');
+        if (!href) return;
+        hfArmJump(href);
+        ctx.log.info('picked a destination, next is armed');
+    }, true);
+
+    return true;
+}
+
+/** The page after a pick: go where "next" pointed, unless the game beat us. */
+function hfFollowJump(ctx) {
+    const jump = hfTakeJump();
+    if (!jump) return;
+    if (location.pathname === jump.path) {
+        // The game landed there itself. Jumping again would skip a vehicle.
+        ctx.log.info('already on the next vehicle, not jumping');
+        return;
+    }
+    ctx.log.info('going to the next transport', jump.path);
+    location.href = jump.href;
+}
+
+YMCA.inject('highfive', (ctx) => {
+    /* The jump is checked on every page, because the page a pick lands on is
+     * not something this has seen yet. It costs one read of sessionStorage. */
+    hfFollowJump(ctx);
+    /* Falsy, not true: a page that is not a vehicle is not a job done. The
+     * player can switch HighFive on while looking at the map and open a
+     * transport a moment later, and marking it finished here would mean the
+     * bar never appeared until the next reload. */
+    if (!/^\/vehicles\/\d+/.test(location.pathname)) return false;
+    return hfOnPickPage(ctx);
+});
 
 YMCA.register({
     id: 'highfive',
@@ -5577,10 +5941,15 @@ YMCA.register({
           <b>What they can do</b> reads one vehicle of each type you own and takes the capability
           flags off it, so a type does not have to wait until it happens to be in range of a
           mission. Ids and flags only.<br>
-          <b>Download everything</b> is for rebuilding the dataset. That one carries your player
-          name, your alliance and your building coordinates, so share it only where you are happy
+          <b>Send this one</b> is everything the repo needs in a single file, with nothing in it
+          that is yours: every vehicle type and what it can do, every mission the game lists,
+          what you have run, what the ledger says each paid, and every requirement nothing could
+          match. That is the file to hand over.<br>
+          <b>Download everything</b> is the raw endpoints. That one carries your player name,
+          your alliance and your building coordinates, so share it only where you are happy
           to.</p>
-        <button class="ymca-btn primary" data-do="export-all">Download everything</button>
+        <button class="ymca-btn primary" data-do="dataset">Send this one</button>
+        <button class="ymca-btn" data-do="export-all">Download everything</button>
         <button class="ymca-btn" data-do="vehicles">Vehicle types</button>
         <button class="ymca-btn" data-do="capabilities">What they can do</button>
         <button class="ymca-btn" data-do="sweep">Look for new types now</button>
@@ -5716,6 +6085,89 @@ async function run(what, ctx, put) {
             await ctx.sleep(120);
         }
         put(rows, 'the endpoint check');
+        return;
+    }
+
+    /* ONE FILE, AND NOTHING IN IT IS THEIRS.
+     *
+     * Every answer this repo has ever asked for, gathered without anybody
+     * having to remember which button produced which half: the type store, the
+     * game's own mission list, what has actually been run, what the ledger says
+     * it paid, and the requirement keys nothing could match.
+     *
+     * What it deliberately leaves out is the whole of "Download everything":
+     * no player name, no alliance, no buildings, no coordinates, no vehicle
+     * captions, no mission instance ids. The reason there are two buttons is
+     * that one of them can be posted in public and the other cannot.
+     */
+    if (what === 'dataset') {
+        ctx.status('Gathering\u2026');
+        const data = {
+            note: 'Everything YMCA has learnt about the game, and nothing about the account. '
+                + 'No player name, no alliance, no buildings, no coordinates, no vehicle names.',
+            ymca: YMCA.version,
+            at: new Date().toISOString(),
+            game: location.origin,
+            locale: ctx.locale() || null,
+        };
+
+        /* Vehicle types: what the repo shipped, with whatever this game taught
+         * laid over the top. Names, flags, seats and training \u2014 the type, not
+         * the vehicle. */
+        let learnt = {};
+        try {
+            learnt = JSON.parse(localStorage.getItem('ymca-vehicle-types')) || {};
+        } catch (err) { /* nothing learnt here yet */ }
+        const types = {};
+        for (const [id, t] of Object.entries(SHIPPED_VEHICLE_TYPES)) types[id] = { ...t };
+        for (const [id, t] of Object.entries(learnt)) {
+            const caps = Array.isArray(t) ? t : (t.caps || []);
+            types[id] = { ...(types[id] || {}) };
+            if (caps.length) types[id].capabilities = caps;
+            if (!Array.isArray(t) && t.name) types[id].name = t.name;
+            types[id].learntHere = true;
+        }
+        data.vehicleTypes = types;
+        data.vehicleTypesNotShipped = Object.keys(types)
+            .filter((id) => !SHIPPED_VEHICLE_TYPES[id]).map(Number);
+
+        /* Which types this account actually owns, as a count per type. A count
+         * is not a vehicle: no ids, no names, no stations. */
+        try {
+            const fleet = await ctx.game('/api/vehicles');
+            const own = {};
+            for (const v of fleet || []) {
+                const t = String(v.vehicle_type ?? '');
+                if (t) own[t] = (own[t] || 0) + 1;
+            }
+            data.ownedByType = own;
+        } catch (err) {
+            data.ownedByType = `could not be read: ${err.message}`;
+        }
+
+        /* The game's own mission list, which is what data/missions.json is
+         * built from. It is the same static list for everyone on this server. */
+        try {
+            const missions = await ctx.rawGame('/einsaetze.json');
+            data.missions = slimMissions(missions);
+        } catch (err) {
+            data.missions = `could not be read: ${err.message}`;
+        }
+
+        /* What the other modules have worked out, read from their stores so a
+         * module can change or go without breaking this. */
+        data.trackops = moduleStore('trackops');
+        data.missionmagician = moduleStore('missionmagician');
+        data.highfive = moduleStore('highfive');
+        data.elements = YMCA.elementState();
+        data.typeSweep = sweepState();
+
+        const text = JSON.stringify(data, null, 1);
+        ctx.download('ymca-dataset.json', text);
+        out.value = text;
+        ctx.status(`Downloaded ymca-dataset.json \u2014 ${Math.round(text.length / 1024)} KB, `
+            + `${Object.keys(types).length} vehicle types. Nothing in it is yours.`);
+        ctx.log.info('dataset exported', `${Math.round(text.length / 1024)} KB`);
         return;
     }
 

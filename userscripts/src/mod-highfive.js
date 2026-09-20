@@ -18,14 +18,36 @@
  *
  * So FINDING the vehicles works: the list below is read from `/api/vehicles`.
  *
- * WHAT DOES NOT WORK YET IS THE PICKING. The markup of the game's own vehicle
- * window while it is transporting has not been seen — what holds the
- * destinations, what a pick actually is, and what the page does afterwards.
- * Guessing a selector that clicks a destination on somebody's behalf is
- * exactly the thing this repo does not do: a wrong guess sends a patient to
- * the wrong hospital and there is no undo for that. So the list links to each
- * vehicle and stops there, and the capture button collects the missing piece —
- * structure only, never a hospital name, a patient or an address.
+ * AND THE GAME ADVANCES ITSELF, which is the whole trick. A transporting
+ * vehicle's page carries
+ *
+ *     <a class="btn btn-success" id="next-vehicle-fms-5"
+ *        href="/vehicles/15079875">Go to the next vehicle with a transport request</a>
+ *
+ * so the next vehicle in status 5 is a link the game has already worked out.
+ * Nothing has to be searched for and nothing has to be guessed: HighFive reads
+ * that href before the pick and follows it after, which is the one button
+ * LSS-Manager presses for you.
+ *
+ * **IT NEVER PICKS, AND IT NEVER FETCHES THE PICK.** The destination is a plain
+ * `<a href="/vehicles/<id>/patient/<hospital>">` and the player clicks it
+ * themselves; HighFive only remembers where "next" pointed and goes there
+ * afterwards. Doing the GET on their behalf would be writing something that
+ * cannot be taken back, and a failed fetch would leave a patient untransported
+ * while the panel moved on. Navigating is not writing.
+ *
+ * The jump is one-shot and it checks first: if the game already landed on the
+ * vehicle it was going to send you to, it does nothing rather than skipping one.
+ * It also expires, so a flag left behind cannot hijack a navigation minutes
+ * later.
+ *
+ * WHAT IS STILL MISSING IS THE FILTERING. A range — "only hospitals within so
+ * far" — needs to know which cell of that table carries the distance, and the
+ * rows carry no class at all (`rowClasses: {}` on a page with 35 destinations).
+ * So the capture asks for the table's own shape and the filter waits for it.
+ * `hospital_max_distance`, `hospital_max_price` and `hospital_own` sit on the
+ * vehicle in `/api/vehicles`, which is where the game keeps that setting
+ * itself.
  *
  * THE FIRST CAPTURE WAS TAKEN ON THE MAP, which is why it came back with 67
  * building links and no destinations. The panel says where it is being pressed
@@ -50,6 +72,10 @@ function hfTally(list, cap) {
  * it. That is why this does not need to be injected into the game's markup to
  * work.
  */
+/** The page's own answer to "is this a vehicle waiting for a destination". */
+const HF_PICK_LINK = 'a[href*="/patient/"]';
+const HF_NEXT = '#next-vehicle-fms-5';
+
 function hfCapturePage() {
     const classOf = (el) => (typeof el.className === 'string' ? el.className.trim().slice(0, 100) : '');
 
@@ -79,6 +105,53 @@ function hfCapturePage() {
             .map(classOf).filter(Boolean), 25),
         tableCount: document.querySelectorAll('table').length,
         forms,
+        /* WHAT THE RANGE FILTER IS WAITING FOR. 35 destinations came back with
+         * no class on a single row, so which cell carries the distance cannot
+         * be found by name. This asks the row itself: how many cells, what each
+         * is called, and whether it holds digits or words. Never a hospital
+         * name, never a distance, never a price — only the shape of the cell
+         * one of them is in. */
+        destinations: (() => {
+            const link = document.querySelector(HF_PICK_LINK);
+            const row = link?.closest('tr');
+            const table = link?.closest('table');
+            if (!link) return 'no destination link on this page';
+            if (!row) {
+                const up = link.parentElement;
+                return { noRow: true, parent: up
+                    ? { tag: up.tagName.toLowerCase(), class: classOf(up) || undefined } : null };
+            }
+            return {
+                rows: table ? table.querySelectorAll('tr').length : null,
+                tableId: hfShape(table?.id) || undefined,
+                tableClass: classOf(table) || undefined,
+                rowAttributes: [...row.attributes].map((a) => a.name),
+                cells: [...(row.cells || [])].map((c) => ({
+                    tag: c.tagName.toLowerCase(),
+                    class: classOf(c) || undefined,
+                    attributes: [...c.attributes].map((a) => a.name),
+                    digits: /\d/.test(c.textContent || ''),
+                    words: /[a-z]{4}/i.test(c.textContent || ''),
+                    controls: [...c.querySelectorAll('a,button,input,span[id]')]
+                        .map((x) => `${x.tagName.toLowerCase()}${hfShape(x.id) ? `#${hfShape(x.id)}` : ''}.${classOf(x)}`)
+                        .slice(0, 4),
+                })),
+                /* Which of these is a section and which is a heading decides
+                 * whether "own only" can be done by hiding one thing. */
+                sections: ['own-hospitals', 'alliance-hospitals', 'showRetired', 'showBtn',
+                    'hideBtn', 'leave_without_transport_no_compensation']
+                    .map((id) => {
+                        const el = document.getElementById(id);
+                        return el ? {
+                            id,
+                            tag: el.tagName.toLowerCase(),
+                            class: classOf(el) || undefined,
+                            holdsLinks: el.querySelectorAll(HF_PICK_LINK).length,
+                        } : { id, missing: true };
+                    }),
+            };
+        })(),
+        hasNextButton: !!document.querySelector(HF_NEXT),
     };
 }
 
@@ -146,11 +219,19 @@ function hfPanel(el, ctx) {
       <button class="ymca-btn" data-do="again" style="margin-top:10px">Read it again</button>
     </div>
 
-    <div class="ymca-note warn"><b>Picking for you does not work yet.</b>
-      Finding the vehicles does \u2014 that is the list above. What is missing is the markup of
-      one of your vehicles <em>while it is transporting</em>, so nothing here can move you on to
-      the next one after you have picked. Guessing which link is a hospital would mean guessing
-      where a patient goes, and that cannot be taken back.</div>
+    <div class="ymca-card">
+      <b>After you pick</b>
+      <label style="display:block;margin-top:6px;font-weight:400;cursor:pointer">
+        <input type="checkbox" data-cfg="advance"> Go straight to the next transport</label>
+      <p class="ymca-dim" style="margin:6px 0 0;font-size:12px">The game works out which vehicle
+        is next and links to it; this follows that link once you have picked. It never picks for
+        you and never repeats your click \u2014 assigning a hospital cannot be undone.</p>
+    </div>
+
+    <div class="ymca-note warn"><b>Filtering the list does not work yet.</b>
+      Setting a range, so only the hospitals close enough are listed, needs to know which column
+      of that table carries the distance \u2014 and on a page with 35 of them not one row carries
+      a class. The capture below asks for the table's own shape.</div>
 
     <div class="ymca-card">
       <b>Send the missing piece</b>
@@ -193,6 +274,13 @@ function hfPanel(el, ctx) {
     };
     paint();
 
+    const advance = el.querySelector('[data-cfg="advance"]');
+    advance.checked = hfCfg(ctx).advance !== false;
+    advance.addEventListener('change', () => {
+        ctx.store.write('cfg', { ...hfCfg(ctx), advance: advance.checked });
+        ctx.status(advance.checked ? 'It will move you on.' : 'It will stay put.');
+    });
+
     el.addEventListener('click', async (e) => {
         const btn = e.target.closest('[data-do]');
         if (!btn) return;
@@ -218,6 +306,120 @@ function hfPanel(el, ctx) {
         }
     });
 }
+
+/* ------------------------------------------------- going to the next one */
+
+/**
+ * Where the jump is remembered between two page loads.
+ *
+ * sessionStorage rather than a variable, because the pick navigates: the page
+ * that reads this is not the page that wrote it. It is one-shot and it expires,
+ * so a flag left behind by a click the player thought better of cannot take
+ * over a navigation two minutes later.
+ */
+const HF_JUMP_KEY = 'ymca-highfive-jump';
+const HF_JUMP_GOOD_FOR = 30e3;
+
+function hfCfg(ctx) {
+    return ctx.store.read('cfg', { advance: true });
+}
+
+function hfArmJump(href) {
+    try {
+        sessionStorage.setItem(HF_JUMP_KEY, JSON.stringify({
+            href, path: new URL(href, location.origin).pathname, at: Date.now(),
+        }));
+    } catch (e) { /* private window: the jump simply does not happen */ }
+}
+
+function hfTakeJump() {
+    let held = null;
+    try {
+        held = JSON.parse(sessionStorage.getItem(HF_JUMP_KEY));
+        // Taken, not read: one-shot, so a jump that fails cannot loop.
+        sessionStorage.removeItem(HF_JUMP_KEY);
+    } catch (e) {
+        return null;
+    }
+    if (!held || Date.now() - held.at > HF_JUMP_GOOD_FOR) return null;
+    return held;
+}
+
+/**
+ * On a vehicle waiting for a destination: remember where "next" points, and
+ * put the switch where the player is looking.
+ *
+ * The click is only listened to. It is never taken over, never prevented and
+ * never repeated as a fetch — the player's own click is what assigns the
+ * hospital, and that cannot be undone.
+ */
+function hfOnPickPage(ctx) {
+    if (document.getElementById('hf-bar')) return true;
+    const link = document.querySelector(HF_PICK_LINK);
+    if (!link) return false;
+
+    const next = document.querySelector(HF_NEXT);
+    const cfg = hfCfg(ctx);
+
+    /* The game's own Bootstrap, never YMCA's role classes: this is the game's
+     * page and it has to follow it into whatever theme it is wearing. */
+    const bar = document.createElement('div');
+    bar.id = 'hf-bar';
+    bar.className = 'alert alert-info';
+    bar.style.margin = '6px 0';
+    bar.innerHTML = `<label style="font-weight:400;margin:0;cursor:pointer">
+      <input type="checkbox" id="hf-advance" ${cfg.advance ? 'checked' : ''}>
+      Go straight to the next transport after you pick</label>
+    ${next ? ` <a class="btn btn-xs btn-success" href="${next.getAttribute('href')}"
+      style="margin-left:10px">Next transport</a>`
+        : ' <span class="text-muted" style="margin-left:10px">This is the last one.</span>'}`;
+    /* Above whatever holds the destinations. `before()` needs a parent, so a
+     * table sitting directly in <body> falls back to going in at the top. */
+    const holder = link.closest('table') || link.closest('div');
+    if (holder && holder.parentElement) holder.before(bar);
+    else document.body.prepend(bar);
+
+    bar.querySelector('#hf-advance').addEventListener('change', (e) => {
+        ctx.store.write('cfg', { ...hfCfg(ctx), advance: e.target.checked });
+        ctx.log.info(`advance ${e.target.checked ? 'on' : 'off'}`);
+    });
+
+    document.addEventListener('click', (e) => {
+        const picked = e.target.closest(HF_PICK_LINK);
+        if (!picked || !hfCfg(ctx).advance) return;
+        const href = document.querySelector(HF_NEXT)?.getAttribute('href');
+        if (!href) return;
+        hfArmJump(href);
+        ctx.log.info('picked a destination, next is armed');
+    }, true);
+
+    return true;
+}
+
+/** The page after a pick: go where "next" pointed, unless the game beat us. */
+function hfFollowJump(ctx) {
+    const jump = hfTakeJump();
+    if (!jump) return;
+    if (location.pathname === jump.path) {
+        // The game landed there itself. Jumping again would skip a vehicle.
+        ctx.log.info('already on the next vehicle, not jumping');
+        return;
+    }
+    ctx.log.info('going to the next transport', jump.path);
+    location.href = jump.href;
+}
+
+YMCA.inject('highfive', (ctx) => {
+    /* The jump is checked on every page, because the page a pick lands on is
+     * not something this has seen yet. It costs one read of sessionStorage. */
+    hfFollowJump(ctx);
+    /* Falsy, not true: a page that is not a vehicle is not a job done. The
+     * player can switch HighFive on while looking at the map and open a
+     * transport a moment later, and marking it finished here would mean the
+     * bar never appeared until the next reload. */
+    if (!/^\/vehicles\/\d+/.test(location.pathname)) return false;
+    return hfOnPickPage(ctx);
+});
 
 YMCA.register({
     id: 'highfive',

@@ -1416,6 +1416,60 @@ assert.deepEqual(
 console.log('crew numbers      : saved as typed');
 await pg.click('#ymca-back');
 
+// ---- HighFive: the game already works out which vehicle is next ----
+// A transporting vehicle's page carries #next-vehicle-fms-5, so nothing has to be searched for.
+// HighFive reads that href before the pick and follows it after; it never picks and never
+// repeats the click, because assigning a hospital cannot be undone.
+await pg.evaluate(() => {
+  document.getElementById('ymca-window')?.remove();
+  // Switched on here, not at load: a switch has to take effect where it is flicked.
+  window.YMCA.switchElement('highfive', true);
+  const page = document.createElement('div');
+  page.innerHTML = `
+    <a class="btn btn-success" id="next-vehicle-fms-5" href="/vehicles/15079875"
+      >Go to the next vehicle with a transport request</a>
+    <table><tbody>
+      <tr><td>Mercy General</td><td><span id="div_free_beds_41">6</span></td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/41">Transport</a></td></tr>
+      <tr><td>St Anne</td><td><span id="div_free_beds_42">2</span></td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/42">Transport</a></td></tr>
+    </tbody></table>
+    <a id="leave_without_transport_no_compensation"
+      href="/vehicles/15079874/patient/-1">Leave without transport</a>`;
+  document.body.append(page);
+  history.replaceState({}, '', '/vehicles/15079874');
+});
+// The switch is asked on every attempt, so turning HighFive on starts it without a reload.
+await pg.waitForSelector('#hf-bar');
+assert.equal(await pg.locator('#hf-advance').isChecked(), true, 'advancing is on by default');
+assert.equal(await pg.getAttribute('#hf-bar a.btn', 'href'), '/vehicles/15079875',
+  'the bar links to the vehicle the game named as next');
+console.log('highfive bar      : next is /vehicles/15079875');
+
+// Clicking a destination arms the jump. HighFive never prevents that click — so the test has
+// to, or the browser really would navigate away to the game's own transport page.
+await pg.evaluate(() => {
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('a[href*="/patient/"]')) e.preventDefault();
+  }, true);
+  document.querySelector('a[href="/vehicles/15079874/patient/41"]')
+    .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+});
+const armed = await pg.evaluate(() => JSON.parse(sessionStorage.getItem('ymca-highfive-jump')));
+console.log('highfive armed    :', JSON.stringify({ path: armed?.path }));
+assert.equal(armed.path, '/vehicles/15079875', 'picking a destination arms the next vehicle');
+
+// Switched off, it arms nothing at all.
+await pg.evaluate(() => sessionStorage.removeItem('ymca-highfive-jump'));
+await pg.click('#hf-advance');
+await pg.evaluate(() => {
+  document.querySelector('a[href="/vehicles/15079874/patient/42"]')
+    .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+});
+assert.equal(await pg.evaluate(() => sessionStorage.getItem('ymca-highfive-jump')), null,
+  'with advancing off, a pick arms nothing');
+console.log('highfive off      : a pick arms nothing');
+
 console.log('page errors       :', errs.length ? errs.slice(0, 3) : 'none');
 assert.equal(errs.length, 0);
 console.log('\nALL ASSERTIONS PASSED');

@@ -103,6 +103,15 @@ the launcher and by `YMCA.inject`, both of which run before any module mounts,
 and `YMCA.switchElement` is the only writer. ElementFriend is the face of it, so
 a module going does not take every other module's state with it.
 
+**A switch takes effect where it is flicked.** The shell keeps every injection
+it was handed, so switching a module on re-runs it in the page there and then.
+Without that, a switch did nothing until the next reload — the injection had
+already given up — and a switch that appears to do nothing is a switch that gets
+reported as broken. For the same reason the switch is asked **on every attempt**
+rather than once at the top, and **a page a module does not belong on is not a
+job done**: returning truthy there marks it finished, so the panel never appears
+when the player navigates to the page it was waiting for.
+
 **A switch means the whole module, not its tile.** The tile leaves the launcher
 *and* `YMCA.inject` refuses to run it, so nothing of it reaches the game's page
 either — a switch that left MissionMagician's mission panel standing would be
@@ -137,11 +146,39 @@ button that collects the missing piece. MissionMagician was in that state for
 three rounds of captures before it ticked anything, and its capture button is
 still there for a window built differently from the one it was written against.
 
-**HighFive is half answered, and says which half.** Status 5 is a vehicle
+**HighFive works, and what is left is the filtering.** Status 5 is a vehicle
 transporting — an ambulance to a hospital, a patrol car to a prison — and the
 point is to pick the destination and land straight on the next one, the way
-LSS-Manager does. *Finding* the vehicles works; *picking* for the player does
-not, and the panel separates the two rather than calling itself broken.
+LSS-Manager does.
+
+**The game already works out which vehicle is next.** A transporting vehicle's
+page carries `<a class="btn btn-success" id="next-vehicle-fms-5"
+href="/vehicles/15079875">Go to the next vehicle with a transport request</a>`,
+so nothing has to be searched for: HighFive reads that href before the pick and
+follows it after. The destination itself is a plain
+`a[href="/vehicles/<id>/patient/<hospital>"]` — no form on the page at all — and
+"leave without transport" is the same link with a negative id
+(`#leave_without_transport_no_compensation`). Each destination carries
+`div_free_beds_<id>`, and the list is split into `#own-hospitals` and
+`#alliance-hospitals`.
+
+**It never picks, and it never repeats the click as a fetch.** The player clicks
+the hospital; HighFive only remembers where "next" pointed and navigates there
+afterwards. Doing the GET on their behalf would be writing something that cannot
+be taken back, and a failed fetch would leave a patient untransported while the
+panel moved on. **Navigating is not writing** — that is the whole reason this
+one can ship where MissionMagician's dispatch cannot.
+
+The jump is one-shot, it expires after thirty seconds, and it checks the landing
+page first: if the game already went to the vehicle it was going to send you to,
+it does nothing rather than skipping one.
+
+**What is missing is the range filter.** Which cell of that table carries the
+distance cannot be found by name — 35 destinations came back with `rowClasses:
+{}`, not one row carrying a class — so the capture asks for the row's own shape
+and the filter waits for it. `hospital_max_distance`, `hospital_max_price` and
+`hospital_own` sit on the vehicle in `/api/vehicles`, which is where the game
+keeps that setting itself.
 
 **`fms_real` and `fms_show` carry the status**, and the first fleet capture
 settled it: both run 1 to 6 across a fleet of 83, so 5 is a value the field
@@ -235,6 +272,15 @@ to be paired with anything. This is where per-mission credits come from, and it
 is also the only place the **ambulance service's own income** appears —
 "Patient Treatment" and "Patient Treatment and Transport" are not in the mission
 list at all. Amounts use a dot for thousands.
+
+**Find a table's columns, do not assume them.** The ledger reader took cell 0 as
+the amount, cell 1 as the description and cell 2 as the date, and dropped any
+row with fewer than three cells — three assumptions about a page nobody here had
+seen, and on a real account it came back with nothing at all. Each row is asked
+instead which of its cells reads as a number and which carries words. A read
+that still finds nothing reports the page's **shape** — how many tables, how
+many rows, what each cell is called and whether it held digits or words — so the
+next version knows what it is looking at without anybody pasting HTML.
 
 **`/einsaetze.json` only lists missions this player can generate.** An alliance
 mission from somebody else's building is absent, and so is anything the account
@@ -639,6 +685,14 @@ each copied one thing are gone and what they copied rides in the report.
 - **Send feedback** — a typed note packaged with the version, the page, which
   tool was open and the last 25 log entries. Nothing is transmitted; it lands on
   the clipboard for the player to paste wherever they like.
+- **Send this one** — everything the repo has ever asked for, in a single
+  downloadable file, with nothing in it that is the player's: every vehicle type
+  and what it can do, how many of each they own as a count, the game's own
+  mission list, what TrackOps has run, what the ledger says each paid, every
+  requirement MissionMagician could not match, and what HighFive captured. **The
+  reason there are two download buttons is that one of them can be posted in
+  public and the other cannot.** A reading that arrives by a button somebody has
+  to be told about is a reading that does not arrive.
 - **Download everything** — every endpoint, into one file. This one *does* carry
   the player's name, alliance and building coordinates, so it is described as
   such and is never committed to the repo.

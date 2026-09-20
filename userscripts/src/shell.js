@@ -73,7 +73,13 @@ YMCA.switchElement = function switchElement(id, on) {
     states[id] = !!on;
     writeStore(LS.elements, states);
     logger.info('shell', `${id} switched ${on ? 'on' : 'off'}`);
+    /* Start it where it belongs, now. A switch that only takes effect after a
+     * reload is a switch that reads as broken. */
+    if (on) YMCA.startInjection(id);
 };
+
+/** Re-run a module's injection, if it asked for one. Set by the shell below. */
+YMCA.startInjection = () => {};
 
 /** Every switch, for the problem report and for ElementFriend's own tiles. */
 YMCA.elementState = function elementState() {
@@ -481,45 +487,89 @@ function openWindow(moduleId) {
  *
  * A throw is logged rather than left to break the game's page.
  */
-YMCA.inject = function inject(moduleId, fn) {
-    /* A switched-off module does not reach the game's page either. The switch
-     * has to mean the whole module, not only its tile — MissionMagician's
-     * panel lives in the mission window, so a switch that left it there would
-     * switch off nothing the player can see. */
-    if (!YMCA.isOn(moduleId)) {
-        logger.info(moduleId, 'not injected, switched off in ElementFriend');
-        return;
-    }
+/**
+ * What each module asked to run in the game's own page, kept so switching it on
+ * can start it there and then.
+ *
+ * Without this, switching a module on did nothing until the page was reloaded:
+ * the injection had already given up, and the player was left looking at a
+ * switch that appeared to do nothing. A switch has to take effect where it is
+ * flicked.
+ */
+const injections = new Map();
+
+function runInjection(moduleId, fn) {
+    const held = injections.get(moduleId);
+    if (held?.done) return;              // it has already done its job
+    held?.observer?.disconnect();        // never two observers for one module
+
     const ctx = context(moduleId);
-    let done = false;
+    const state = { fn, done: false, observer: null, said: false };
+    injections.set(moduleId, state);
+
     const attempt = () => {
-        if (done) return true;
+        if (state.done) return true;
+        /* A switched-off module does not reach the game's page either. The
+         * switch has to mean the whole module, not only its tile —
+         * MissionMagician's panel lives in the mission window, so a switch that
+         * left it there would switch off nothing the player can see. */
+        if (!YMCA.isOn(moduleId)) {
+            if (!state.said) { logger.info(moduleId, 'not injected, switched off'); state.said = true; }
+            return false;
+        }
         try {
-            done = !!fn(ctx);
+            state.done = !!fn(ctx);
         } catch (err) {
-            done = true;                       // a module that throws is not retried into a loop
+            state.done = true;                 // a module that throws is not retried into a loop
             logger.error(moduleId, 'injection failed', err.message);
         }
-        return done;
+        return state.done;
     };
     if (attempt()) return;
 
     /* Retry as the page fills in. Coalesced into a frame so a page building
      * itself does not run this once per node. */
     let queued = false;
-    const observer = new MutationObserver(() => {
+    state.observer = new MutationObserver(() => {
         if (queued) return;
         queued = true;
         requestAnimationFrame(() => {
             queued = false;
-            if (attempt()) observer.disconnect();
+            if (attempt()) state.observer.disconnect();
         });
     });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    state.observer.observe(document.documentElement, { childList: true, subtree: true });
 
     /* A page that never grows what was wanted stops being watched rather than
      * observing for the rest of the session. */
-    setTimeout(() => observer.disconnect(), 30000);
+    setTimeout(() => state.observer.disconnect(), 30000);
+}
+
+/**
+ * Run a module's code on the game's own page, outside YMCA's window.
+ *
+ * Almost every module only ever renders into the panel it is handed. A few
+ * belong in the game's own markup instead — MissionMagician sits inside the
+ * mission window the way LSS-Manager's helper does, because a tool you have to
+ * open a lightbox to reach is a tool you stop using. Those get a context
+ * without a mount.
+ *
+ * `fn` returns truthy once it has done its job. Until then it is tried again
+ * whenever the page grows, because **waiting for DOMContentLoaded was the
+ * mistake**: a mission window pulls in the game's application bundle and
+ * whatever else the player has installed, and the log showed the panel landing
+ * as much as sixteen seconds after the markup it needed already existed. The
+ * markup is what matters, not the last script.
+ *
+ * A throw is logged rather than left to break the game's page.
+ */
+YMCA.inject = function inject(moduleId, fn) {
+    runInjection(moduleId, fn);
+};
+
+YMCA.startInjection = (moduleId) => {
+    const held = injections.get(moduleId);
+    if (held && !held.done) runInjection(moduleId, held.fn);
 };
 
 /**

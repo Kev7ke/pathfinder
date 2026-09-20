@@ -123,6 +123,8 @@ YMCA.register({
           mission; a daily task is named as one and left out.</p>
         <button class="ymca-btn primary" data-do="ledger">Read the credits ledger</button>
         <button class="ymca-btn" data-do="ledger-copy">Copy it</button>
+        <button class="ymca-btn" data-do="ledger-shape"
+          title="press this if the ledger will not read">Copy the credits page</button>
         <span class="ymca-status" id="to-ledger-status"></span>
         <div id="to-ledger"></div>
       </div>
@@ -232,7 +234,20 @@ YMCA.register({
                     }
                 }).catch((err) => {
                     status.textContent = `Could not read it: ${err.message}`;
+                    el.querySelector('#to-ledger').innerHTML = `<div class="ymca-note bad"
+              style="margin-top:8px"><b>The ledger did not read.</b> ${ctx.esc(err.message)}<br>
+              Press <b>Copy the credits page</b> and send what it gives you \u2014 it copies the
+              shape of that page and nothing that is on it.</div>`;
                     ctx.log.warn('credits ledger unreadable', err.message);
+                });
+            } else if (e.target.closest('[data-do="ledger-shape"]')) {
+                const status = el.querySelector('#to-ledger-status');
+                status.textContent = 'Reading\u2026';
+                toCaptureLedger().then((shape) => {
+                    const text = JSON.stringify(shape, null, 1);
+                    out.value = text;
+                    status.textContent = `${shape.pages.length} pages looked at.`;
+                    ctx.clipboard(text, 'the credits page\u2019s shape');
                 });
             } else if (e.target.closest('[data-do="copy"]')) {
                 const text = JSON.stringify(toExport(log, listed), null, 1);
@@ -473,29 +488,126 @@ const TO_NOT_A_MISSION = [
 /** Income that belongs to the ambulance service rather than to a mission name. */
 const TO_PATIENT_LINES = /^patient (treatment|transport)/i;
 
+/**
+ * Find the columns rather than assume them.
+ *
+ * The first version took cell 0 as the amount, cell 1 as the description and
+ * cell 2 as the date, and threw away any row with fewer than three cells. That
+ * is three assumptions about a page nobody here has seen, and on a real account
+ * it came back with nothing at all. So each row is asked which of its cells is
+ * a number and which carries words, and a row that answers neither is skipped
+ * rather than taking the whole read with it.
+ *
+ * Amounts use a dot for thousands, so every character that is not a digit is
+ * dropped and the sign is read separately.
+ */
+function toParseLedgerRow(tr) {
+    const cells = [...(tr.cells || tr.querySelectorAll('td, th'))];
+    if (cells.length < 2) return null;
+    const text = (c) => (c.textContent || '').replace(/\s+/g, ' ').trim();
+
+    let amount = null;
+    let amountAt = -1;
+    for (let i = 0; i < cells.length; i += 1) {
+        const t = text(cells[i]);
+        if (!/^[+\-\u2212]?\s*[\d.,]+$/.test(t) || !/\d/.test(t)) continue;
+        const digits = Number(t.replace(/\D/g, ''));
+        if (!Number.isFinite(digits) || !digits) continue;
+        amount = /^[-\u2212]/.test(t) ? -digits : digits;
+        amountAt = i;
+        break;
+    }
+    if (amount === null) return null;
+
+    /* The description is the wordiest cell that is not the amount. A date has
+     * digits and separators; a mission name has letters. */
+    let what = '';
+    for (let i = 0; i < cells.length; i += 1) {
+        if (i === amountAt) continue;
+        const t = text(cells[i]);
+        if (!/[a-z]{3}/i.test(t)) continue;
+        if (t.length > what.length) what = t;
+    }
+    if (!what) return null;
+
+    const at = text(cells[cells.length - 1]);
+    return { amount, what, at: at === what ? '' : at };
+}
+
+/** What the page looked like, for a read that came back empty. */
+function toLedgerShape(doc) {
+    const tables = [...doc.querySelectorAll('table')];
+    return {
+        tables: tables.length,
+        rows: tables.map((t) => t.querySelectorAll('tr').length),
+        /* Cell shapes only: how many, what they are called, whether each held
+         * digits or words. Never an amount and never a description. */
+        firstRow: tables.map((t) => {
+            const tr = t.querySelector('tbody tr, tr');
+            if (!tr) return null;
+            return [...(tr.cells || [])].map((c) => ({
+                tag: c.tagName.toLowerCase(),
+                class: (typeof c.className === 'string' && c.className.trim()) || undefined,
+                digits: /\d/.test(c.textContent || ''),
+                words: /[a-z]{3}/i.test(c.textContent || ''),
+            }));
+        }),
+    };
+}
+
 async function toReadLedger() {
     let lastError = null;
+    let lastShape = null;
     for (const path of TO_LEDGER_PATHS) {
         try {
             const res = await fetch(path, { credentials: 'same-origin' });
             if (!res.ok) { lastError = `HTTP ${res.status}`; continue; }
             const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
-            const rows = [...doc.querySelectorAll('table tbody tr')].map((tr) => {
-                const cells = tr.querySelectorAll('td');
-                if (cells.length < 3) return null;
-                const amount = Number(cells[0].textContent.replace(/[^\d-]/g, ''))
-                    * (/-/.test(cells[0].textContent) ? -1 : 1);
-                const what = cells[1].textContent.trim();
-                if (!Number.isFinite(amount) || !what) return null;
-                return { amount, what, at: cells[2].textContent.trim() };
-            }).filter(Boolean);
+            const rows = [...doc.querySelectorAll('table tr')]
+                .map(toParseLedgerRow).filter(Boolean);
             if (rows.length) return { path, rows };
-            lastError = 'the page answered but carried no rows';
+            lastShape = { path, ...toLedgerShape(doc) };
+            lastError = `${path} answered, but no row in it read as an amount and a description`;
         } catch (err) {
             lastError = err.message;
         }
     }
-    throw new Error(lastError || 'no credits page answered');
+    const err = new Error(lastError || 'no credits page answered');
+    err.shape = lastShape;
+    throw err;
+}
+
+/**
+ * The credits page, as structure.
+ *
+ * Pressed when the ledger will not read, so the next version knows what it is
+ * looking at. Table and cell shapes only \u2014 never an amount, never a line's
+ * description, never a balance.
+ */
+async function toCaptureLedger() {
+    const out = { ymca: YMCA.version, what: 'trackops-ledger', at: new Date().toISOString(), pages: [] };
+    for (const path of TO_LEDGER_PATHS) {
+        try {
+            const res = await fetch(path, { credentials: 'same-origin' });
+            if (!res.ok) { out.pages.push({ path, status: res.status }); continue; }
+            const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+            const rows = [...doc.querySelectorAll('table tr')].map(toParseLedgerRow).filter(Boolean);
+            out.pages.push({
+                path,
+                status: res.status,
+                rowsParsed: rows.length,
+                ...toLedgerShape(doc),
+                /* Where the rest of the ledger is: the game keeps many pages and
+                 * one of these links is how to reach them. Shapes, not targets. */
+                linkShapes: [...new Set([...doc.querySelectorAll('a[href]')]
+                    .map((a) => (a.getAttribute('href') || '').split('?')[0].replace(/\d+/g, '#')))]
+                    .filter(Boolean).slice(0, 25),
+            });
+        } catch (err) {
+            out.pages.push({ path, failed: err.message });
+        }
+    }
+    return out;
 }
 
 /**

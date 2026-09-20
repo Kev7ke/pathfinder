@@ -73,10 +73,15 @@ YMCA.register({
           <b>What they can do</b> reads one vehicle of each type you own and takes the capability
           flags off it, so a type does not have to wait until it happens to be in range of a
           mission. Ids and flags only.<br>
-          <b>Download everything</b> is for rebuilding the dataset. That one carries your player
-          name, your alliance and your building coordinates, so share it only where you are happy
+          <b>Send this one</b> is everything the repo needs in a single file, with nothing in it
+          that is yours: every vehicle type and what it can do, every mission the game lists,
+          what you have run, what the ledger says each paid, and every requirement nothing could
+          match. That is the file to hand over.<br>
+          <b>Download everything</b> is the raw endpoints. That one carries your player name,
+          your alliance and your building coordinates, so share it only where you are happy
           to.</p>
-        <button class="ymca-btn primary" data-do="export-all">Download everything</button>
+        <button class="ymca-btn primary" data-do="dataset">Send this one</button>
+        <button class="ymca-btn" data-do="export-all">Download everything</button>
         <button class="ymca-btn" data-do="vehicles">Vehicle types</button>
         <button class="ymca-btn" data-do="capabilities">What they can do</button>
         <button class="ymca-btn" data-do="sweep">Look for new types now</button>
@@ -212,6 +217,89 @@ async function run(what, ctx, put) {
             await ctx.sleep(120);
         }
         put(rows, 'the endpoint check');
+        return;
+    }
+
+    /* ONE FILE, AND NOTHING IN IT IS THEIRS.
+     *
+     * Every answer this repo has ever asked for, gathered without anybody
+     * having to remember which button produced which half: the type store, the
+     * game's own mission list, what has actually been run, what the ledger says
+     * it paid, and the requirement keys nothing could match.
+     *
+     * What it deliberately leaves out is the whole of "Download everything":
+     * no player name, no alliance, no buildings, no coordinates, no vehicle
+     * captions, no mission instance ids. The reason there are two buttons is
+     * that one of them can be posted in public and the other cannot.
+     */
+    if (what === 'dataset') {
+        ctx.status('Gathering\u2026');
+        const data = {
+            note: 'Everything YMCA has learnt about the game, and nothing about the account. '
+                + 'No player name, no alliance, no buildings, no coordinates, no vehicle names.',
+            ymca: YMCA.version,
+            at: new Date().toISOString(),
+            game: location.origin,
+            locale: ctx.locale() || null,
+        };
+
+        /* Vehicle types: what the repo shipped, with whatever this game taught
+         * laid over the top. Names, flags, seats and training \u2014 the type, not
+         * the vehicle. */
+        let learnt = {};
+        try {
+            learnt = JSON.parse(localStorage.getItem('ymca-vehicle-types')) || {};
+        } catch (err) { /* nothing learnt here yet */ }
+        const types = {};
+        for (const [id, t] of Object.entries(SHIPPED_VEHICLE_TYPES)) types[id] = { ...t };
+        for (const [id, t] of Object.entries(learnt)) {
+            const caps = Array.isArray(t) ? t : (t.caps || []);
+            types[id] = { ...(types[id] || {}) };
+            if (caps.length) types[id].capabilities = caps;
+            if (!Array.isArray(t) && t.name) types[id].name = t.name;
+            types[id].learntHere = true;
+        }
+        data.vehicleTypes = types;
+        data.vehicleTypesNotShipped = Object.keys(types)
+            .filter((id) => !SHIPPED_VEHICLE_TYPES[id]).map(Number);
+
+        /* Which types this account actually owns, as a count per type. A count
+         * is not a vehicle: no ids, no names, no stations. */
+        try {
+            const fleet = await ctx.game('/api/vehicles');
+            const own = {};
+            for (const v of fleet || []) {
+                const t = String(v.vehicle_type ?? '');
+                if (t) own[t] = (own[t] || 0) + 1;
+            }
+            data.ownedByType = own;
+        } catch (err) {
+            data.ownedByType = `could not be read: ${err.message}`;
+        }
+
+        /* The game's own mission list, which is what data/missions.json is
+         * built from. It is the same static list for everyone on this server. */
+        try {
+            const missions = await ctx.rawGame('/einsaetze.json');
+            data.missions = slimMissions(missions);
+        } catch (err) {
+            data.missions = `could not be read: ${err.message}`;
+        }
+
+        /* What the other modules have worked out, read from their stores so a
+         * module can change or go without breaking this. */
+        data.trackops = moduleStore('trackops');
+        data.missionmagician = moduleStore('missionmagician');
+        data.highfive = moduleStore('highfive');
+        data.elements = YMCA.elementState();
+        data.typeSweep = sweepState();
+
+        const text = JSON.stringify(data, null, 1);
+        ctx.download('ymca-dataset.json', text);
+        out.value = text;
+        ctx.status(`Downloaded ymca-dataset.json \u2014 ${Math.round(text.length / 1024)} KB, `
+            + `${Object.keys(types).length} vehicle types. Nothing in it is yours.`);
+        ctx.log.info('dataset exported', `${Math.round(text.length / 1024)} KB`);
         return;
     }
 
