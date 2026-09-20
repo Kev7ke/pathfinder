@@ -59,6 +59,7 @@ userscripts/
     mod-highfive.js
     mod-eagleeye.js
     mod-shuteye.js
+    mod-stationfascination.js
     mod-diagnostics.js
 tools/build_ymca.mjs  the bundler, and the single home of VERSION
 ```
@@ -178,7 +179,15 @@ so nothing has to be searched for: HighFive reads that href before the pick and
 follows it after. The destination itself is a plain
 `a[href="/vehicles/<id>/patient/<hospital>"]` — no form on the page at all — and
 "leave without transport" is the same link with a negative id
-(`#leave_without_transport_no_compensation`). Each destination carries
+(`#leave_without_transport_no_compensation`).
+
+**The game names the two branches in two languages.** A hospital is
+`/vehicles/<id>/patient/<hospital>`; a prison is
+`/vehicles/<id>/gefangener/<cell>` — the German word, in an English game,
+exactly as `gw_gefahrgut` turned up in an English requirement list. Matching
+only the English one is why the ambulances advanced and the patrol cars did not.
+**Assume a second spelling wherever the game has two branches**, and read both
+off a capture rather than translating one. Each destination carries
 `div_free_beds_<id>`, and the list is split into `#own-hospitals` and
 `#alliance-hospitals`.
 
@@ -225,7 +234,10 @@ holds one kind of thing.
 are the container or the heading above it was never captured.** Both shapes are
 handled — the element itself if it holds destinations, otherwise the next thing
 after it that does — and where neither works the control is not offered at all
-rather than offered and doing nothing.
+rather than offered and doing nothing. A list of ids to look for answers
+nothing on a prison page, so the capture **finds** the sections instead: every
+element with an id that holds destination links names itself, however that
+branch spells its halves.
 
 **`fms_real` and `fms_show` carry the status**, and the first fleet capture
 settled it: both run 1 to 6 across a fleet of 83, so 5 is a value the field
@@ -464,7 +476,27 @@ elements one at a time means hiding them again every few seconds and missing the
 ones that arrive in between. One rule applies to a panel the game has not drawn
 yet.
 
-**A mission panel is `#mission_panel_<id>`.** Inside its `.panel-body` the
+**`display: contents` is what makes a one-line layout a stylesheet job.** The
+artwork and the progress bar live in `.panel-body`; the Dispatch button and the
+mission's name live in `.panel-heading`. No amount of flex on either will
+interleave them, and moving the nodes with script would have to be done again on
+every redraw. `display: contents` takes a box away and lets its children lay out
+in the grandparent — heading, body, the row and both columns step out, the panel
+becomes the flex row, and `order` lines them up. Anything put back takes
+`flex: 1 1 100%` so it gets its own line rather than squeezing the name.
+
+**A name is cut with an ellipsis, not after a set number of words.** A word
+count leaves a ragged right edge, and the thing beside it — the progress bar —
+is what wants a predictable width. The address is a second sentence inside the
+name (`small#mission_address_<id>` inside the caption) and it is what made the
+name unreadable in the space left, so it goes by default.
+
+**A mission panel is `#mission_panel_<id>`.** Its heading is
+`#mission_panel_heading_<id>` — which also starts with `mission_panel_`, so a
+selector meant for the panel has to say `.panel[id^="mission_panel_"]` or it
+catches both. The heading holds `a#alarm_button_<id>` (Dispatch),
+`span#mission_participant_<id>` and `a#mission_caption_<id>` (the name, with the
+address nested inside it). Inside its `.panel-body` the
 artwork sits in `.col-xs-1` and everything else in `.col-xs-11`, one `<div>`
 each: `mission_overview_countdown_<id>`, `mission_bar_outer_<id>` (the progress
 bar), `mission_missing_<id>`, `mission_missing_short_<id>`,
@@ -484,6 +516,19 @@ selection tabs (`feuerwehr_lf`, `rettungsdienst`, `polizei`, `wasserrettung`,
 the dataset grows from what players actually have, and the open question —
 whether an at-mission row carries the flags itself, which would end the need for
 it — rides in MissionMagician's report as `tablesNotSeenYet`.
+
+**The station list already says which dispatch centre each station answers
+to.** A row is `li#building_list_<id>` carrying `building_type_id` and
+`leitstelle_building_id` as plain attributes; a dispatch centre is
+`building_type_id="1"` and its own `leitstelle_building_id` is the string
+`"null"`. So StationFascination groups by reading, and `/api/buildings` is never
+asked. The game filters that list by *kind* of building and never by region,
+which is the gap.
+
+**A filter that only hides can be combined with the game's own.** The game's
+station search marks rows with `building-filtered-by-search`; a rule that forced
+rows visible would fight it. Hiding what is not in the chosen centre and leaving
+everything else alone means the two filters simply add up.
 
 **`hire_do` is a plain GET**, the same request the button in the page makes:
 `/buildings/<id>/hire_do/1|2|3` for credits, `…/hire_do/coins` for coins. So

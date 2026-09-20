@@ -1461,7 +1461,10 @@ await pg.click('.ymca-tile[data-mod="elementfriend"]');
 await pg.waitForSelector('.ymca-tile.el[data-el="eagleeye"]');
 await pg.click('.ymca-tile.el[data-el="eagleeye"] b');
 await pg.waitForSelector('.ymca-tile.el[data-el="shuteye"]');
-console.log('inside eagleeye   : ShutEye');
+const inGroup = await pg.$$eval('.ymca-tile.el', (b) => b.map((x) => x.dataset.el));
+console.log('inside eagleeye   :', JSON.stringify(inGroup));
+assert.deepEqual(inGroup, ['shuteye', 'stationfascination'],
+  'a group lists its own members and nothing else');
 assert.equal(await pg.locator('.ymca-switch[data-sw="shuteye"] input').isChecked(), false,
   'ShutEye is off until asked for: it hides things the player may want');
 
@@ -1469,7 +1472,13 @@ assert.equal(await pg.locator('.ymca-switch[data-sw="shuteye"] input').isChecked
 await pg.evaluate(() => {
   const panel = document.createElement('div');
   panel.id = 'mission_panel_506247649';
-  panel.innerHTML = `<div class="panel-body"><div class="row">
+  panel.className = 'panel panel-default mission_panel_red';
+  panel.innerHTML = `<div class="panel-heading" id="mission_panel_heading_506247649">
+    <a class="btn btn-default btn-xs" id="alarm_button_506247649">Dispatch</a>
+    <span id="mission_participant_506247649" class="glyphicon"></span>
+    <a href="" id="mission_caption_506247649" class="map_position_mover">Washing machine on
+      fire, <small id="mission_address_506247649">151 West 34th Street, 10001 New York</small></a>
+  </div><div class="panel-body"><div class="row">
     <div class="col-xs-1"><img id="mission_vehicle_state_506247649"></div>
     <div class="col-xs-11">
       <div class="mission_overview_countdown" id="mission_overview_countdown_506247649"></div>
@@ -1490,9 +1499,27 @@ await pg.waitForTimeout(150);
 console.log('panel after       :', JSON.stringify(await seen()));
 assert.deepEqual(await seen(), ['mission_bar_outer_506247649'],
   'the progress bar stays and the rest folds away — a stylesheet, so a panel drawn later obeys');
-assert.equal(await pg.evaluate(() =>
+
+// One line: the boxes in between step out with display:contents, so the artwork, the Dispatch
+// button, the name and the bar all become children of one flex row and `order` lines them up.
+const line = await pg.evaluate(() => {
+  const p = document.getElementById('mission_panel_506247649');
+  const at = (sel) => document.querySelector(sel)?.getBoundingClientRect().top;
+  return {
+    panel: getComputedStyle(p).display,
+    heading: getComputedStyle(p.querySelector('.panel-heading')).display,
+    address: getComputedStyle(document.getElementById('mission_address_506247649')).display,
+    sameRow: Math.abs(at('#alarm_button_506247649') - at('#mission_bar_outer_506247649')) < 24,
+  };
+});
+console.log('one line          :', JSON.stringify(line));
+assert.equal(line.panel, 'flex', 'the panel itself becomes the row');
+assert.equal(line.heading, 'contents', 'the heading gives up its box so its children join it');
+assert.equal(line.address, 'none', 'the address is what made the name unreadable');
+assert.ok(line.sameRow, 'Dispatch and the progress bar end up on the same line');
+assert.notEqual(await pg.evaluate(() =>
   getComputedStyle(document.querySelector('#mission_panel_506247649 .col-xs-1 img')).display),
-'inline', 'the artwork is in the other column and is never touched');
+'none', 'the artwork is in the other column and is never hidden');
 
 // Put one part back, by the id the game gives it.
 await pg.click('.ymca-tile.el[data-el="shuteye"] b');
@@ -1502,6 +1529,49 @@ await pg.waitForTimeout(150);
 console.log('patients back     :', JSON.stringify(await seen()));
 assert.deepEqual(await seen(), ['mission_bar_outer_506247649', 'mission_patients_506247649'],
   'what is put back comes back, and nothing else with it');
+
+// ---- StationFascination filters by an attribute the game already wrote ----
+await pg.evaluate(() => {
+  const box = document.createElement('div');
+  box.innerHTML = `<div class="btn-group" id="btn-group-building-select">
+      <a class="btn btn-xs btn-success building_selection">Firehouse</a></div>
+    <ul id="building_list">
+      <li id="building_list_11" building_type_id="1" leitstelle_building_id="null"
+        search_attribute="NY"></li>
+      <li id="building_list_12" building_type_id="1" leitstelle_building_id="null"
+        search_attribute="LI"></li>
+      <li id="building_list_21" building_type_id="0" leitstelle_building_id="11"
+        search_attribute="FS01"></li>
+      <li id="building_list_22" building_type_id="3" leitstelle_building_id="11"
+        search_attribute="AS01"></li>
+      <li id="building_list_23" building_type_id="0" leitstelle_building_id="12"
+        search_attribute="FS101"></li>
+    </ul>`;
+  document.body.append(box);
+  // The station list arrives long after the page does; off and on again is what a fresh page
+  // load looks like from the injection's side.
+  window.YMCA.switchElement('stationfascination', false);
+  window.YMCA.switchElement('stationfascination', true);
+});
+await pg.waitForSelector('#ymca-sf-pick');
+const centres = await pg.$$eval('#ymca-sf-pick option', (o) => o.map((x) => x.textContent.trim()));
+console.log('dispatch centres  :', JSON.stringify(centres));
+assert.deepEqual(centres, ['All dispatch centres', 'NY (2)', 'LI (1)'],
+  'the centres name themselves and say how many stations answer to each');
+
+const stations = () => pg.evaluate(() => [...document.querySelectorAll('#building_list > li')]
+  .filter((li) => getComputedStyle(li).display !== 'none')
+  .map((li) => li.getAttribute('search_attribute')));
+await pg.selectOption('#ymca-sf-pick', '11');
+await pg.waitForTimeout(150);
+console.log('centre NY         :', JSON.stringify(await stations()));
+assert.deepEqual(await stations(), ['NY', 'FS01', 'AS01'],
+  'the centre itself stays, and only the stations that answer to it');
+await pg.selectOption('#ymca-sf-pick', '');
+await pg.waitForTimeout(150);
+assert.equal((await stations()).length, 5, 'and all of them come back');
+console.log('centre all        : 5 back');
+await pg.evaluate(() => document.getElementById('building_list').closest('div').remove());
 
 // The group is the master switch: EagleEye off takes ShutEye with it.
 await pg.click('#ef-back');
@@ -1613,24 +1683,27 @@ console.log('highfive off      : a pick arms nothing');
 // fail quietly. The capture ended that: a pick lands on /vehicles/<id>/patient/<hospital>, a
 // page with no destinations and #next-vehicle-fms-5 already on it. A fresh page, because a
 // fresh page is exactly what a pick produces.
-const picked = await b.newPage({ viewport: { width: 1100, height: 900 } });
-const pickedErrs = [];
-picked.on('pageerror', (e) => pickedErrs.push(e.message));
-await picked.goto('http://localhost:8777/README.md');
-await picked.setContent(`<html><body>
-  <div class="alert alert-success">Transport assigned</div>
-  <a class="btn btn-success" id="next-vehicle-fms-5"
-    href="/README.md?next=1">Go to the next vehicle with a transport request</a>
-</body></html>`);
-await picked.evaluate(() => history.replaceState({}, '', '/vehicles/15079874/patient/41'));
-await picked.addScriptTag({ content: script });
-await picked.waitForURL(/next=1/, { timeout: 15000 });
-console.log('after a pick      :', new URL(picked.url()).pathname + new URL(picked.url()).search);
-assert.match(picked.url(), /next=1/,
-  'landing on the pick page should follow the next-vehicle button the game put there');
-console.log('picked errors     :', pickedErrs.length ? pickedErrs.slice(0, 3) : 'none');
-assert.equal(pickedErrs.length, 0);
-await picked.close();
+// Both branches, because the game names them in two languages: a hospital is /patient/ and a
+// prison is /gefangener/. Matching only the English one is why the ambulances advanced and the
+// patrol cars did not.
+for (const [branch, dest] of [['patient', '41'], ['gefangener', '7'], ['patient', '-1']]) {
+  const picked = await b.newPage({ viewport: { width: 1100, height: 900 } });
+  const pickedErrs = [];
+  picked.on('pageerror', (e) => pickedErrs.push(e.message));
+  await picked.goto('http://localhost:8777/README.md');
+  await picked.setContent(`<html><body>
+    <div class="alert alert-success">Assigned</div>
+    <a class="btn btn-success" id="next-vehicle-fms-5"
+      href="/README.md?next=${branch}">Go to the next vehicle with a transport request</a>
+  </body></html>`);
+  await picked.evaluate(([b2, d]) =>
+    history.replaceState({}, '', `/vehicles/15079874/${b2}/${d}`), [branch, dest]);
+  await picked.addScriptTag({ content: script });
+  await picked.waitForURL(new RegExp(`next=${branch}`), { timeout: 15000 });
+  console.log('after a pick      :', `/${branch}/${dest} \u2192`, new URL(picked.url()).search);
+  assert.equal(pickedErrs.length, 0, `${branch} page threw`);
+  await picked.close();
+}
 
 console.log('page errors       :', errs.length ? errs.slice(0, 3) : 'none');
 assert.equal(errs.length, 0);

@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.36';
+export const VERSION = '0.0.37';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -190,6 +190,7 @@ function build() {
          * first: ElementFriend lists in register order. */
         read('userscripts/src/mod-eagleeye.js'),
         read('userscripts/src/mod-shuteye.js'),
+        read('userscripts/src/mod-stationfascination.js'),
         read('userscripts/src/mod-diagnostics.js').replace('__VEHICLE_TYPES__', vehicleTypes),
         BOOT,
         '})();\n',

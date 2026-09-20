@@ -381,6 +381,8 @@ const ICONS = {
         + '<circle cx="17" cy="17" r="4.5"/>',
     shuteye: '<path d="M3 13c3 4.5 8 7.5 14 7.5S28 17.5 31 13"/><path d="M8 19l-2.5 4"/>'
         + '<path d="M17 20.5V25"/><path d="M26 19l2.5 4"/>',
+    stationfascination: '<path d="M5 29V15l12-8 12 8v14"/><path d="M13 29v-8h8v8"/>'
+        + '<path d="M2 29h30"/>',
     elementfriend: '<circle cx="17" cy="17" r="4"/><path d="M17 4v5M17 25v5M4 17h5M25 17h5"/>'
         + '<path d="M8.4 8.4l3.5 3.5M22.1 22.1l3.5 3.5M25.6 8.4l-3.5 3.5M11.9 22.1l-3.5 3.5"/>',
     highfive: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'

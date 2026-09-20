@@ -72,8 +72,19 @@ function hfTally(list, cap) {
  * it. That is why this does not need to be injected into the game's markup to
  * work.
  */
-/** The page's own answer to "is this a vehicle waiting for a destination". */
-const HF_PICK_LINK = 'a[href*="/patient/"]';
+/**
+ * The page's own answer to "is this a vehicle waiting for a destination".
+ *
+ * THE GAME NAMES THE TWO BRANCHES IN TWO LANGUAGES. A hospital is
+ * `/vehicles/<id>/patient/<hospital>` and a prison is
+ * `/vehicles/<id>/gefangener/<cell>` — the German word, in an English game,
+ * exactly as `gw_gefahrgut` turned up in a requirement list. Matching only the
+ * English one is why the ambulances advanced and the patrol cars did not.
+ * Neither word is guessed at: both came off a capture.
+ */
+const HF_BRANCHES = ['patient', 'gefangener'];
+const HF_PICK_LINK = HF_BRANCHES.map((w) => `a[href*="/${w}/"]`).join(', ');
+const HF_PICKED = new RegExp(`^/vehicles/\\d+/(${HF_BRANCHES.join('|')})/-?\\d+`);
 const HF_NEXT = '#next-vehicle-fms-5';
 
 function hfCapturePage() {
@@ -136,19 +147,21 @@ function hfCapturePage() {
                         .map((x) => `${x.tagName.toLowerCase()}${hfShape(x.id) ? `#${hfShape(x.id)}` : ''}.${classOf(x)}`)
                         .slice(0, 4),
                 })),
-                /* Which of these is a section and which is a heading decides
-                 * whether "own only" can be done by hiding one thing. */
-                sections: ['own-hospitals', 'alliance-hospitals', 'showRetired', 'showBtn',
-                    'hideBtn', 'leave_without_transport_no_compensation']
-                    .map((id) => {
-                        const el = document.getElementById(id);
-                        return el ? {
-                            id,
-                            tag: el.tagName.toLowerCase(),
-                            class: classOf(el) || undefined,
-                            holdsLinks: el.querySelectorAll(HF_PICK_LINK).length,
-                        } : { id, missing: true };
-                    }),
+                /* FOUND, NOT NAMED. `own-hospitals` and `alliance-hospitals` were
+                 * a list of ids to look for, which answers nothing on a prison
+                 * page. Every element carrying an id and holding destinations
+                 * is reported instead, so whatever the other branch calls its
+                 * halves names itself. */
+                sections: [...document.querySelectorAll('[id]')]
+                    .map((el) => ({ el, n: el.querySelectorAll(HF_PICK_LINK).length }))
+                    .filter(({ el, n }) => n && el.tagName !== 'BODY')
+                    .slice(0, 12)
+                    .map(({ el, n }) => ({
+                        id: hfShape(el.id),
+                        tag: el.tagName.toLowerCase(),
+                        class: classOf(el) || undefined,
+                        holdsLinks: n,
+                    })),
             };
         })(),
         hasNextButton: !!document.querySelector(HF_NEXT),
@@ -603,8 +616,6 @@ function hfOnPickPage(ctx) {
  * "Leave without transport" is the same path with a negative hospital id, so it
  * moves on the same way.
  */
-const HF_PICKED = /^\/vehicles\/\d+\/patient\/-?\d+/;
-
 function hfAfterPick(ctx) {
     if (!HF_PICKED.test(location.pathname)) return false;
     const next = document.querySelector(HF_NEXT);
