@@ -155,6 +155,10 @@ async function run(what, ctx, put) {
                 menu: typeof GM_registerMenuCommand === 'function',
             },
             modules: YMCA.modules.map((m) => m.id),
+            /* Which parts are switched on in ElementFriend. Half of "it does
+             * nothing" is "it is switched off", and that is not something the
+             * player thinks to mention. */
+            elements: YMCA.elementState(),
             entryPoint: document.getElementById('ymca-nav') ? 'navbar'
                 : document.getElementById('ymca-fab') ? 'floating button' : 'none',
             endpoints: {},
@@ -182,6 +186,10 @@ async function run(what, ctx, put) {
          * three tools and a paste each. */
         report.trackops = moduleStore('trackops');
         report.missionmagician = moduleStore('missionmagician');
+        /* HighFive's captures ride along rather than waiting to be asked for:
+         * the window it needs is one the player happens to be looking at, and
+         * a reading that has to be remembered is a reading that is missing. */
+        report.highfive = moduleStore('highfive');
         // What the sweep has managed, so "nothing saves itself" is answerable.
         report.typeSweep = sweepState();
         report.interface = interfaceProbe();
@@ -482,6 +490,15 @@ function moduleStore(moduleId) {
                 .filter((f) => !claimed.has(f)).sort(),
             unmatchedRequirements: unmatched,
             settings: read('cfg', null),
+        };
+    }
+
+    if (moduleId === 'highfive') {
+        /* Structure only, both of them — path shapes and field names, never a
+         * hospital, a patient or a vehicle of the player's. */
+        return {
+            window: read('lastCapture', null),
+            fleetStatus: read('lastFleet', null),
         };
     }
 

@@ -55,6 +55,8 @@ userscripts/
     mod-missionmagician.js
     mod-recruitroom.js
     mod-trackops.js
+    mod-elementfriend.js
+    mod-highfive.js
     mod-diagnostics.js
 tools/build_ymca.mjs  the bundler, and the single home of VERSION
 ```
@@ -90,6 +92,32 @@ menu entry.
 The click handler sits on the `<li>`, not the `<a>`: the game pads its navbar
 items by the list item, so a click can land either side of the text.
 
+### The switchboard
+
+**A tool set that cannot be turned down is one somebody uninstalls whole.**
+ElementFriend is a page of **element tiles**, one per part of YMCA the player
+may not want, each with a switch on its face and its own settings behind it.
+
+The state lives in the shell, not in ElementFriend: `YMCA.isOn(mod)` is read by
+the launcher and by `YMCA.inject`, both of which run before any module mounts,
+and `YMCA.switchElement` is the only writer. ElementFriend is the face of it, so
+a module going does not take every other module's state with it.
+
+**A switch means the whole module, not its tile.** The tile leaves the launcher
+*and* `YMCA.inject` refuses to run it, so nothing of it reaches the game's page
+either — a switch that left MissionMagician's mission panel standing would be
+switching off the part nobody looks at. The Tampermonkey menu answers to the
+same switches, because it is the launcher by another route.
+
+Two fields on a module, and no others:
+
+| | |
+|---|---|
+| `optional: true` | carries a switch, and is listed in ElementFriend |
+| `defaultOn` | what it is before anybody has touched it — **on** for anything that shipped before the switchboard, because an update that hides tools somebody was using is an update that broke; off for anything that does not work yet |
+| `mainTile: false` | never in the launcher. An **element tile**: its work happens in the game's own pages, so a tile on the front would open a panel that does nothing |
+| `settings(el, ctx)` | rendered when its element tile is opened. `ctx` is `YMCA.contextFor(mod.id)`, so what it writes lands in the **module's own** namespace and the module reads it back without knowing ElementFriend exists |
+
 ### Freshness
 
 `ctx.game()` caches for the whole page load, which is right when switching
@@ -108,6 +136,21 @@ module with its settings, a plain warning that it does not work yet, and the
 button that collects the missing piece. MissionMagician was in that state for
 three rounds of captures before it ticked anything, and its capture button is
 still there for a window built differently from the one it was written against.
+
+**HighFive is the one in that state now.** Status 5 is a vehicle transporting —
+an ambulance to a hospital, a patrol car to a prison — and the point is to pick
+the destination and land straight on the next one, the way LSS-Manager does.
+What is missing is the markup of the game's own vehicle window while it is
+transporting: what holds the destinations, what a pick actually is, and what the
+page does afterwards. **Guessing which link is a hospital is guessing where a
+patient goes, and there is no undo for that**, so it ships switched off, with a
+plain warning and two capture buttons. One reads the page YMCA is open over —
+YMCA's window is a lightbox, so the vehicle page behind it is still in the
+document and the capture needs no injection to reach it. The other asks the
+fleet **which field carries the status**, by reporting every field whose values
+across the whole fleet are few and small; an id is never tallied however small
+it happens to be, so a status names itself without the player's own identifiers
+riding along.
 
 **When a guess turns out wrong, write down what was wrong in the module's
 header.** TrackOps guessed twice — first that the game polls over HTTP, then
@@ -278,6 +321,15 @@ HazMat rides with fewer or more — so seats are not people, and a figure built 
 them looks measured while being a guess. Nothing in a mission window says who is
 aboard. The requirement is stated and nothing counts it. Both facts are kept in
 the type store because the game states them; neither is arithmetic.
+
+**…and then the player was asked.** `Max. Crew` is a cap *somebody set*, which
+is exactly why the game cannot be read for it and exactly why the person who set
+it can. Crew numbers are typed in **ElementFriend → MissionMagician**, one row
+per type in the fleet, with `Max. Crew` shown beside as a hint and never as the
+value. What the panel adds up is **seats ticked**, labelled as the player's own
+number wherever it shows. Whether the people aboard a HazMat hold the HazMat
+training is still not something any page says, so it is still not claimed — the
+training sentence stays the game's own.
 
 **`average_credits` is the game's own figure**, in the catalogue the
 `#mission_help` link points at, so the panel can show what a call is worth
@@ -530,7 +582,10 @@ and re-render; do not assume the first look was the whole picture.
 
 ### Add a module in five steps
 
-1. Write `userscripts/src/mod-<name>.js` with one `YMCA.register` call.
+1. Write `userscripts/src/mod-<name>.js` with one `YMCA.register` call. Decide
+   whether it carries a switch (`optional: true`, and `defaultOn: false` if it
+   does not work yet) and whether it belongs in the launcher at all
+   (`mainTile: false` makes it an element tile).
 2. Add it to the `parts` list in `tools/build_ymca.mjs`.
 3. Give it a tile icon in `ICONS` in `shell.js`, keyed by module id. Without one
    it falls back to a generic glyph, which is fine but looks unfinished.
@@ -551,10 +606,12 @@ ask for is a reading they will not have when they need it, so the buttons that
 each copied one thing are gone and what they copied rides in the report.
 
 - **Copy the report** — version, page, browser, script manager, grants, how YMCA
-  was reached, the module list, **which of every endpoint answered**, the last 60
-  log entries, **the interface probe**, **what TrackOps has measured**, and
-  **every requirement MissionMagician could not match**. Deliberately carries
-  **no** building names or coordinates.
+  was reached, the module list, **which parts are switched on in ElementFriend**,
+  **which of every endpoint answered**, the last 60 log entries, **the interface
+  probe**, **what TrackOps has measured**, **every requirement MissionMagician
+  could not match**, and **whatever HighFive has captured**. Deliberately carries
+  **no** building names or coordinates. Half of "it does nothing" is "it is
+  switched off", and that is not something a player thinks to mention.
 - **Send feedback** — a typed note packaged with the version, the page, which
   tool was open and the last 25 log entries. Nothing is transmitted; it lands on
   the clipboard for the player to paste wherever they like.

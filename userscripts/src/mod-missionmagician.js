@@ -533,9 +533,15 @@ YMCA.register({
     id: 'missionmagician',
     title: 'MissionMagician',
     tagline: 'Pick the right vehicles',
+    /* Switchable from ElementFriend, and on until somebody says otherwise: it
+     * shipped before the switchboard existed. */
+    optional: true,
 
     description: 'Reads what a mission needs and ticks the vehicles that match. '
         + 'It never dispatches — you press the game\'s own button.',
+
+    /* ElementFriend opens this: the crew numbers the game cannot be read for. */
+    settings: mmSettings,
 
     async mount(el, ctx) {
         const cfg = ctx.store.read('cfg', { fastestFirst: true });
@@ -989,6 +995,133 @@ function mmCrewTraining(record) {
  *
  * Nothing in a mission window says who is aboard. The requirement is stated,
  * and stated as the game states it, until there is something real to count. */
+
+/* ...AND THEN THE PLAYER WAS ASKED.
+ *
+ * `Max. Crew` is a cap somebody set, which is exactly why the game cannot be
+ * read for this — and exactly why the person who set it can. Crew numbers are
+ * typed in ElementFriend -> MissionMagician, they are that player's own figure
+ * for their own vehicles, and they are labelled as theirs everywhere they
+ * show. A number the player states is not a number YMCA inferred.
+ *
+ * It counts SEATS TICKED, not trained crew. Whether the people aboard a HazMat
+ * hold the HazMat training is still not something any page says, so it is
+ * still not claimed. The sentence beside it stays the game's own. */
+const MM_CREW_KEY = 'ymca-missionmagician-crew';
+
+function mmCrewOnBoard() {
+    try {
+        return JSON.parse(localStorage.getItem(MM_CREW_KEY)) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+/** Seats on what is ticked right now, and how many of them are unstated. */
+function mmTickedSeats() {
+    const crew = mmCrewOnBoard();
+    let seats = 0;
+    let unstated = 0;
+    for (const box of document.querySelectorAll('.vehicle_checkbox:checked')) {
+        const n = Number(crew[box.getAttribute('vehicle_type_id')]);
+        if (n > 0) seats += n; else unstated += 1;
+    }
+    return { seats, unstated, anyStated: Object.keys(crew).length > 0 };
+}
+
+/** The sentence that goes beside the training line. */
+function mmSeatSentence() {
+    const { seats, unstated, anyStated } = mmTickedSeats();
+    if (!anyStated) {
+        return 'How many are aboard is not something this window says \u2014 set your own crew '
+            + 'numbers in ElementFriend \u2192 MissionMagician and this will add up what you tick.';
+    }
+    const tail = unstated
+        ? `, and ${unstated} whose crew you have not stated`
+        : '';
+    return `Ticked so far: <b>${seats}</b> seats by your own crew numbers${tail}. Whether the `
+        + 'people aboard hold that training is not something the game says.';
+}
+
+/* ---------------------------------------------------- the crew numbers page */
+
+/**
+ * ElementFriend -> MissionMagician. One row per type in the fleet, because a
+ * type nobody owns has no crew to state.
+ *
+ * `Max. Crew` from the buy page is shown as a hint and never as the value: it
+ * is the cap, and the point of this page is that the cap is not the count.
+ */
+async function mmSettings(el, ctx) {
+    el.innerHTML = '<p class="ymca-dim">Reading your fleet\u2026</p>';
+    let vehicles;
+    try {
+        vehicles = await ctx.game('/api/vehicles');
+    } catch (err) {
+        el.innerHTML = `<div class="ymca-note bad">Your fleet could not be read
+      (${ctx.esc(err.message)}), so there is nothing to list yet.</div>`;
+        return;
+    }
+
+    const owned = new Map();
+    for (const v of vehicles || []) {
+        const id = String(v.vehicle_type ?? '');
+        if (!id) continue;
+        owned.set(id, (owned.get(id) || 0) + 1);
+    }
+    const learnt = mmLearntTypes();
+    const nameOf = (id) => learnt[id]?.name || MM_SHIPPED_TYPES[id]?.name || `Type ${id}`;
+    const crew = mmCrewOnBoard();
+
+    const rows = [...owned.keys()]
+        .sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+        .map((id) => {
+            const cap = MM_SHIPPED_TYPES[id]?.crew;
+            return `<tr>
+          <td>${ctx.esc(nameOf(id))} <small>#${ctx.esc(id)}</small></td>
+          <td class="ymca-num">${owned.get(id)}</td>
+          <td class="ymca-dim ymca-num">${cap ? ctx.esc(String(cap)) : '\u2014'}</td>
+          <td><input type="number" min="0" max="99" style="width:72px" data-crew="${ctx.esc(id)}"
+            value="${crew[id] > 0 ? ctx.esc(String(crew[id])) : ''}" placeholder="\u2014"></td>
+        </tr>`;
+        }).join('');
+
+    el.innerHTML = `
+    <div class="ymca-note">A mission can ask for trained crew &mdash; eight with HazMat, say
+      &mdash; and they ride on whatever you send. Nothing in the game says how many people are
+      on a vehicle: <b>Max. Crew</b> on the buy page is the cap you set, not the count. So this
+      is <b>your</b> number, and MissionMagician says so wherever it uses it.</div>
+
+    ${rows ? `<div class="ymca-card">
+      <table>
+        <thead><tr><th>Vehicle type</th><th class="text-right">You own</th>
+          <th>Max. crew</th><th>Crew on board</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="ymca-row">
+      <button class="ymca-btn" data-do="clear">Clear them all</button>
+      <span class="ymca-dim" style="font-size:12px">Saved as you type.</span>
+    </div>`
+        : '<div class="ymca-note warn">No vehicles yet, so there is nothing to state.</div>'}`;
+
+    el.addEventListener('input', (e) => {
+        const box = e.target.closest('[data-crew]');
+        if (!box) return;
+        const held = mmCrewOnBoard();
+        const n = Number(box.value);
+        if (n > 0) held[box.dataset.crew] = Math.min(99, Math.round(n));
+        else delete held[box.dataset.crew];
+        ctx.store.write('crew', held);
+        ctx.status('Crew numbers saved.');
+    });
+    el.addEventListener('click', (e) => {
+        if (!e.target.closest('[data-do="clear"]')) return;
+        ctx.store.write('crew', {});
+        el.querySelectorAll('[data-crew]').forEach((box) => { box.value = ''; });
+        ctx.status('Crew numbers cleared.');
+    });
+}
 
 function mmPretty(key) {
     return key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
@@ -1745,6 +1878,11 @@ function mmRecount(panel, plan) {
             ?.classList.toggle('mm-row-ok', line.found >= line.wanted);
     }
 
+    /* Seats follow the ticking the same way the counts do — by the player's own
+     * numbers, and saying so. */
+    const seatLine = panel.querySelector('[data-crew-seats]');
+    if (seatLine) seatLine.innerHTML = mmSeatSentence();
+
     /* The table is the surface with the answer on it, so it carries the answer:
      * red while anything is short, green once nothing is. */
     const table = panel.querySelector('.mm-table');
@@ -1909,8 +2047,8 @@ function mmGamePanelHtml(plan, cfg, ctx) {
 
       ${plan.crewTraining?.length ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.crewTraining.map((t) => `Crew: <b>${t.count}</b> with
-          ${ctx.esc(t.label)} training`).join('; ')} &mdash; they ride on whatever is sent, and
-        how many are aboard is not something this window says.</p>` : ''}
+          ${ctx.esc(t.label)} training`).join('; ')} &mdash; they ride on whatever is sent.
+        <span data-crew-seats>${mmSeatSentence()}</span></p>` : ''}
 
       ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.scene.total} already at the mission or on the way, subtracted above${

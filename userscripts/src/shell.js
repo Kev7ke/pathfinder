@@ -17,6 +17,7 @@ const YMCA = {
 const LS = {
     ui: 'ymca-ui',
     log: 'ymca-log',
+    elements: 'ymca-elements',
 };
 
 // ---------- small helpers every module uses ----------
@@ -37,6 +38,48 @@ function writeStore(key, value) {
         localStorage.setItem(key, JSON.stringify(value));
     } catch (e) { /* private window: nothing is remembered, everything still works */ }
 }
+
+/* ---------- which parts are switched on ----------
+ *
+ * ElementFriend owns this switchboard; the shell only reads it, so a module
+ * never has to ask whether it is allowed to be there.
+ *
+ * A module that declares `optional: true` carries a switch. `defaultOn` says
+ * what it is before anybody has touched it — off for anything that does not
+ * work yet, on for everything that shipped before the switchboard existed,
+ * because an update that hides tools somebody was already using is an update
+ * that broke.
+ *
+ * `mainTile: false` keeps a module out of the launcher altogether. Those are
+ * the element tiles: they live inside ElementFriend and do their work in the
+ * game's own page, so a tile of their own on the front would open nothing.
+ */
+function elementStates() {
+    return readStore(LS.elements, {});
+}
+
+/** Is this module switched on? Anything not optional always is. */
+YMCA.isOn = function isOn(mod) {
+    const m = typeof mod === 'string' ? this.modules.find((x) => x.id === mod) : mod;
+    if (!m) return false;
+    if (!m.optional) return true;
+    const held = elementStates()[m.id];
+    return typeof held === 'boolean' ? held : m.defaultOn !== false;
+};
+
+/** The only writer is ElementFriend. */
+YMCA.switchElement = function switchElement(id, on) {
+    const states = elementStates();
+    states[id] = !!on;
+    writeStore(LS.elements, states);
+    logger.info('shell', `${id} switched ${on ? 'on' : 'off'}`);
+};
+
+/** Every switch, for the problem report and for ElementFriend's own tiles. */
+YMCA.elementState = function elementState() {
+    return Object.fromEntries(this.modules.filter((m) => m.optional)
+        .map((m) => [m.id, this.isOn(m)]));
+};
 
 /**
  * A rolling log of what YMCA did and what went wrong.
@@ -225,6 +268,26 @@ function styles() {
 #${WINDOW_ID} .ymca-tile.soon:hover{border-color:var(--g-line);background:var(--g-raise)}
 #${WINDOW_ID} .ymca-lead{margin:0 0 14px;color:var(--g-dim)}
 
+/* An element tile: the same tile with a switch along its foot. It is a div,
+   not a button, because a switch inside a button is a control inside a
+   control — the click handler simply stands aside for the switch. */
+#${WINDOW_ID} .ymca-tile.el{gap:6px}
+#${WINDOW_ID} .ymca-tile.el.off{opacity:.62}
+#${WINDOW_ID} .ymca-tile.el.off:hover{opacity:1}
+#${WINDOW_ID} .ymca-tile .ymca-foot{display:flex;align-items:center;justify-content:space-between;
+  gap:9px;margin-top:4px;padding-top:9px;border-top:1px solid var(--g-soft)}
+#${WINDOW_ID} .ymca-switch{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+  font:600 12px/1.2 var(--g-font);user-select:none}
+#${WINDOW_ID} .ymca-switch input{position:absolute;opacity:0;width:0;height:0}
+#${WINDOW_ID} .ymca-switch i{flex:none;width:34px;height:19px;border-radius:19px;position:relative;
+  background:rgba(0,0,0,.45);border:1px solid var(--g-line);transition:background .12s}
+#${WINDOW_ID} .ymca-switch i::after{content:"";position:absolute;top:2px;left:2px;width:13px;
+  height:13px;border-radius:50%;background:#fff;transition:left .12s}
+#${WINDOW_ID} .ymca-switch input:checked + i{background:var(--g-navy)}
+#${WINDOW_ID} .ymca-switch input:checked + i::after{left:17px}
+#${WINDOW_ID} .ymca-switch input:focus-visible + i{outline:2px solid #8ab4f8;outline-offset:1px}
+#${WINDOW_ID} .ymca-switch input:disabled + i{opacity:.45}
+
 #${WINDOW_ID} h2.ymca-h{margin:0 0 4px;font-size:19px;color:#fff}
 #${WINDOW_ID} p.ymca-sub{margin:0 0 14px;color:var(--g-dim);font-size:13px}
 #${WINDOW_ID} .ymca-btn{border:1px solid #252525;background:#fff;border-radius:3px;
@@ -281,6 +344,10 @@ const ICONS = {
         + '<path d="M24 9v10M19 14h10"/>',
     trackops: '<path d="M5 29 H30"/><rect x="7" y="18" width="5" height="11"/>'
         + '<rect x="15" y="11" width="5" height="18"/><rect x="23" y="5" width="5" height="24"/>',
+    elementfriend: '<circle cx="17" cy="17" r="4"/><path d="M17 4v5M17 25v5M4 17h5M25 17h5"/>'
+        + '<path d="M8.4 8.4l3.5 3.5M22.1 22.1l3.5 3.5M25.6 8.4l-3.5 3.5M11.9 22.1l-3.5 3.5"/>',
+    highfive: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'
+        + '<path d="M19 16v-7a2 2 0 0 1 4 0v12a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7v-6a2 2 0 0 1 4 0"/>',
     default: '<rect x="6" y="6" width="9" height="9"/><rect x="19" y="6" width="9" height="9"/>'
         + '<rect x="6" y="19" width="9" height="9"/><rect x="19" y="19" width="9" height="9"/>',
 };
@@ -354,7 +421,8 @@ function openWindow(moduleId) {
         setStatus('');
         main.innerHTML = `<p class="ymca-lead">Pick a tool.</p>
       <div class="ymca-tiles">
-        ${YMCA.modules.map((m) => `<button class="ymca-tile" data-mod="${esc(m.id)}">
+        ${YMCA.modules.filter((m) => m.mainTile !== false && YMCA.isOn(m))
+        .map((m) => `<button class="ymca-tile" data-mod="${esc(m.id)}">
           ${iconFor(m.id)}<b>${esc(m.title)}</b><span>${esc(m.tagline || '')}</span>
         </button>`).join('')}
         <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
@@ -414,6 +482,14 @@ function openWindow(moduleId) {
  * A throw is logged rather than left to break the game's page.
  */
 YMCA.inject = function inject(moduleId, fn) {
+    /* A switched-off module does not reach the game's page either. The switch
+     * has to mean the whole module, not only its tile — MissionMagician's
+     * panel lives in the mission window, so a switch that left it there would
+     * switch off nothing the player can see. */
+    if (!YMCA.isOn(moduleId)) {
+        logger.info(moduleId, 'not injected, switched off in ElementFriend');
+        return;
+    }
     const ctx = context(moduleId);
     let done = false;
     const attempt = () => {
@@ -445,6 +521,15 @@ YMCA.inject = function inject(moduleId, fn) {
      * observing for the rest of the session. */
     setTimeout(() => observer.disconnect(), 30000);
 };
+
+/**
+ * Another module's context.
+ *
+ * ElementFriend renders a module's own settings into its own panel, and those
+ * settings have to be stored where the module reads them — under the module's
+ * namespace, not under ElementFriend's. This is the only caller.
+ */
+YMCA.contextFor = (moduleId) => context(moduleId);
 
 /** What a module is handed. Nothing here touches the shell's own chrome. */
 function context(moduleId) {

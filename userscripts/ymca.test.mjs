@@ -201,7 +201,11 @@ await pg.waitForSelector('#ymca-window');
 const tiles = await pg.$$eval('.ymca-tile[data-mod]', (b) => b.map((x) => x.dataset.mod));
 console.log('tiles             :', JSON.stringify(tiles));
 assert.deepEqual(tiles,
-  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'trackops', 'diagnostics']);
+  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'trackops', 'elementfriend',
+    'diagnostics']);
+// HighFive is an element tile: it lives in ElementFriend and never in the launcher.
+assert.equal(await pg.locator('.ymca-tile[data-mod="highfive"]').count(), 0,
+  'an element-only tile should not be in the launcher');
 assert.equal(await pg.locator('#ymca-back').isVisible(), false,
   'the back button should be hidden on the launcher');
 await pg.screenshot({ path: '/tmp/ymca-tiles.png' });
@@ -1313,6 +1317,72 @@ for (const [span, expect, why] of [
 }
 await pg.click('[data-span="all"]');
 await pg.waitForTimeout(250);
+
+// ---- ElementFriend: the switchboard ----
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="elementfriend"]');
+await pg.waitForSelector('.ymca-tile.el');
+const elements = await pg.$$eval('.ymca-tile.el', (b) => b.map((x) => x.dataset.el));
+console.log('elements          :', JSON.stringify(elements));
+await pg.screenshot({ path: '/tmp/ymca-elements.png' });
+assert.deepEqual(elements, ['renamer', 'missionmagician', 'trackops', 'highfive'],
+  'every switchable module should have an element tile');
+// Shipped-before-the-switchboard is on; does-not-work-yet is off.
+assert.equal(await pg.locator('.ymca-switch[data-sw="trackops"] input').isChecked(), true);
+assert.equal(await pg.locator('.ymca-switch[data-sw="highfive"] input').isChecked(), false);
+
+// A switch takes the tool out of the launcher, not just out of this page.
+await pg.click('.ymca-switch[data-sw="trackops"]');
+await pg.waitForTimeout(120);
+assert.ok(await pg.locator('.ymca-tile.el[data-el="trackops"].off').count() === 1,
+  'a switched-off element tile should read as off');
+await pg.click('#ymca-back');
+await pg.waitForSelector('.ymca-tile[data-mod]');
+assert.equal(await pg.locator('.ymca-tile[data-mod="trackops"]').count(), 0,
+  'switching TrackOps off should take its tile out of the launcher');
+console.log('switch off        : TrackOps left the launcher');
+
+await pg.click('.ymca-tile[data-mod="elementfriend"]');
+await pg.click('.ymca-switch[data-sw="trackops"]');
+await pg.waitForTimeout(120);
+await pg.click('#ymca-back');
+await pg.waitForSelector('.ymca-tile[data-mod="trackops"]');
+console.log('switch on         : and came back');
+
+// ---- HighFive: honest about not working, and collects what would make it ----
+await pg.click('.ymca-tile[data-mod="elementfriend"]');
+await pg.click('.ymca-tile.el[data-el="highfive"] b');
+await pg.waitForSelector('[data-do="capture"]');
+const hfText = (await pg.textContent('#ef-body')).replace(/\s+/g, ' ');
+assert.ok(/does not work yet/i.test(hfText), 'HighFive should say plainly that it does not work');
+await pg.click('[data-do="fleet"]');
+await pg.waitForFunction(() => localStorage.getItem('ymca-highfive-lastFleet'));
+const hfFleet = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-highfive-lastFleet')));
+console.log('highfive fleet    :', JSON.stringify(hfFleet.smallIntegerFields));
+assert.ok(hfFleet.fieldNames.includes('vehicle_type'), 'the fleet capture should name its fields');
+assert.ok(!('id' in hfFleet.smallIntegerFields) && !('building_id' in hfFleet.smallIntegerFields),
+  'a capture must not tally the player\'s own identifiers');
+await pg.click('[data-do="capture"]');
+await pg.waitForFunction(() => localStorage.getItem('ymca-highfive-lastCapture'));
+const shot = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-highfive-lastCapture')));
+assert.ok(Object.keys(shot.linkShapes).every((k) => !/\d/.test(k)),
+  'a captured path should be a shape, with the digits taken out');
+console.log('highfive capture  : structure only, digits shaped out');
+
+// ---- crew numbers: the player's figure, because the game has none ----
+await pg.click('#ef-back');
+await pg.click('.ymca-tile.el[data-el="missionmagician"] b');
+await pg.waitForSelector('[data-crew]');
+const crewRows = await pg.$$eval('[data-crew]', (b) => b.map((x) => x.dataset.crew));
+console.log('crew rows         :', JSON.stringify(crewRows));
+assert.deepEqual(crewRows.sort(), ['10', '13', '904'], 'one row per type in the fleet');
+await pg.fill('[data-crew="13"]', '6');
+await pg.waitForTimeout(120);
+assert.deepEqual(
+  await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-missionmagician-crew'))),
+  { 13: 6 }, 'a crew number should be saved under MissionMagician, not under ElementFriend');
+console.log('crew numbers      : saved as typed');
+await pg.click('#ymca-back');
 
 console.log('page errors       :', errs.length ? errs.slice(0, 3) : 'none');
 assert.equal(errs.length, 0);

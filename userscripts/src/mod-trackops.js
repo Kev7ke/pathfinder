@@ -77,6 +77,7 @@ YMCA.register({
     id: 'trackops',
     title: 'TrackOps',
     tagline: 'What you have run',
+    optional: true,
 
     description: 'Counts the missions you finish and what each one actually paid, '
         + 'from the day it was installed.',

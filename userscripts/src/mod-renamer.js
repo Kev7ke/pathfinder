@@ -104,6 +104,7 @@ YMCA.register({
     id: 'renamer',
     title: 'RelabelTable',
     tagline: 'Vehicles and stations',
+    optional: true,
     description: 'Rename from a pattern. The preview is mandatory, and every run records the '
         + 'previous names so it can be undone.',
 

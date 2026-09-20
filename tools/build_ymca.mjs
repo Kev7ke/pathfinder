@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.31';
+export const VERSION = '0.0.32';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -123,7 +123,10 @@ function mount() {
 
 if (typeof GM_registerMenuCommand === 'function') {
     GM_registerMenuCommand('Open YMCA', () => openWindow());
+    /* The menu is the launcher by another route, so it answers to the same
+     * switches. An element tile has no panel worth opening from here. */
     for (const mod of YMCA.modules) {
+        if (mod.mainTile === false || !YMCA.isOn(mod)) continue;
         GM_registerMenuCommand(mod.title, () => openWindow(mod.id));
     }
 }
@@ -178,6 +181,11 @@ function build() {
         read('userscripts/src/mod-missionmagician.js').replace('__VEHICLE_TYPES__', vehicleTypes),
         read('userscripts/src/mod-recruitroom.js'),
         read('userscripts/src/mod-trackops.js'),
+        /* ElementFriend is the switchboard and HighFive is its first
+         * element-only tile, so both come after everything they switch: the
+         * page lists YMCA.modules, and register order is the order it reads. */
+        read('userscripts/src/mod-elementfriend.js'),
+        read('userscripts/src/mod-highfive.js'),
         read('userscripts/src/mod-diagnostics.js').replace('__VEHICLE_TYPES__', vehicleTypes),
         BOOT,
         '})();\n',

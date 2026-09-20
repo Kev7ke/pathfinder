@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.31
+// @version      0.0.32
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.31',
+    version: '0.0.32',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -699,6 +699,7 @@ const YMCA = {
 const LS = {
     ui: 'ymca-ui',
     log: 'ymca-log',
+    elements: 'ymca-elements',
 };
 
 // ---------- small helpers every module uses ----------
@@ -719,6 +720,48 @@ function writeStore(key, value) {
         localStorage.setItem(key, JSON.stringify(value));
     } catch (e) { /* private window: nothing is remembered, everything still works */ }
 }
+
+/* ---------- which parts are switched on ----------
+ *
+ * ElementFriend owns this switchboard; the shell only reads it, so a module
+ * never has to ask whether it is allowed to be there.
+ *
+ * A module that declares `optional: true` carries a switch. `defaultOn` says
+ * what it is before anybody has touched it — off for anything that does not
+ * work yet, on for everything that shipped before the switchboard existed,
+ * because an update that hides tools somebody was already using is an update
+ * that broke.
+ *
+ * `mainTile: false` keeps a module out of the launcher altogether. Those are
+ * the element tiles: they live inside ElementFriend and do their work in the
+ * game's own page, so a tile of their own on the front would open nothing.
+ */
+function elementStates() {
+    return readStore(LS.elements, {});
+}
+
+/** Is this module switched on? Anything not optional always is. */
+YMCA.isOn = function isOn(mod) {
+    const m = typeof mod === 'string' ? this.modules.find((x) => x.id === mod) : mod;
+    if (!m) return false;
+    if (!m.optional) return true;
+    const held = elementStates()[m.id];
+    return typeof held === 'boolean' ? held : m.defaultOn !== false;
+};
+
+/** The only writer is ElementFriend. */
+YMCA.switchElement = function switchElement(id, on) {
+    const states = elementStates();
+    states[id] = !!on;
+    writeStore(LS.elements, states);
+    logger.info('shell', `${id} switched ${on ? 'on' : 'off'}`);
+};
+
+/** Every switch, for the problem report and for ElementFriend's own tiles. */
+YMCA.elementState = function elementState() {
+    return Object.fromEntries(this.modules.filter((m) => m.optional)
+        .map((m) => [m.id, this.isOn(m)]));
+};
 
 /**
  * A rolling log of what YMCA did and what went wrong.
@@ -907,6 +950,26 @@ function styles() {
 #${WINDOW_ID} .ymca-tile.soon:hover{border-color:var(--g-line);background:var(--g-raise)}
 #${WINDOW_ID} .ymca-lead{margin:0 0 14px;color:var(--g-dim)}
 
+/* An element tile: the same tile with a switch along its foot. It is a div,
+   not a button, because a switch inside a button is a control inside a
+   control — the click handler simply stands aside for the switch. */
+#${WINDOW_ID} .ymca-tile.el{gap:6px}
+#${WINDOW_ID} .ymca-tile.el.off{opacity:.62}
+#${WINDOW_ID} .ymca-tile.el.off:hover{opacity:1}
+#${WINDOW_ID} .ymca-tile .ymca-foot{display:flex;align-items:center;justify-content:space-between;
+  gap:9px;margin-top:4px;padding-top:9px;border-top:1px solid var(--g-soft)}
+#${WINDOW_ID} .ymca-switch{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+  font:600 12px/1.2 var(--g-font);user-select:none}
+#${WINDOW_ID} .ymca-switch input{position:absolute;opacity:0;width:0;height:0}
+#${WINDOW_ID} .ymca-switch i{flex:none;width:34px;height:19px;border-radius:19px;position:relative;
+  background:rgba(0,0,0,.45);border:1px solid var(--g-line);transition:background .12s}
+#${WINDOW_ID} .ymca-switch i::after{content:"";position:absolute;top:2px;left:2px;width:13px;
+  height:13px;border-radius:50%;background:#fff;transition:left .12s}
+#${WINDOW_ID} .ymca-switch input:checked + i{background:var(--g-navy)}
+#${WINDOW_ID} .ymca-switch input:checked + i::after{left:17px}
+#${WINDOW_ID} .ymca-switch input:focus-visible + i{outline:2px solid #8ab4f8;outline-offset:1px}
+#${WINDOW_ID} .ymca-switch input:disabled + i{opacity:.45}
+
 #${WINDOW_ID} h2.ymca-h{margin:0 0 4px;font-size:19px;color:#fff}
 #${WINDOW_ID} p.ymca-sub{margin:0 0 14px;color:var(--g-dim);font-size:13px}
 #${WINDOW_ID} .ymca-btn{border:1px solid #252525;background:#fff;border-radius:3px;
@@ -963,6 +1026,10 @@ const ICONS = {
         + '<path d="M24 9v10M19 14h10"/>',
     trackops: '<path d="M5 29 H30"/><rect x="7" y="18" width="5" height="11"/>'
         + '<rect x="15" y="11" width="5" height="18"/><rect x="23" y="5" width="5" height="24"/>',
+    elementfriend: '<circle cx="17" cy="17" r="4"/><path d="M17 4v5M17 25v5M4 17h5M25 17h5"/>'
+        + '<path d="M8.4 8.4l3.5 3.5M22.1 22.1l3.5 3.5M25.6 8.4l-3.5 3.5M11.9 22.1l-3.5 3.5"/>',
+    highfive: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'
+        + '<path d="M19 16v-7a2 2 0 0 1 4 0v12a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7v-6a2 2 0 0 1 4 0"/>',
     default: '<rect x="6" y="6" width="9" height="9"/><rect x="19" y="6" width="9" height="9"/>'
         + '<rect x="6" y="19" width="9" height="9"/><rect x="19" y="19" width="9" height="9"/>',
 };
@@ -1036,7 +1103,8 @@ function openWindow(moduleId) {
         setStatus('');
         main.innerHTML = `<p class="ymca-lead">Pick a tool.</p>
       <div class="ymca-tiles">
-        ${YMCA.modules.map((m) => `<button class="ymca-tile" data-mod="${esc(m.id)}">
+        ${YMCA.modules.filter((m) => m.mainTile !== false && YMCA.isOn(m))
+        .map((m) => `<button class="ymca-tile" data-mod="${esc(m.id)}">
           ${iconFor(m.id)}<b>${esc(m.title)}</b><span>${esc(m.tagline || '')}</span>
         </button>`).join('')}
         <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
@@ -1096,6 +1164,14 @@ function openWindow(moduleId) {
  * A throw is logged rather than left to break the game's page.
  */
 YMCA.inject = function inject(moduleId, fn) {
+    /* A switched-off module does not reach the game's page either. The switch
+     * has to mean the whole module, not only its tile — MissionMagician's
+     * panel lives in the mission window, so a switch that left it there would
+     * switch off nothing the player can see. */
+    if (!YMCA.isOn(moduleId)) {
+        logger.info(moduleId, 'not injected, switched off in ElementFriend');
+        return;
+    }
     const ctx = context(moduleId);
     let done = false;
     const attempt = () => {
@@ -1127,6 +1203,15 @@ YMCA.inject = function inject(moduleId, fn) {
      * observing for the rest of the session. */
     setTimeout(() => observer.disconnect(), 30000);
 };
+
+/**
+ * Another module's context.
+ *
+ * ElementFriend renders a module's own settings into its own panel, and those
+ * settings have to be stored where the module reads them — under the module's
+ * namespace, not under ElementFriend's. This is the only caller.
+ */
+YMCA.contextFor = (moduleId) => context(moduleId);
 
 /** What a module is handed. Nothing here touches the shell's own chrome. */
 function context(moduleId) {
@@ -1536,6 +1621,7 @@ YMCA.register({
     id: 'renamer',
     title: 'RelabelTable',
     tagline: 'Vehicles and stations',
+    optional: true,
     description: 'Rename from a pattern. The preview is mandatory, and every run records the '
         + 'previous names so it can be undone.',
 
@@ -2395,9 +2481,15 @@ YMCA.register({
     id: 'missionmagician',
     title: 'MissionMagician',
     tagline: 'Pick the right vehicles',
+    /* Switchable from ElementFriend, and on until somebody says otherwise: it
+     * shipped before the switchboard existed. */
+    optional: true,
 
     description: 'Reads what a mission needs and ticks the vehicles that match. '
         + 'It never dispatches — you press the game\'s own button.',
+
+    /* ElementFriend opens this: the crew numbers the game cannot be read for. */
+    settings: mmSettings,
 
     async mount(el, ctx) {
         const cfg = ctx.store.read('cfg', { fastestFirst: true });
@@ -2851,6 +2943,133 @@ function mmCrewTraining(record) {
  *
  * Nothing in a mission window says who is aboard. The requirement is stated,
  * and stated as the game states it, until there is something real to count. */
+
+/* ...AND THEN THE PLAYER WAS ASKED.
+ *
+ * `Max. Crew` is a cap somebody set, which is exactly why the game cannot be
+ * read for this — and exactly why the person who set it can. Crew numbers are
+ * typed in ElementFriend -> MissionMagician, they are that player's own figure
+ * for their own vehicles, and they are labelled as theirs everywhere they
+ * show. A number the player states is not a number YMCA inferred.
+ *
+ * It counts SEATS TICKED, not trained crew. Whether the people aboard a HazMat
+ * hold the HazMat training is still not something any page says, so it is
+ * still not claimed. The sentence beside it stays the game's own. */
+const MM_CREW_KEY = 'ymca-missionmagician-crew';
+
+function mmCrewOnBoard() {
+    try {
+        return JSON.parse(localStorage.getItem(MM_CREW_KEY)) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+/** Seats on what is ticked right now, and how many of them are unstated. */
+function mmTickedSeats() {
+    const crew = mmCrewOnBoard();
+    let seats = 0;
+    let unstated = 0;
+    for (const box of document.querySelectorAll('.vehicle_checkbox:checked')) {
+        const n = Number(crew[box.getAttribute('vehicle_type_id')]);
+        if (n > 0) seats += n; else unstated += 1;
+    }
+    return { seats, unstated, anyStated: Object.keys(crew).length > 0 };
+}
+
+/** The sentence that goes beside the training line. */
+function mmSeatSentence() {
+    const { seats, unstated, anyStated } = mmTickedSeats();
+    if (!anyStated) {
+        return 'How many are aboard is not something this window says \u2014 set your own crew '
+            + 'numbers in ElementFriend \u2192 MissionMagician and this will add up what you tick.';
+    }
+    const tail = unstated
+        ? `, and ${unstated} whose crew you have not stated`
+        : '';
+    return `Ticked so far: <b>${seats}</b> seats by your own crew numbers${tail}. Whether the `
+        + 'people aboard hold that training is not something the game says.';
+}
+
+/* ---------------------------------------------------- the crew numbers page */
+
+/**
+ * ElementFriend -> MissionMagician. One row per type in the fleet, because a
+ * type nobody owns has no crew to state.
+ *
+ * `Max. Crew` from the buy page is shown as a hint and never as the value: it
+ * is the cap, and the point of this page is that the cap is not the count.
+ */
+async function mmSettings(el, ctx) {
+    el.innerHTML = '<p class="ymca-dim">Reading your fleet\u2026</p>';
+    let vehicles;
+    try {
+        vehicles = await ctx.game('/api/vehicles');
+    } catch (err) {
+        el.innerHTML = `<div class="ymca-note bad">Your fleet could not be read
+      (${ctx.esc(err.message)}), so there is nothing to list yet.</div>`;
+        return;
+    }
+
+    const owned = new Map();
+    for (const v of vehicles || []) {
+        const id = String(v.vehicle_type ?? '');
+        if (!id) continue;
+        owned.set(id, (owned.get(id) || 0) + 1);
+    }
+    const learnt = mmLearntTypes();
+    const nameOf = (id) => learnt[id]?.name || MM_SHIPPED_TYPES[id]?.name || `Type ${id}`;
+    const crew = mmCrewOnBoard();
+
+    const rows = [...owned.keys()]
+        .sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+        .map((id) => {
+            const cap = MM_SHIPPED_TYPES[id]?.crew;
+            return `<tr>
+          <td>${ctx.esc(nameOf(id))} <small>#${ctx.esc(id)}</small></td>
+          <td class="ymca-num">${owned.get(id)}</td>
+          <td class="ymca-dim ymca-num">${cap ? ctx.esc(String(cap)) : '\u2014'}</td>
+          <td><input type="number" min="0" max="99" style="width:72px" data-crew="${ctx.esc(id)}"
+            value="${crew[id] > 0 ? ctx.esc(String(crew[id])) : ''}" placeholder="\u2014"></td>
+        </tr>`;
+        }).join('');
+
+    el.innerHTML = `
+    <div class="ymca-note">A mission can ask for trained crew &mdash; eight with HazMat, say
+      &mdash; and they ride on whatever you send. Nothing in the game says how many people are
+      on a vehicle: <b>Max. Crew</b> on the buy page is the cap you set, not the count. So this
+      is <b>your</b> number, and MissionMagician says so wherever it uses it.</div>
+
+    ${rows ? `<div class="ymca-card">
+      <table>
+        <thead><tr><th>Vehicle type</th><th class="text-right">You own</th>
+          <th>Max. crew</th><th>Crew on board</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="ymca-row">
+      <button class="ymca-btn" data-do="clear">Clear them all</button>
+      <span class="ymca-dim" style="font-size:12px">Saved as you type.</span>
+    </div>`
+        : '<div class="ymca-note warn">No vehicles yet, so there is nothing to state.</div>'}`;
+
+    el.addEventListener('input', (e) => {
+        const box = e.target.closest('[data-crew]');
+        if (!box) return;
+        const held = mmCrewOnBoard();
+        const n = Number(box.value);
+        if (n > 0) held[box.dataset.crew] = Math.min(99, Math.round(n));
+        else delete held[box.dataset.crew];
+        ctx.store.write('crew', held);
+        ctx.status('Crew numbers saved.');
+    });
+    el.addEventListener('click', (e) => {
+        if (!e.target.closest('[data-do="clear"]')) return;
+        ctx.store.write('crew', {});
+        el.querySelectorAll('[data-crew]').forEach((box) => { box.value = ''; });
+        ctx.status('Crew numbers cleared.');
+    });
+}
 
 function mmPretty(key) {
     return key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
@@ -3607,6 +3826,11 @@ function mmRecount(panel, plan) {
             ?.classList.toggle('mm-row-ok', line.found >= line.wanted);
     }
 
+    /* Seats follow the ticking the same way the counts do — by the player's own
+     * numbers, and saying so. */
+    const seatLine = panel.querySelector('[data-crew-seats]');
+    if (seatLine) seatLine.innerHTML = mmSeatSentence();
+
     /* The table is the surface with the answer on it, so it carries the answer:
      * red while anything is short, green once nothing is. */
     const table = panel.querySelector('.mm-table');
@@ -3771,8 +3995,8 @@ function mmGamePanelHtml(plan, cfg, ctx) {
 
       ${plan.crewTraining?.length ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.crewTraining.map((t) => `Crew: <b>${t.count}</b> with
-          ${ctx.esc(t.label)} training`).join('; ')} &mdash; they ride on whatever is sent, and
-        how many are aboard is not something this window says.</p>` : ''}
+          ${ctx.esc(t.label)} training`).join('; ')} &mdash; they ride on whatever is sent.
+        <span data-crew-seats>${mmSeatSentence()}</span></p>` : ''}
 
       ${plan.scene.total ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.scene.total} already at the mission or on the way, subtracted above${
@@ -4126,6 +4350,7 @@ YMCA.register({
     id: 'trackops',
     title: 'TrackOps',
     tagline: 'What you have run',
+    optional: true,
 
     description: 'Counts the missions you finish and what each one actually paid, '
         + 'from the day it was installed.',
@@ -4772,6 +4997,366 @@ if (toCfg().recording && TO_MAIN_PAGE.test(location.pathname)) {
 }
 
 /* --------------------------------------------------------------------------
+ * ElementFriend — the switchboard.
+ *
+ * Not a tool. A page of element tiles, one per part of YMCA that the player
+ * may or may not want, each with a switch on its face and its own settings
+ * behind it.
+ *
+ * WHY IT EXISTS. YMCA grew a tool at a time and every one of them landed on
+ * the front page whether or not anybody asked for it. MissionMagician draws
+ * itself into the mission window, TrackOps hooks the game's own functions,
+ * RelabelTable renames things — those are not equally welcome to everyone, and
+ * a tool set that cannot be turned down is a tool set somebody uninstalls
+ * whole. So the switch, not the uninstall.
+ *
+ * WHAT A SWITCH ACTUALLY DOES. Both halves of a module: the tile disappears
+ * from the launcher AND `YMCA.inject` refuses to run it, so nothing of it
+ * reaches the game's page either. A switch that left the mission panel behind
+ * would be switching off the part nobody looks at.
+ *
+ * THE SWITCHBOARD IS THE SHELL'S, NOT THIS MODULE'S. `YMCA.isOn` is read by
+ * the launcher and by injection, both of which run before any module mounts.
+ * ElementFriend is only the face of it, so a module that goes does not take
+ * the state of every other one with it.
+ *
+ * TWO KINDS OF TILE. A module with `mainTile: false` — HighFive — lives only
+ * here, because its work happens in the game's own page and a launcher tile
+ * for it would open a panel that does nothing. Everything else keeps its main
+ * tile and is listed here as well, so the one page answers "what have I got
+ * switched on" without going looking.
+ *
+ * SETTINGS BELONG TO THE MODULE. A module may declare `settings(el, ctx)`, and
+ * what it writes goes into its OWN namespace — `YMCA.contextFor(mod.id)`, not
+ * ElementFriend's store — so the module reads its settings back without
+ * knowing this page exists.
+ * ------------------------------------------------------------------------ */
+
+/** The modules that carry a switch. Register order, like everything else. */
+function efElements() {
+    return YMCA.modules.filter((m) => m.optional);
+}
+
+function efSwitch(id, on, label) {
+    return `<label class="ymca-switch" data-sw="${esc(id)}">
+      <input type="checkbox" ${on ? 'checked' : ''}><i></i>
+      <span class="ymca-sw-text">${esc(label || (on ? 'On' : 'Off'))}</span>
+    </label>`;
+}
+
+/** Wire every switch inside `root`. `after` is told which module changed. */
+function efWireSwitches(root, ctx, after) {
+    root.querySelectorAll('.ymca-switch[data-sw] input').forEach((box) => {
+        box.addEventListener('change', () => {
+            const label = box.closest('.ymca-switch');
+            const id = label.dataset.sw;
+            YMCA.switchElement(id, box.checked);
+            const text = label.querySelector('.ymca-sw-text');
+            if (text) text.textContent = box.checked ? 'On' : 'Off';
+            const mod = YMCA.modules.find((m) => m.id === id);
+            ctx.status(`${mod ? mod.title : id} is ${box.checked ? 'on' : 'off'}.`);
+            if (after) after(id, box.checked);
+        });
+    });
+}
+
+function efTiles(el, ctx) {
+    const mods = efElements();
+    el.innerHTML = `
+    <p class="ymca-lead">A switch takes the tool out of the launcher <em>and</em> out of the
+      game's own pages &mdash; nothing of it runs. Open a tile for what it can be set to.</p>
+    <div class="ymca-tiles">
+      ${mods.map((m) => {
+        const on = YMCA.isOn(m);
+        return `<div class="ymca-tile el ${on ? '' : 'off'}" data-el="${esc(m.id)}"
+          role="button" tabindex="0">
+          ${iconFor(m.id)}<b>${esc(m.title)}</b><span>${esc(m.tagline || '')}</span>
+          ${m.mainTile === false
+        ? '<span class="ymca-dim" style="font-size:12px">Lives in the game’s own pages</span>'
+        : ''}
+          <div class="ymca-foot">
+            <span class="ymca-dim" style="font-size:12px">${m.settings
+        ? 'Open for settings' : 'Nothing to set'}</span>
+            ${efSwitch(m.id, on)}
+          </div>
+        </div>`;
+    }).join('')}
+      <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
+        <span>This is where the next elements land.</span></div>
+    </div>`;
+
+    // The switch is inside the tile, so the tile's own click has to stand aside
+    // for it — otherwise flicking the switch also opens the settings.
+    const open = (id) => {
+        const mod = YMCA.modules.find((m) => m.id === id);
+        if (mod) efOpen(el, ctx, mod);
+    };
+    el.querySelectorAll('[data-el]').forEach((tile) => {
+        tile.addEventListener('click', (e) => {
+            if (e.target.closest('.ymca-switch')) return;
+            open(tile.dataset.el);
+        });
+        tile.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            if (e.target.closest('.ymca-switch')) return;
+            e.preventDefault();
+            open(tile.dataset.el);
+        });
+    });
+    efWireSwitches(el, ctx, (id, on) => {
+        el.querySelector(`[data-el="${id}"]`)?.classList.toggle('off', !on);
+    });
+}
+
+function efOpen(el, ctx, mod) {
+    const on = YMCA.isOn(mod);
+    el.innerHTML = `
+    <div class="ymca-row" style="justify-content:space-between;margin-bottom:12px">
+      <button class="ymca-btn" id="ef-back">&larr; All elements</button>
+      ${efSwitch(mod.id, on, on ? 'On' : 'Off')}
+    </div>
+    <div class="ymca-card">
+      <b style="font-size:15px">${esc(mod.title)}</b>
+      <div class="ymca-dim" style="font-size:13px;margin-top:3px">${esc(mod.description || '')}</div>
+    </div>
+    <div id="ef-body"></div>`;
+
+    el.querySelector('#ef-back').addEventListener('click', () => efTiles(el, ctx));
+    efWireSwitches(el, ctx);
+
+    const body = el.querySelector('#ef-body');
+    if (!mod.settings) {
+        body.innerHTML = `<div class="ymca-note">Nothing to set here. The switch is the whole
+      of it: on and ${esc(mod.title)} is in the launcher${mod.mainTile === false
+    ? '' : ' and in the game’s pages'}, off and it is not.</div>`;
+        return;
+    }
+    /* A module's settings write into the module's own namespace, so it reads
+     * them back without knowing this page exists. A throw here shows an error
+     * and leaves the rest of the switchboard standing. */
+    const failed = (err) => {
+        logger.error('elementfriend', `${mod.id} settings failed`, err.stack || err.message);
+        body.innerHTML = `<div class="ymca-note bad"><b>${esc(mod.title)}’s settings could
+      not open.</b> ${esc(err.message)}<br>The switch above still works.</div>`;
+    };
+    /* A settings page that reads the game fails as a rejected promise, long
+     * after the try block has closed, so both routes land on the same notice. */
+    try {
+        const running = mod.settings(body, YMCA.contextFor(mod.id));
+        if (running && typeof running.then === 'function') running.catch(failed);
+    } catch (err) {
+        failed(err);
+    }
+}
+
+YMCA.register({
+    id: 'elementfriend',
+    title: 'ElementFriend',
+    tagline: 'What you want switched on',
+    description: 'One page for every part of YMCA you can turn down, and the settings that '
+        + 'belong to each of them.',
+
+    async mount(el, ctx) {
+        efTiles(el, ctx);
+    },
+});
+
+/* --------------------------------------------------------------------------
+ * HighFive — clicking through status 5.
+ *
+ * Status 5 is a vehicle transporting: an ambulance taking a patient to a
+ * hospital, a patrol car taking somebody to a prison. Each one wants a
+ * destination picked, and picking it one vehicle at a time means going back to
+ * the list and finding the next. LSS-Manager's version jumps straight to the
+ * next vehicle in status 5 after each pick, so the whole queue is clicked
+ * through in one place. That is what this is for.
+ *
+ * IT DOES NOT WORK YET, AND THAT IS ON PURPOSE.
+ *
+ * What is missing is the markup of the game's own vehicle window while it is
+ * transporting: what holds the hospitals, what a pick actually is, and what
+ * the page does afterwards. Nobody here has seen one. Guessing a selector that
+ * clicks a destination on somebody's behalf is exactly the thing this repo
+ * does not do — a wrong guess sends a patient to the wrong hospital and there
+ * is no undo for that.
+ *
+ * So it ships the way MissionMagician did for three rounds: the switch, a
+ * plain warning, and the button that collects the missing piece. Press it on a
+ * transporting vehicle and the answer comes back as structure — path shapes,
+ * element names, form fields. Never a hospital name, never a patient, never an
+ * address.
+ *
+ * WHICH FIELD CARRIES THE STATUS IS ALSO UNKNOWN, so the capture does not
+ * assume one. It reads the fleet and reports every field whose values across
+ * the whole fleet are few and small — which is what a status looks like and
+ * what an id does not. That names the field rather than betting on `fms`.
+ * ------------------------------------------------------------------------ */
+
+/** Digits out: a path is reported as a shape, not as a particular vehicle. */
+const hfShape = (s) => String(s || '').replace(/\d+/g, '#').slice(0, 80);
+
+function hfTally(list, cap) {
+    const counts = new Map();
+    for (const item of list) counts.set(item, (counts.get(item) || 0) + 1);
+    return Object.fromEntries([...counts.entries()]
+        .sort((a, b) => b[1] - a[1]).slice(0, cap));
+}
+
+/**
+ * The page YMCA is open over.
+ *
+ * YMCA's window is a lightbox on top of the game, so everything below it is
+ * still in the document — a capture pressed here reads the vehicle page behind
+ * it. That is why this does not need to be injected into the game's markup to
+ * work.
+ */
+function hfCapturePage() {
+    const classOf = (el) => (typeof el.className === 'string' ? el.className.trim().slice(0, 100) : '');
+
+    const links = [...document.querySelectorAll('a[href]')]
+        .map((a) => hfShape((a.getAttribute('href') || '').split('?')[0]))
+        .filter((h) => h && h !== '#');
+
+    const forms = [...document.querySelectorAll('form')].slice(0, 8).map((f) => ({
+        id: hfShape(f.id) || undefined,
+        class: classOf(f) || undefined,
+        action: hfShape((f.getAttribute('action') || '').split('?')[0]),
+        method: f.getAttribute('method') || 'get',
+        // Names only. A value here could be a CSRF token or a caption.
+        fieldNames: [...new Set([...f.elements].map((x) => x.name).filter(Boolean))].slice(0, 25),
+    }));
+
+    return {
+        path: hfShape(location.pathname),
+        inFrame: window.top !== window.self,
+        /* Where a destination is picked will be one of these shapes. */
+        linkShapes: hfTally(links, 45),
+        idShapes: hfTally([...document.querySelectorAll('[id]')]
+            .map((el) => hfShape(el.id)).filter(Boolean), 45),
+        rowClasses: hfTally([...document.querySelectorAll('tr')]
+            .map(classOf).filter(Boolean), 25),
+        panelClasses: hfTally([...document.querySelectorAll('.panel, .box, .alert, .list-group')]
+            .map(classOf).filter(Boolean), 25),
+        tableCount: document.querySelectorAll('table').length,
+        forms,
+    };
+}
+
+/**
+ * What the fleet says about status, without saying anything about the fleet.
+ *
+ * A field is reported only when the whole fleet has few distinct values for it
+ * and all of them are small integers. A status looks like that; a vehicle id,
+ * a building id and a set of coordinates do not, so they are left out by the
+ * shape of the test rather than by a list of names to avoid.
+ */
+function hfCaptureFleet(vehicles) {
+    const fields = new Map();
+    for (const v of vehicles.slice(0, 600)) {
+        for (const [key, value] of Object.entries(v || {})) {
+            if (!fields.has(key)) fields.set(key, { values: new Map(), kinds: new Set() });
+            const f = fields.get(key);
+            f.kinds.add(value === null ? 'null' : typeof value);
+            /* An id names the player's own things, so it never gets a
+             * histogram however small it happens to be on a small fleet. A
+             * status field is not called an id, so nothing is lost. */
+            const isIdentifier = key === 'id' || /(^|_)id$/.test(key);
+            if (!isIdentifier && typeof value === 'number' && Number.isInteger(value)
+                && value >= -1 && value <= 30) {
+                f.values.set(value, (f.values.get(value) || 0) + 1);
+            }
+        }
+    }
+    const statusLike = {};
+    for (const [key, f] of fields) {
+        if (f.values.size && f.values.size <= 12) {
+            statusLike[key] = Object.fromEntries([...f.values.entries()].sort((a, b) => a[0] - b[0]));
+        }
+    }
+    return {
+        vehicleCount: vehicles.length,
+        fieldNames: [...fields.keys()].sort(),
+        // key -> { value: how many vehicles }. The field carrying 5 names itself.
+        smallIntegerFields: statusLike,
+    };
+}
+
+function hfPanel(el, ctx) {
+    el.innerHTML = `
+    <div class="ymca-note warn"><b>HighFive does not work yet.</b>
+      What it needs is the markup of one of your vehicles while it is transporting, and nobody
+      here has seen one. Guessing which link is a hospital would mean guessing where a patient
+      goes, and that cannot be taken back.</div>
+
+    <div class="ymca-card">
+      <b>What it will do</b>
+      <p class="ymca-dim" style="margin:6px 0 0">Show the pick-a-destination window for a vehicle
+        in status 5 &mdash; hospital for the ambulance service, prison for the police &mdash; and
+        move straight to the next vehicle in status 5 once you have picked, so a queue of
+        transports is clicked through in one place instead of one page at a time.</p>
+    </div>
+
+    <div class="ymca-card">
+      <b>Send the missing piece</b>
+      <p class="ymca-dim" style="margin:6px 0 9px">Open a vehicle of yours that is
+        <b>transporting</b> &mdash; the page where the game asks you to pick a hospital or a
+        prison. Leave that page open, open YMCA from the navbar, and press this. It copies
+        <em>structure</em>: path shapes, element names, form field names. No hospital names, no
+        patients, no addresses, no vehicle names.</p>
+      <div class="ymca-row">
+        <button class="ymca-btn primary" data-do="capture">Copy this vehicle window</button>
+        <button class="ymca-btn" data-do="fleet">Copy what your fleet says about status</button>
+      </div>
+      <p class="ymca-dim" style="margin:9px 0 0;font-size:12px" id="hf-where"></p>
+    </div>`;
+
+    el.querySelector('#hf-where').textContent = `You are on ${hfShape(location.pathname)}.`;
+
+    el.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-do]');
+        if (!btn) return;
+        if (btn.dataset.do === 'capture') {
+            const report = { ymca: YMCA.version, what: 'highfive-window', at: new Date().toISOString(), ...hfCapturePage() };
+            ctx.store.write('lastCapture', report);
+            ctx.log.info('captured a vehicle window', report.path);
+            ctx.clipboard(JSON.stringify(report, null, 2), 'the vehicle window’s structure');
+            return;
+        }
+        if (btn.dataset.do === 'fleet') {
+            ctx.status('Reading your fleet…');
+            try {
+                const vehicles = await ctx.game('/api/vehicles');
+                const report = { ymca: YMCA.version, what: 'highfive-fleet', at: new Date().toISOString(), ...hfCaptureFleet(vehicles || []) };
+                ctx.store.write('lastFleet', report);
+                ctx.clipboard(JSON.stringify(report, null, 2), 'what your fleet says about status');
+            } catch (err) {
+                ctx.status('The fleet could not be read.');
+                ctx.log.error('fleet capture failed', err.message);
+            }
+        }
+    });
+}
+
+YMCA.register({
+    id: 'highfive',
+    title: 'HighFive',
+    tagline: 'Click through the transports',
+    description: 'Picks a hospital or a prison for every vehicle in status 5, one after the '
+        + 'next. It does not work yet — the game’s own window has not been seen from '
+        + 'this side.',
+
+    /* An element tile, so it is never in the launcher: its work happens in the
+     * game's own pages, and a tile on the front would open a panel that does
+     * nothing. Off until it does something. */
+    mainTile: false,
+    optional: true,
+    defaultOn: false,
+
+    async mount(el, ctx) { hfPanel(el, ctx); },
+    settings(el, ctx) { hfPanel(el, ctx); },
+});
+
+/* --------------------------------------------------------------------------
  * Diagnostics — the channel back to whoever is fixing this.
  *
  * The person running YMCA can see the game; whoever maintains it usually
@@ -4928,6 +5513,10 @@ async function run(what, ctx, put) {
                 menu: typeof GM_registerMenuCommand === 'function',
             },
             modules: YMCA.modules.map((m) => m.id),
+            /* Which parts are switched on in ElementFriend. Half of "it does
+             * nothing" is "it is switched off", and that is not something the
+             * player thinks to mention. */
+            elements: YMCA.elementState(),
             entryPoint: document.getElementById('ymca-nav') ? 'navbar'
                 : document.getElementById('ymca-fab') ? 'floating button' : 'none',
             endpoints: {},
@@ -4955,6 +5544,10 @@ async function run(what, ctx, put) {
          * three tools and a paste each. */
         report.trackops = moduleStore('trackops');
         report.missionmagician = moduleStore('missionmagician');
+        /* HighFive's captures ride along rather than waiting to be asked for:
+         * the window it needs is one the player happens to be looking at, and
+         * a reading that has to be remembered is a reading that is missing. */
+        report.highfive = moduleStore('highfive');
         // What the sweep has managed, so "nothing saves itself" is answerable.
         report.typeSweep = sweepState();
         report.interface = interfaceProbe();
@@ -5255,6 +5848,15 @@ function moduleStore(moduleId) {
                 .filter((f) => !claimed.has(f)).sort(),
             unmatchedRequirements: unmatched,
             settings: read('cfg', null),
+        };
+    }
+
+    if (moduleId === 'highfive') {
+        /* Structure only, both of them — path shapes and field names, never a
+         * hospital, a patient or a vehicle of the player's. */
+        return {
+            window: read('lastCapture', null),
+            fleetStatus: read('lastFleet', null),
         };
     }
 
@@ -5816,7 +6418,10 @@ function mount() {
 
 if (typeof GM_registerMenuCommand === 'function') {
     GM_registerMenuCommand('Open YMCA', () => openWindow());
+    /* The menu is the launcher by another route, so it answers to the same
+     * switches. An element tile has no panel worth opening from here. */
     for (const mod of YMCA.modules) {
+        if (mod.mainTile === false || !YMCA.isOn(mod)) continue;
         GM_registerMenuCommand(mod.title, () => openWindow(mod.id));
     }
 }
