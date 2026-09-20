@@ -68,6 +68,15 @@ const MM_REQUIREMENTS = {
     mobile_air_vehicles: { flag: 'gwa', label: 'Mobile air', icon: 'wind', source: 'the "F-MA" AAO selects on gwa=1' },
     platform_trucks: { flag: 'dlk', label: 'Platform trucks', icon: 'ladder', source: 'the "F-PlT" AAO selects on dlk=1' },
     water_tankers: { flag: 'gwl2wasser_only', label: 'Water tankers', icon: 'tank', source: 'the "F-WaTa" AAO' },
+    /* The game calls this one two different things and says so itself: mission
+     * 1008 asks for `personnel_educations: { gw_gefahrgut: 8 }` and spells the
+     * same training `HazMat` under `additional`. The vehicle wears the German
+     * name — `gwgefahrgut` — so `hazmat_vehicles` never matched by spelling,
+     * however the vocabulary was read. */
+    hazmat_vehicles: {
+        anyOf: ['gwgefahrgut', 'gw_gefahrgut_only'], label: 'HazMat', icon: 'hazard',
+        source: 'the catalogue names the training gw_gefahrgut and HazMat for the same thing',
+    },
 
     /* The "one of these will do" family. The key spells out the alternatives, so
      * these are read rather than guessed: any vehicle carrying any one of the
@@ -860,9 +869,18 @@ async function mmPlan(page, ctx, cfg) {
             if (!wanted) continue;
             const carried = (v) => (key === 'water_needed' ? v.water : v.foam);
             let have = [...picked.values()].reduce((n, v) => n + carried(v), 0);
-            for (const v of vehicles) {
+            /* Biggest tank first, and only then the nearest.
+             *
+             * Filling in arrival order sends whatever happens to be close, and
+             * what is close is engines: a Quint carries a few hundred gallons,
+             * a Water Tanker several thousand. Asked for 20,000 gallons the
+             * panel picked eleven engines — four were wanted — because each one
+             * moved the bar a little. One tanker is worth ten of them, so the
+             * bar is filled by the tank and ties are broken by the clock. */
+            const byTank = vehicles.filter((v) => carried(v) && !picked.has(v.id))
+                .sort((a, b) => carried(b) - carried(a) || mmOrder(a, b));
+            for (const v of byTank) {
                 if (have >= wanted) break;
-                if (picked.has(v.id) || !carried(v)) continue;
                 picked.set(v.id, v);
                 have += carried(v);
             }

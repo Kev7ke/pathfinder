@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------
- * RecruitRoom — every station's hiring, on one screen.
+ * RecruitDude — every station's hiring, on one screen.
  *
  * Hiring is four clicks per station: open the building, Hire new people, pick a
  * length, confirm. Across fourteen stations that is the whole evening, and it
@@ -89,7 +89,7 @@ async function rrHire(buildingId, days) {
 
 YMCA.register({
     id: 'recruitroom',
-    title: 'RecruitRoom',
+    title: 'RecruitDude',
     tagline: 'Hiring, every station at once',
 
     description: 'Every station that employs people, with its crew count and the game’s own '
@@ -114,8 +114,8 @@ YMCA.register({
       <div class="ymca-card">
         <b>${stations.length} station${stations.length === 1 ? '' : 's'}</b>
         <p class="ymca-sub" style="margin:4px 0 10px">Crew counts come from each station's own
-          page. The recruit buttons are the game's own links &mdash; RecruitRoom does not press
-          them, because credits spent on people do not come back.</p>
+          page. Recruiting spends credits and cannot be undone, so it says what it is about
+          to do and waits to be told yes.</p>
         ${centres.length ? `<label class="ymca-dim">Dispatch center
           <select data-cfg="area" style="margin-left:6px">
             <option value="">Everything you own</option>
@@ -133,7 +133,8 @@ YMCA.register({
             <tr data-station="${b.id}">
               <td><input type="checkbox" class="rr-pick" value="${b.id}"></td>
               <td class="rr-art"></td>
-              <td>${ctx.esc(b.caption || `Building ${b.id}`)}</td>
+              <td><a href="/buildings/${b.id}" target="_blank" rel="noopener"
+                >${ctx.esc(b.caption || `Building ${b.id}`)}</a></td>
               <td class="ymca-num rr-staff"><span class="ymca-dim">&hellip;</span></td>
               <td class="rr-said"></td>
             </tr>`).join('')}

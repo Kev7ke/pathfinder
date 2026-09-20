@@ -1,7 +1,7 @@
 {
   "note": "MissionChief vehicle types, by the id the game uses in vehicle_type_id. Names come from the game's own buy pages, which name every type it sells whether or not the player can afford one. Capabilities are the plain attributes the game puts on a vehicle's checkbox in a mission window, so a type only carries them once one has been seen in a selection table; a type with a name and no capabilities is named but not yet judged, and MissionMagician leaves such a vehicle alone rather than assuming it covers nothing. Nothing here is guessed.",
   "source": "names: the game's own vehicle buy pages, via Diagnostics -> Vehicle types; capabilities: mission-window selection tables, via Diagnostics -> Copy the report",
-  "updated": "2026-09-20",
+  "updated": "2026-09-21",
   "types": {
     "0": {
       "name": "Type 1 fire engine",
@@ -9,6 +9,13 @@
     },
     "1": {
       "name": "Type 2 fire engine",
+      "capabilities": [
+        "fire",
+        "lf_only",
+        "water_damage_pump",
+        "crew_carrier_or_fire_engine",
+        "road_rescue_or_fire_engine"
+      ],
       "category": "Firetruck"
     },
     "2": {
@@ -18,7 +25,9 @@
     "3": {
       "name": "Battalion chief unit",
       "capabilities": [
-        "elw"
+        "elw",
+        "elw1_or_elw2",
+        "elw1_or_elw_drone"
       ],
       "category": "Other vehicles"
     },
@@ -29,7 +38,11 @@
     "5": {
       "name": "ALS Ambulance",
       "capabilities": [
-        "any_rtw"
+        "rtw",
+        "any_rtw",
+        "ktw_or_rtw",
+        "ktw_or_rtw_2",
+        "ambulance_or_rapid_responder"
       ],
       "category": "Ambulance",
       "requiredExtension": "Ambulance Extension"
@@ -44,7 +57,10 @@
     "7": {
       "name": "Water Tanker",
       "capabilities": [
-        "gwl2wasser_only"
+        "gwl2wasser",
+        "gwl2wasser_only",
+        "gwl2wasser_all",
+        "water_damage_pump"
       ],
       "category": "Other vehicles"
     },
@@ -54,12 +70,18 @@
     },
     "9": {
       "name": "HazMat",
+      "capabilities": [
+        "gwgefahrgut",
+        "gw_gefahrgut_only"
+      ],
       "category": "Other vehicles"
     },
     "10": {
       "name": "Patrol car",
       "capabilities": [
-        "fustw_or_police_motorcycle"
+        "fustw",
+        "fustw_or_police_motorcycle",
+        "police_car_or_service_group_leader"
       ],
       "category": "Police Cars"
     },
@@ -73,7 +95,12 @@
       "longName": "Quint Fire Truck",
       "capabilities": [
         "fire",
-        "dlk"
+        "dlk",
+        "dlk_or_tm50",
+        "lf_only",
+        "water_damage_pump",
+        "crew_carrier_or_fire_engine",
+        "road_rescue_or_fire_engine"
       ],
       "category": "Firetruck"
     },
@@ -96,7 +123,12 @@
       "name": "Rescue Engine",
       "capabilities": [
         "fire",
-        "rw"
+        "rw",
+        "ab_ruest_rw",
+        "lf_only",
+        "water_damage_pump",
+        "crew_carrier_or_fire_engine",
+        "road_rescue_or_fire_engine"
       ],
       "category": "Firetruck"
     },
@@ -164,7 +196,13 @@
       "name": "Pumper Tanker",
       "capabilities": [
         "fire",
-        "gwl2wasser_only"
+        "gwl2wasser",
+        "gwl2wasser_only",
+        "gwl2wasser_all",
+        "lf_only",
+        "water_damage_pump",
+        "crew_carrier_or_fire_engine",
+        "road_rescue_or_fire_engine"
       ],
       "category": "Other vehicles"
     },

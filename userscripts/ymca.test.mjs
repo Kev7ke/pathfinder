@@ -709,18 +709,18 @@ await mission.evaluate(() => {
   tr.setAttribute('vehicle_id', '55');
   tr.setAttribute('data-distance', '9');
   tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_55"
-    value="55" name="vehicle_ids[]" vehicle_type_id="9" fms="2"></td>
+    value="55" name="vehicle_ids[]" vehicle_type_id="902" fms="2"></td>
     <td id="vehicle_sort_55" timevalue="900">15 min.</td>`;
   document.getElementById('vehicle_show_table_body_all').append(tr);
   const scene = document.querySelector('#mission_vehicle_at_mission tbody');
   const on = document.createElement('tr');
   on.id = 'vehicle_row_98';
-  on.innerHTML = '<td vehicle_type_id="9">on scene</td>';
+  on.innerHTML = '<td vehicle_type_id="902">on scene</td>';
   scene.append(on);
 });
 await mission.waitForTimeout(900);
 const flagless = await mission.evaluate(() =>
-  JSON.parse(localStorage.getItem('ymca-missionmagician-types'))['9']);
+  JSON.parse(localStorage.getItem('ymca-missionmagician-types'))['902']);
 console.log('flagless type     :', JSON.stringify(flagless));
 assert.deepEqual(flagless.caps, [], 'the game gave it none of the flags YMCA reads');
 const sceneNote = (await mission.textContent('#ymca-mm-panel')).replace(/\s+/g, ' ');
@@ -949,7 +949,7 @@ await mission.evaluate(() => {
   localStorage.removeItem('ymca-missionmagician-mm-help-17');
   const help = `<html><body><h1>Chemical spill</h1><table>
     <tr><td>Required Firetrucks</td><td>1</td></tr>
-    <tr><td>Required Hazmat Vehicles</td><td>2</td></tr></table></body></html>`;
+    <tr><td>Required Snowplows</td><td>2</td></tr></table></body></html>`;
   const realFetch = window.fetch;
   window.fetch = async (url, opts) => {
     if (String(url).startsWith('/einsaetze/17')) {
@@ -964,8 +964,8 @@ await mission.evaluate(() => {
     id="vehicle_checkbox_${id}" value="${id}" name="vehicle_ids[]" ${attrs} fms="2"></td>
     <td id="vehicle_sort_${id}" timevalue="${secs}">x</td></tr>`;
   document.getElementById('vehicle_show_table_body_all').innerHTML = [
-    row(80, 10, 'vehicle_type_id="9" hazmat="1"'),
-    row(81, 20, 'vehicle_type_id="9" hazmat="1"'),
+    row(80, 10, 'vehicle_type_id="903" snowplow="1"'),
+    row(81, 20, 'vehicle_type_id="903" snowplow="1"'),
     row(82, 30, 'vehicle_type_id="33" fire="1"'),
   ].join('');
 });
@@ -973,7 +973,7 @@ await mission.waitForTimeout(1400);
 const hazmat = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('hazmat row        :', JSON.stringify(hazmat));
-const haz = hazmat.find((r) => /Hazmat vehicles/i.test(r[4]));
+const haz = hazmat.find((r) => /Snowplows/i.test(r[4]));
 assert.ok(haz, 'a requirement nothing maps is still a row, not a shrug');
 assert.equal(haz[0], '2', 'and it wants what the page said it wants');
 assert.ok(/read from the page/.test(haz[4]),
@@ -981,7 +981,7 @@ assert.ok(/read from the page/.test(haz[4]),
 const hazTick = await mission.textContent('#ymca-mm-panel [data-do="select"]');
 console.log('hazmat tick       :', hazTick.trim());
 assert.ok(/Tick 3 vehicles/.test(hazTick),
-  'two HazMats and an engine: a vehicle YMCA has never heard of is dispatched like any other');
+  'two snowplows and an engine: a vehicle YMCA has never heard of is dispatched like any other');
 await mission.click('#ymca-mm-panel [data-do="select"]');
 const hazTicked = await mission.evaluate(() =>
   [...document.querySelectorAll('.vehicle_checkbox:checked')].map((b) => b.value).sort());
@@ -1000,8 +1000,8 @@ await mission.evaluate(() => {
   t.id = 'mission_vehicle_at_mission';
   const at = (rowId, typeId) => `<tr id="vehicle_row_${rowId}"><td vehicle_type_id="${typeId}">
     <a class="btn-backalarm-ajax" href="#">back</a></td></tr>`;
-  // Two HazMats and two pumpers, against 2 hazmat + 1 engine: one pumper is spare.
-  t.innerHTML = `<tbody>${at(90, 9)}${at(91, 9)}${at(92, 33)}${at(93, 33)}</tbody>`;
+  // Two snowplows and two pumpers, against 2 snowplows + 1 engine: one pumper is spare.
+  t.innerHTML = `<tbody>${at(90, 903)}${at(91, 903)}${at(92, 33)}${at(93, 33)}</tbody>`;
   document.getElementById('col_right').append(t);
   for (const a of document.querySelectorAll('.btn-backalarm-ajax')) {
     a.addEventListener('click', (e) => {
@@ -1016,7 +1016,7 @@ await mission.waitForTimeout(1500);
 const hazCancel = await mission.textContent('#ymca-mm-panel [data-do="cancel"]');
 console.log('hazmat cancel     :', hazCancel.trim(), '(wants 2 hazmat + 1 engine, 2+2 are there)');
 assert.ok(/Cancel 1 unused/.test(hazCancel),
-  'one pumper is spare; the two HazMats are held by a line nothing here mapped');
+  'one pumper is spare; the two snowplows are held by a line nothing here mapped');
 await mission.click('#ymca-mm-panel [data-do="cancel"]');
 const hazBack = await mission.evaluate(() => window.__backalarms);
 console.log('hazmat sent back  :', JSON.stringify(hazBack));
@@ -1033,9 +1033,9 @@ console.log('handover          :', JSON.stringify(handover.capabilitiesByType),
   '| not shipped:', JSON.stringify(handover.notInDataset));
 assert.ok(Object.keys(handover.capabilitiesByType).length > 0,
   'the report carries what each type can do, not how many types there are');
-assert.ok(handover.notInDataset.includes(9),
+assert.ok(handover.notInDataset.includes(903),
   'and says which of them this repo does not ship yet');
-assert.deepEqual(hazBack, ['93'], 'a pumper goes home, never a HazMat');
+assert.deepEqual(hazBack, ['93'], 'a pumper goes home, never a snowplow');
 // Out of the way: the next block builds its own scene table, and two with this id would merge.
 await mission.evaluate(() => document.getElementById('mission_vehicle_at_mission')?.remove());
 
@@ -1120,7 +1120,43 @@ assert.equal(await mission.evaluate(() =>
   document.querySelectorAll('.vehicle_checkbox:checked').length), 0,
 'a D typed into a field is a letter, not a dispatch');
 
-// ---- RecruitRoom: every station's hiring on one screen, and it hires nothing ----
+// ---- water comes from the tank, not from whatever is nearest ----
+// Filling the bar in arrival order sends whatever is close, and what is close is engines: asked
+// for 20,000 gallons the panel picked eleven when four were wanted, because each moved it a
+// little. One tanker is worth ten of them.
+await mission.evaluate(() => {
+  window.__catalogue = [{
+    id: '1130', name: 'Water test', average_credits: 100,
+    requirements: { firetrucks: 1, water_needed: 6000 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1130');
+  for (const el of document.querySelectorAll(
+    '#patient_button_text, .mission_patient, #patient_missing_requirements')) el.remove();
+  const row = (id, secs, attrs, water) => `<tr class="vehicle_select_table_tr" vehicle_id="${id}"
+    data-distance="1"><td><input type="checkbox" class="vehicle_checkbox"
+    id="vehicle_checkbox_${id}" value="${id}" name="vehicle_ids[]" ${attrs} fms="2"
+    wasser_amount="${water}"></td><td id="vehicle_sort_${id}" timevalue="${secs}">x</td></tr>`;
+  document.getElementById('vehicle_show_table_body_all').innerHTML = [
+    // Five nearby engines carrying a little each, one distant tanker carrying the lot.
+    row(60, 10, 'vehicle_type_id="13" fire="1" dlk="1"', 500),
+    row(61, 20, 'vehicle_type_id="13" fire="1" dlk="1"', 500),
+    row(62, 30, 'vehicle_type_id="33" fire="1"', 2500),
+    row(63, 40, 'vehicle_type_id="33" fire="1"', 2500),
+    row(64, 50, 'vehicle_type_id="33" fire="1"', 2500),
+    row(65, 900, 'vehicle_type_id="7" gwl2wasser_only="1"', 3500),
+  ].join('');
+});
+await mission.waitForTimeout(1200);
+await mission.click('#ymca-mm-panel [data-do="select"]');
+const wet = await mission.evaluate(() =>
+  [...document.querySelectorAll('.vehicle_checkbox:checked')].map((b) => b.value).sort());
+console.log('water picked      :', JSON.stringify(wet), '(65 is the 3,500 tanker, 15 min away)');
+assert.ok(wet.includes('65'), 'the tanker goes even though it is the furthest thing in the list');
+assert.ok(wet.length <= 3,
+  'and three vehicles cover 6,000 gallons — not five engines chosen for being close');
+
+// ---- RecruitDude: every station's hiring on one screen ----
 await pg.click('#ymca-back');
 await pg.click('.ymca-tile[data-mod="recruitroom"]');
 await pg.waitForSelector('#rr-table');

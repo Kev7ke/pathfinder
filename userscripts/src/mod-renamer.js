@@ -102,7 +102,7 @@ const TOKEN_HELP = [
 
 YMCA.register({
     id: 'renamer',
-    title: 'Renamer',
+    title: 'RelabelTable',
     tagline: 'Vehicles and stations',
     description: 'Rename from a pattern. The preview is mandatory, and every run records the '
         + 'previous names so it can be undone.',

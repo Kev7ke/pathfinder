@@ -277,6 +277,20 @@ guard was wrong more often than the thing it guarded against happened:
 past the alarm opened it on a switch its own predecessor was holding shut. It
 stays on until it is switched off.
 
+**The game calls the same capability two different things, and says so itself.**
+Mission 1008 asks for `personnel_educations: { gw_gefahrgut: 8 }` and spells the
+same training `HazMat` under `additional`. The vehicle wears the German name —
+`gwgefahrgut`, `gw_gefahrgut_only` — so `hazmat_vehicles` could never match by
+spelling, however wide the vocabulary was read. Where a key and a flag are two
+names for one thing, `personnel_educations` beside `additional.personnel_educations`
+is where the game states the pair.
+
+**Water is filled by the tank, not by the clock.** Adding vehicles in arrival
+order sends whatever is close, and what is close is engines: asked for 20,000
+gallons the panel picked eleven when four were wanted, because each moved the
+bar a little. A Quint carries a few hundred gallons, a Water Tanker several
+thousand. Biggest tank first, ties broken by travel time.
+
 **The flag vocabulary is everything the game has ever flagged**, not only what
 is in the table now. A HazMat out of range today still taught `hazmat` the day
 it was in a selection list, and `hazmat_vehicles` is no less real a requirement
