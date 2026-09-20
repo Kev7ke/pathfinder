@@ -60,7 +60,7 @@
  * but never auto-selected — an unmatched requirement is stated, not guessed at.
  */
 const MM_REQUIREMENTS = {
-    firetrucks: { flag: 'fire', label: 'Fire engines', icon: 'hose', source: 'the "Fire Truck" AAO selects on fire=1' },
+    firetrucks: { flag: 'fire', label: 'Fire engines', icon: 'flame', source: 'the "Fire Truck" AAO selects on fire=1' },
     battalion_chief_vehicles: { flag: 'elw', label: 'Battalion chief units', icon: 'star', source: 'the "F-BCU" AAO selects on elw=1' },
     police_cars: { flag: 'fustw_or_police_motorcycle', label: 'Patrol cars', icon: 'shield', source: 'the "Patrol Car" AAO' },
     ambulances: { flag: 'any_rtw', label: 'Ambulances', icon: 'cross', source: 'the "Rescue Unit" AAO selects on any_rtw=1' },
@@ -93,8 +93,13 @@ const MM_REQUIREMENTS = {
     },
 
     /* Patients live under `additional`, not in `requirements`. They are counted
-     * into the ambulance row rather than shown as a line of their own. */
-    patients: { flag: 'any_rtw', label: 'Ambulances', icon: 'cross', source: 'additional.possible_patient' },
+     * into the ambulance row rather than shown as a line of their own.
+     *
+     * A patient wants an ambulance: something that can treat one and carry one.
+     * A Rescue Engine or a heavy rescue is a fire appliance and does neither,
+     * and the game does not flag either `any_rtw`. So this is the same test as
+     * the ambulances line above, deliberately and not a looser one. */
+    patients: { flag: 'any_rtw', label: 'Ambulances', icon: 'cross', source: 'one per patient' },
 };
 
 /**
@@ -112,11 +117,51 @@ const MM_REQUIREMENTS = {
  * this one.
  */
 function mmPatients(record) {
-    const stated = document.querySelector('#patient_missing_requirements strong');
-    const fromPage = stated ? parseInt(stated.textContent, 10) : NaN;
-    if (Number.isFinite(fromPage) && fromPage > 0) return { count: fromPage, from: 'page' };
+    /* The window says it three ways and which one is showing depends on where
+     * the mission has got to, so all three are read in order of how sure each is.
+     *
+     *  1. What is still missing — "1x We need: Ambulance". Rendered only while
+     *     an ambulance is actually wanted, so surest when it is there.
+     *  2. The patient panel's own header — "1 Patient". Present whenever the
+     *     mission has patients at all, including while a first responder is
+     *     already on the way and nothing is being flagged as missing. This is
+     *     the one that was missing, and why an ambulance went unasked for.
+     *  3. One element per patient, the same number said a third way.
+     *
+     * Only then `additional.possible_patient`, which is the most this mission
+     * *can* produce rather than what it did. */
+    const firstNumber = (sel, re) => {
+        for (const el of document.querySelectorAll(sel)) {
+            const m = re.exec((el.textContent || '').trim());
+            if (m) return Number(m[1]);
+        }
+        return null;
+    };
+
+    const missing = firstNumber('#patient_missing_requirements strong', /^(\d+)\s*x/i);
+    if (missing) return { count: missing, from: 'missing' };
+
+    const stated = firstNumber('#patient_button_text strong, #patient_button_form strong', /^(\d+)\b/);
+    if (stated) return { count: stated, from: 'window' };
+
+    const each = document.querySelectorAll('.mission_patient, [id^="patient_form_"]').length;
+    if (each) return { count: each, from: 'rows' };
+
     const possible = Number(record?.additional?.possible_patient) || 0;
     return possible ? { count: possible, from: 'catalogue' } : null;
+}
+
+/** Where the window keeps its patients, for a window that keeps them elsewhere. */
+function mmPatientProbe() {
+    const shapes = (sel, attr) => [...new Set([...document.querySelectorAll(sel)]
+        .map((el) => String(el[attr] || '').replace(/\d+/g, '#')))].filter(Boolean).slice(0, 15);
+    return {
+        detected: mmPatients(null),
+        patientIdShapes: shapes('[id*="patient"]', 'id'),
+        patientClasses: shapes('[class*="patient"]', 'className'),
+        missingBlockHidden: [...document.querySelectorAll('#patient_missing_requirements')]
+            .map((el) => getComputedStyle(el).display === 'none'),
+    };
 }
 
 /** Requirements that are an amount to reach, not a count of vehicles. */
@@ -138,8 +183,8 @@ const MM_ICONS = {
     wind: '<path d="M2 7h9a3 3 0 1 0-3-3"/><path d="M2 12h12a3 3 0 1 1-3 3"/>',
     drop: '<path d="M10 2s6 6.5 6 10a6 6 0 0 1-12 0c0-3.5 6-10 6-10z"/>',
     shield: '<path d="M10 2 3 5v5c0 4 3 7 7 8 4-1 7-4 7-8V5z"/>',
-    // A hose running to a nozzle: the engine itself, as against what it carries.
-    hose: '<path d="M2 15c4 0 3-7 7-7h3"/><path d="M12 6h4l2 2-2 2h-4z"/>',
+    flame: '<path d="M10 18c3.3 0 6-2.4 6-5.5 0-4-4-6-4-10.5-2 1.5-4 3.5-4 6 0 1.5.6 2.4.6 2.4'
+        + 'S7 9 6 7.5C4.8 9 4 10.8 4 12.5 4 15.6 6.7 18 10 18z"/>',
     // The chief: a star, the way rank is worn.
     star: '<path d="M10 2.5 12.2 7l5 .7-3.6 3.5.9 5-4.5-2.4L5.5 16l.9-5L2.8 7.7l5-.7z"/>',
     // A tanker: a cylinder on its side, which is what one looks like.
@@ -513,11 +558,13 @@ async function mmPlan(page, ctx, cfg) {
 
         for (const v of mmAllocate(needs, vehicles)) picked.set(v.id, v);
 
+        /* `found` starts at what is committed — at the mission or on the way.
+         * What the plan *would* send covers nothing; it counts once the boxes
+         * are ticked, and mmRecount takes it from there. */
         for (const n of needs) {
-            const covered = [...picked.values()].filter((v) => mmMeets(v, n.rule)).length;
             lines.push({
                 key: n.key, label: n.rule.label, icon: n.rule.icon, wanted: n.wanted,
-                onScene: n.onScene, found: covered + n.onScene,
+                rule: n.rule, onScene: n.onScene, found: n.onScene,
             });
         }
 
@@ -534,7 +581,10 @@ async function mmPlan(page, ctx, cfg) {
                 picked.set(v.id, v);
                 have += carried(v);
             }
-            lines.push({ key, label: rule.label, icon: rule.icon, wanted, found: have, unit: rule.unit });
+            lines.push({
+                key, label: rule.label, icon: rule.icon, wanted,
+                found: 0, unit: rule.unit, carries: key, onScene: 0,
+            });
         }
 
         // Counts first, then the totals, so the table reads the way the game states it.
@@ -656,8 +706,7 @@ function mmPlanHtml(plan, page, cfg, ctx) {
           ${cfg.fastestFirst !== false ? 'checked' : ''}> Fastest first, by travel time</label>
         <button class="ymca-btn primary" data-do="select">Tick ${plan.pick.length} vehicles</button>
         <button class="ymca-btn" data-do="clear">Untick everything</button>
-        <div class="ymca-note" id="mm-done" hidden style="margin-top:10px">Ticked. Press
-          <b>Dispatch</b> in the game when it looks right.</div>
+        <div class="ymca-note" id="mm-done" hidden style="margin-top:10px">Ticked.</div>
       </div>`;
 }
 
@@ -867,6 +916,7 @@ function captureMissionWindow() {
                 class: classOf(b).slice(0, 80) || undefined,
                 text: (b.value || b.textContent || '').trim().slice(0, 30),
             })),
+        patients: mmPatientProbe(),
         requirementBlocks: [...document.querySelectorAll('#missing_text, .missing_text, #mission_general_info')]
             .map((e) => ({
                 id: e.id, class: classOf(e),
@@ -941,6 +991,7 @@ function mmMountPanel(ctx) {
         plan.surplus = mmSurplus(plan);
         lastPlan = plan;
         panel.innerHTML = mmGamePanelHtml(plan, cfg, ctx);
+        mmRecount(panel, plan);
     };
     const redraw = () => {
         clearTimeout(timer);
@@ -993,6 +1044,12 @@ function mmMountPanel(ctx) {
      * before anything had been sent.
      *
      * Its own writes are skipped, or rendering would trigger another render. */
+    /* The game fires change on every box it ticks, its dispatch orders included,
+     * so this catches the player's clicks and YMCA's alike. */
+    document.addEventListener('change', (e) => {
+        if (e.target?.classList?.contains('vehicle_checkbox')) mmRecount(panel, lastPlan);
+    });
+
     const watched = document.getElementById('iframe-inside-container') || document.body;
     new MutationObserver((records) => {
         for (const rec of records) {
@@ -1064,6 +1121,13 @@ function mmSurplus(plan) {
     const covers = (flags, rule) => (rule.anyOf
         ? rule.anyOf.some((f) => flags.includes(f))
         : flags.includes(rule.flag));
+
+    /* A vehicle whose abilities no requirement here judges is not surplus, it is
+     * unaccounted for. An ambulance on a call whose patients went undetected has
+     * no ambulance line to be measured against, and sending it away because
+     * nothing asked for it is exactly the wrong reading. */
+    const judged = new Set(checks.flatMap(({ rule }) => rule.anyOf || [rule.flag]));
+    const accountable = (v) => v.flags.every((f) => judged.has(f));
     const met = (kept) => checks.every(({ wanted, rule }) =>
         kept.filter((v) => covers(v.flags, rule)).length >= wanted);
 
@@ -1072,12 +1136,59 @@ function mmSurplus(plan) {
     let kept = here.slice();
     const drop = [];
     for (let i = here.length - 1; i >= 0; i -= 1) {
+        if (!accountable(here[i])) continue;
         const without = kept.filter((v) => v !== here[i]);
         if (!met(without)) continue;
         kept = without;
         drop.push(here[i]);
     }
     return drop;
+}
+
+/**
+ * Recount what is covered, from the boxes as they stand.
+ *
+ * Covered is what is committed: at the mission, on the way, or ticked. Not what
+ * the plan would send — a plan nobody has acted on covers nothing, and a row
+ * reading "covered" before a single box is ticked says nothing at all.
+ *
+ * Driven by the game's own change event, so ticking or unticking moves the
+ * numbers without a redraw, whether it was YMCA or the player who did it.
+ */
+function mmRecount(panel, plan) {
+    if (!plan || !plan.lines) return;
+    const ticked = [...document.querySelectorAll('.vehicle_checkbox:checked')].map((box) => ({
+        has: (flag) => box.getAttribute(flag) === '1',
+        water: Number(box.getAttribute('wasser_amount')) || 0,
+        foam: Number(box.getAttribute('foam_amount_display')) || 0,
+    }));
+
+    let allMet = true;
+    let judged = false;
+    for (const line of plan.lines) {
+        if (line.unmatched) continue;
+        judged = true;
+        line.found = line.unit
+            ? ticked.reduce((n2, v) => n2 + (line.carries === 'water_needed' ? v.water : v.foam), 0)
+            : line.onScene + ticked.filter((v) => mmMeets(v, line.rule)).length;
+        if (line.found < line.wanted) allMet = false;
+
+        const cell = panel.querySelector(`[data-covered="${line.key}"]`);
+        if (cell) {
+            cell.className = `label label-${line.found >= line.wanted ? 'success' : 'danger'}`;
+            cell.textContent = line.unit ? `${line.found} ${line.unit}` : String(line.found);
+        }
+    }
+
+    /* Red until everything is covered, then green — a tint rather than a colour,
+     * so it lies over the game's own background and reads the same in its dark
+     * theme as in its light one. */
+    const table = panel.querySelector('.mm-table');
+    if (table) {
+        table.style.backgroundColor = judged
+            ? (allMet ? 'rgba(40,160,70,.22)' : 'rgba(190,45,45,.22)')
+            : '';
+    }
 }
 
 /**
@@ -1109,10 +1220,10 @@ function mmGamePanelHtml(plan, cfg, ctx) {
     }
 
     const rows = plan.lines.map((l) => {
+        // mmRecount fills this and keeps it filled, so it is never rendered stale.
         const cell = l.unmatched
-            ? '<span class="label label-warning">not matched yet</span>'
-            : `<span class="label label-${l.found >= l.wanted ? 'success' : 'danger'}">${
-                ctx.fmt(l.found)}${l.unit ? ` ${l.unit}` : ''}</span>`;
+            ? '<span class="label label-warning">not matched</span>'
+            : `<span class="label label-danger" data-covered="${ctx.esc(l.key)}">0</span>`;
         return `<tr>
       <td class="text-right" style="width:1%;white-space:nowrap">${
     ctx.fmt(l.wanted)}${l.unit ? ` ${l.unit}` : ''}</td>
@@ -1132,7 +1243,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
       ${plan.name ? `<small> · ${ctx.esc(plan.name)}</small>` : ''}
     </div>
     <div class="panel-body">
-      <table class="table table-condensed table-striped" style="margin-bottom:8px">
+      <table class="table table-condensed mm-table" style="margin-bottom:8px">
         <thead><tr>
           <th class="text-right">Wanted</th>
           <th class="text-right" title="already at the mission or on the way">There</th>
@@ -1155,21 +1266,23 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         <button type="button" class="btn btn-xs btn-default" data-do="type">Copy this mission
           type</button> to have it added.</div>` : ''}
 
-      <button type="button" class="btn btn-success btn-sm" data-do="select">
-        Tick ${plan.pick.length} vehicles</button>
-      <button type="button" class="btn btn-default btn-sm" data-do="clear">Reset selection</button>
-      ${plan.surplus.length ? `<button type="button" class="btn btn-warning btn-sm"
-        data-do="cancel">Cancel ${plan.surplus.length} unused</button>` : ''}
-      <label style="font-weight:normal;margin:0 0 0 10px">
-        <input type="checkbox" data-cfg="fastestFirst" ${cfg.fastestFirst !== false ? 'checked' : ''}>
-        Fastest first</label>
-      <label style="font-weight:normal;margin:0 0 0 10px">
-        <input type="checkbox" data-cfg="ambulancePerPatient"
-          ${cfg.ambulancePerPatient !== false ? 'checked' : ''}>
-        Ambulance per patient</label>
-      ${plan.untimed ? `<small class="text-muted"> · ${plan.untimed} of ${plan.available}
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">
+        <label style="font-weight:normal;margin:0">
+          <input type="checkbox" data-cfg="fastestFirst"
+            ${cfg.fastestFirst !== false ? 'checked' : ''}> Fastest first</label>
+        <label style="font-weight:normal;margin:0 0 0 10px">
+          <input type="checkbox" data-cfg="ambulancePerPatient"
+            ${cfg.ambulancePerPatient !== false ? 'checked' : ''}> Ambulance per patient</label>
+        <span style="flex:1 1 auto"></span>
+        ${plan.surplus.length ? `<button type="button" class="btn btn-warning btn-sm"
+          data-do="cancel">Cancel ${plan.surplus.length} unused</button>` : ''}
+        <button type="button" class="btn btn-default btn-sm" data-do="clear">Untick everything</button>
+        <button type="button" class="btn btn-success btn-sm" data-do="select">
+          Tick ${plan.pick.length} vehicles</button>
+      </div>
+      ${plan.untimed ? `<small class="text-muted">${plan.untimed} of ${plan.available}
         have no travel time yet, ordered by distance until the game works them out</small>` : ''}
       <div class="alert alert-info" id="mm-panel-done" hidden style="padding:6px 10px;margin:8px 0 0">
-        Ticked. Check the list, then press <b>Dispatch</b> — YMCA will not press it for you.</div>
+        Ticked.</div>
     </div>`;
 }

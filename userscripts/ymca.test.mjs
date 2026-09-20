@@ -213,7 +213,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.13');
+assert.equal(report.ymca, '0.0.14');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -464,12 +464,40 @@ assert.equal(await mission.evaluate(() =>
 const panelRows = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
 console.log('panel table       :', JSON.stringify(panelRows));
-assert.deepEqual(panelRows, [['1', '\u2013', '1', 'Fire engines']]);
+assert.deepEqual(panelRows, [['1', '\u2013', '0', 'Fire engines']],
+  'covered is what is committed, and nothing is committed before a box is ticked');
+const tintBefore = await mission.evaluate(() =>
+  document.querySelector('#ymca-mm-panel .mm-table').style.backgroundColor);
+console.log('tint short        :', tintBefore);
+assert.ok(/^rgba\(190, 45, 45/.test(tintBefore), 'red while something is still missing');
 
 // Travel time, not map distance: vehicle 22 is further away but arrives in 90s, not 300s.
 await mission.click('#ymca-mm-panel [data-do="select"]');
 const chosen = await mission.$$eval('.vehicle_checkbox:checked', (b) => b.map((x) => x.value));
 console.log('panel ticked      :', JSON.stringify(chosen), '(22 is 3.9km/90s, 21 is 1.1km/300s)');
+// Ticking moves Covered, with no redraw, and turns the table green once nothing is missing.
+const afterTick = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+const tintAfter = await mission.evaluate(() =>
+  document.querySelector('#ymca-mm-panel .mm-table').style.backgroundColor);
+console.log('after ticking     :', JSON.stringify(afterTick), tintAfter);
+assert.equal(afterTick[0][2], '1', 'a ticked vehicle counts as covered');
+assert.ok(/^rgba\(40, 160, 70/.test(tintAfter), 'green once every requirement is covered');
+// And unticking by hand takes it straight back, without YMCA being told.
+await mission.evaluate(() => {
+  const box = document.querySelector('.vehicle_checkbox:checked');
+  box.checked = false;
+  box.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await mission.waitForTimeout(150);
+const afterUntick = await mission.$$eval('#ymca-mm-panel tbody tr td:nth-child(3)',
+  (tds) => tds.map((t) => t.textContent.trim()));
+const tintBack = await mission.evaluate(() =>
+  document.querySelector('#ymca-mm-panel .mm-table').style.backgroundColor);
+console.log('after unticking   :', JSON.stringify(afterUntick), tintBack);
+assert.equal(afterUntick[0], '0', 'unticking by hand must drop the count again');
+assert.ok(/^rgba\(190, 45, 45/.test(tintBack), 'and turn the table red again');
+await mission.click('#ymca-mm-panel [data-do="select"]');
 assert.deepEqual(chosen, ['22'],
   'ordering must follow the travel time the game prints, not how close the dot is');
 assert.equal(await mission.evaluate(() => window.__submits), 0,

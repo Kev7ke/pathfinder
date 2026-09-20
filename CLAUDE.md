@@ -158,11 +158,18 @@ reaching across from the parent, ever. Inside the frame there is no navbar, so
 it is the floating button that opens it.
 
 **Patients are not in `requirements`.** They are `additional.possible_patient`
-in the mission catalogue, and the window states the real number for the instance
-in `#patient_missing_requirements` ("1x We need: Ambulance"). One ambulance per
-patient; `chances.patient_transport` is the chance of a transport to hospital
-afterwards and answers a different question. A mission with three patients asks
-for no ambulance anywhere in `requirements`, which is why they were missed.
+in the mission catalogue, and the window states the real number three ways:
+`#patient_missing_requirements` ("1x We need: Ambulance"), which only renders
+while an ambulance is actually wanted; `#patient_button_text` ("1 Patient"),
+which is there whenever the mission has patients, including while a first
+responder is already on its way; and one element per patient. Read all of them —
+reading only the first misses every call where nothing is being flagged.
+
+One ambulance per patient, and **an ambulance means `any_rtw`**: a Rescue Engine
+or a heavy rescue is a fire appliance that can neither treat a patient nor carry
+one, and the game does not flag them `any_rtw`.
+`chances.patient_transport` is the chance of a transport to hospital afterwards
+and answers a different question.
 
 **The `oneof_…` requirement keys name their own alternatives**
 (`oneof_fire_engine_or_rescue_or_ladder`), so they are read rather than guessed:
@@ -176,6 +183,12 @@ capability flags like `fire`, `elw`, `rw`, `dlk`, `gwa`, `fustw`, `any_rtw`.
 `#mission_general_info[data-mission-type]` gives the type id, so what a mission
 *needs* comes from `/einsaetze.json` and the window is only asked what is
 available.
+
+**"Covered" is what is committed, never what is planned.** At the mission, on
+the way, or ticked. A row that reads covered before a box has been ticked says
+nothing, and the plan is not a promise. The game fires `change` on every box it
+ticks, its own dispatch orders included, so one listener keeps the count live
+for the player's clicks and YMCA's alike — without a redraw.
 
 **Ticking a checkbox means dispatching a `change` event.** The game keeps its
 counter, water bar and AAO state from `$("body").on("change", ".vehicle_checkbox", …)`.
@@ -195,6 +208,10 @@ ladders run dry. Speed is the last tie-break for the same reason.
 
 The same overlap is why "more than the requirement asks for" is not a safe test
 for sending one back: take the candidate away and check every requirement again.
+And **a vehicle no requirement judges is unaccounted for, not surplus** — an
+ambulance on a call whose patients went undetected has no line to be measured
+against, and sending it away because nothing asked for it is the wrong reading
+of the same silence.
 
 **Order vehicles by travel time, never by distance.** The row's `data-distance`
 is how far the dot is; the fourth cell's `timevalue`, in seconds, is when the
