@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.17
+// @version      0.0.18
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.17',
+    version: '0.0.18',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1454,7 +1454,7 @@ const BACKUP_KEEP = 10;
  * time that button is pressed rather than waiting to be typed in here.
  */
 const BUILTIN_VEHICLE_TYPES = Object.fromEntries(
-    Object.entries({"3":{"name":"Battalion chief unit","capabilities":["elw"]},"5":{"name":"ALS Ambulance","capabilities":["any_rtw"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser_only"]},"10":{"name":"Patrol Car","capabilities":["fustw_or_police_motorcycle"]},"13":{"name":"Quint","capabilities":["fire","dlk"]},"18":{"name":"Rescue Engine","capabilities":["fire","rw"]},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"33":{"name":"Pumper Tanker","capabilities":["fire"]}}).map(([id, t]) => [id, t.name]));
+    Object.entries({"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine"},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["any_rtw"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser_only"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat"},"10":{"name":"Patrol Car","capabilities":["fustw_or_police_motorcycle"]},"12":{"name":"MCV","longName":"Mobile command vehicle"},"13":{"name":"Quint","capabilities":["fire","dlk"],"longName":"Quint Fire Truck"},"15":{"name":"Fly-Car"},"17":{"name":"Large ARFF Crash Tender","longName":"Large Aircraft Rescue and Firefighting Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw"]},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC","longName":"Wildland Mobile Command Center"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender","longName":"Small Aircraft Rescue and Firefighting Crash Tender"},"80":{"name":"Medium ARFF Crash Tender","longName":"Medium Aircraft Rescue and Firefighting Crash Tender"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"109":{"name":"CCTU","longName":"Critical Care Transport Unit"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC","longName":"Water Tanker Container"},"128":{"name":"FBPC","longName":"Fire Breath Protection Container"},"129":{"name":"USARC","longName":"Urban Search and Rescue Container"},"130":{"name":"HazMat"},"131":{"name":"ICPC","longName":"Incident Command Post Container"},"132":{"name":"CWFT","longName":"Combined Water and Foam Tanker"},"133":{"name":"FWDC","longName":"Flood and Water Damage Container"},"134":{"name":"FRC","longName":"Fire Rolling Container"}}).map(([id, t]) => [id, t.name]));
 
 /** id -> name, learnt from the game and shared across modules. */
 const LEARNT_TYPES_KEY = 'ymca-vehicle-types';
@@ -2111,7 +2111,7 @@ const MM_TYPES_KEY = 'ymca-missionmagician-types';
  * covers until it has watched enough selection tables to learn the type — so
  * every report that names a new type belongs in that file.
  */
-const MM_SHIPPED_TYPES = {"3":{"name":"Battalion chief unit","capabilities":["elw"]},"5":{"name":"ALS Ambulance","capabilities":["any_rtw"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser_only"]},"10":{"name":"Patrol Car","capabilities":["fustw_or_police_motorcycle"]},"13":{"name":"Quint","capabilities":["fire","dlk"]},"18":{"name":"Rescue Engine","capabilities":["fire","rw"]},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"33":{"name":"Pumper Tanker","capabilities":["fire"]}};
+const MM_SHIPPED_TYPES = {"0":{"name":"Type 1 fire engine"},"1":{"name":"Type 2 fire engine"},"2":{"name":"Platform truck"},"3":{"name":"Battalion chief unit","capabilities":["elw"]},"4":{"name":"Heavy rescue vehicle"},"5":{"name":"ALS Ambulance","capabilities":["any_rtw"]},"6":{"name":"Mobile air","capabilities":["gwa"]},"7":{"name":"Water Tanker","capabilities":["gwl2wasser_only"]},"8":{"name":"Utility unit"},"9":{"name":"HazMat"},"10":{"name":"Patrol Car","capabilities":["fustw_or_police_motorcycle"]},"12":{"name":"MCV","longName":"Mobile command vehicle"},"13":{"name":"Quint","capabilities":["fire","dlk"],"longName":"Quint Fire Truck"},"15":{"name":"Fly-Car"},"17":{"name":"Large ARFF Crash Tender","longName":"Large Aircraft Rescue and Firefighting Crash Tender"},"18":{"name":"Rescue Engine","capabilities":["fire","rw"]},"20":{"name":"Mass Casualty Unit"},"21":{"name":"Heavy Rescue + Light Boat"},"22":{"name":"Light Boat Trailer"},"27":{"name":"BLS Ambulance","capabilities":["any_rtw"]},"28":{"name":"EMS Rescue"},"29":{"name":"EMS Chief"},"30":{"name":"Type 3 engine"},"31":{"name":"Type 5 engine"},"32":{"name":"Type 7 engine"},"33":{"name":"Pumper Tanker","capabilities":["fire"]},"34":{"name":"Crew Carrier"},"38":{"name":"Type 4 engine"},"39":{"name":"Type 6 engine"},"40":{"name":"Dozer Trailer"},"41":{"name":"Crew cab semi"},"48":{"name":"EMS Fire Engine/Ambulance"},"49":{"name":"Tactical Ambulance"},"50":{"name":"Hazmat Ambulance"},"59":{"name":"EMS Operations Support"},"60":{"name":"EMS Mobile Command Unit"},"61":{"name":"ALS Rescue Ambulance"},"62":{"name":"Fire Investigator Unit"},"63":{"name":"Fire Prevention Unit"},"64":{"name":"Foam Tender"},"65":{"name":"Foam Trailer"},"66":{"name":"Lifeguard Truck"},"67":{"name":"Lifeguard Rescue"},"68":{"name":"Lifeguard Supervisor"},"73":{"name":"Small Coastal Boat Trailer"},"74":{"name":"Wildland MCC","longName":"Wildland Mobile Command Center"},"77":{"name":"Tanker Semi Truck Trailer"},"78":{"name":"Tanker Trailer"},"79":{"name":"Small ARFF Crash Tender","longName":"Small Aircraft Rescue and Firefighting Crash Tender"},"80":{"name":"Medium ARFF Crash Tender","longName":"Medium Aircraft Rescue and Firefighting Crash Tender"},"91":{"name":"Flood Equipment Trailer"},"92":{"name":"Mobile Air Trailer"},"93":{"name":"Light Tower Trailer"},"94":{"name":"Energy Generator Trailer"},"95":{"name":"Double Light Boat Trailer"},"96":{"name":"Small Heavy Rescue Trailer"},"97":{"name":"Large Heavy Rescue Trailer"},"98":{"name":"Small HazMat Trailer"},"99":{"name":"Large HazMat Trailer"},"100":{"name":"Tiller Ladder Trailer"},"103":{"name":"Fire Traffic Control Unit"},"104":{"name":"Fire Traffic Blocker Unit"},"107":{"name":"Fire Wrecker"},"109":{"name":"CCTU","longName":"Critical Care Transport Unit"},"116":{"name":"Small Fire Equipment Trailer"},"117":{"name":"Large Fire Equipment Trailer"},"118":{"name":"Semi Fire Equipment Trailer"},"126":{"name":"Hooklift Truck"},"127":{"name":"WTC","longName":"Water Tanker Container"},"128":{"name":"FBPC","longName":"Fire Breath Protection Container"},"129":{"name":"USARC","longName":"Urban Search and Rescue Container"},"130":{"name":"HazMat"},"131":{"name":"ICPC","longName":"Incident Command Post Container"},"132":{"name":"CWFT","longName":"Combined Water and Foam Tanker"},"133":{"name":"FWDC","longName":"Flood and Water Damage Container"},"134":{"name":"FRC","longName":"Fire Rolling Container"}};
 
 function mmKnownTypes() {
     let learnt = {};
@@ -2119,7 +2119,13 @@ function mmKnownTypes() {
         learnt = JSON.parse(localStorage.getItem(MM_TYPES_KEY)) || {};
     } catch (e) { /* nothing learnt yet */ }
     const known = {};
-    for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) known[id] = t.capabilities || [];
+    /* A shipped entry may carry a name and nothing else: the buy pages name every
+     * type the game sells, but they do not say what a vehicle covers. An entry
+     * without capabilities stays unknown here, so a vehicle already at the mission
+     * is left alone rather than judged to cover nothing. */
+    for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) {
+        if (Array.isArray(t.capabilities)) known[id] = t.capabilities;
+    }
     // What this game taught wins: the player's own server is the truth here.
     for (const [id, t] of Object.entries(learnt)) known[id] = Array.isArray(t) ? t : (t.caps || []);
     return known;
@@ -4025,7 +4031,7 @@ const ENDPOINTS = [
 /* The type ids data/vehicle-types.json already carries, so the vehicle export
  * can say which of the player's types are new rather than making somebody
  * compare two lists by eye. */
-const SHIPPED_VEHICLE_TYPE_IDS = ["3","5","6","7","10","13","18","27","33"];
+const SHIPPED_VEHICLE_TYPE_IDS = ["0","1","2","3","4","5","6","7","8","9","10","12","13","15","17","18","20","21","22","27","28","29","30","31","32","33","34","38","39","40","41","48","49","50","59","60","61","62","63","64","65","66","67","68","73","74","77","78","79","80","91","92","93","94","95","96","97","98","99","100","103","104","107","109","116","117","118","126","127","128","129","130","131","132","133","134"];
 
 /** Drop what no planner reads. Icons alone are three paths per mission. */
 function slimMissions(data) {
@@ -4442,9 +4448,9 @@ function moduleStore(moduleId) {
  * Learning names one mission at a time is no way to build a catalogue: it needs
  * somebody to keep playing until a type happens to be in range, and a type
  * added by a game update would stay nameless until it was. The buy page already
- * lists them all — a `<select>` of every vehicle a building can buy, with the
- * id as the option's value and the name as its text. That is the whole answer,
- * and it is one page per kind of building.
+ * lists them all — one `.vehicle_type` card per vehicle the building can buy,
+ * affordable or not, with the name in its heading and the id in its buy link.
+ * That is the whole answer, and it is one page per kind of building.
  *
  * Nothing here is guessed at. The buy page is found by following the building's
  * own link to it, so a game that moves it is followed rather than broken. What
@@ -4469,11 +4475,13 @@ async function vehicleCatalogue(ctx) {
             const options = await buyableAt(buildingId);
             if (!options.length) { failed.push({ buildingType: kind, why: 'no vehicle list on that page' }); continue; }
             reached.push({ buildingType: kind, offers: options.length });
-            for (const { id, name } of options) {
-                const row = types.get(id) || { id, name, soldBy: [] };
-                if (!row.name && name) row.name = name;
+            for (const offer of options) {
+                const row = types.get(offer.id) || { id: offer.id, soldBy: [] };
+                for (const k of ['name', 'longName', 'category', 'requiredExtension']) {
+                    if (!row[k] && offer[k]) row[k] = offer[k];
+                }
                 if (!row.soldBy.includes(kind)) row.soldBy.push(kind);
-                types.set(id, row);
+                types.set(offer.id, row);
             }
         } catch (err) {
             failed.push({ buildingType: kind, why: err.message });
@@ -4497,6 +4505,9 @@ async function vehicleCatalogue(ctx) {
         id: r.id,
         name: r.name || learnt[String(r.id)]?.name || null,
         capabilities: learnt[String(r.id)]?.caps || null,
+        longName: r.longName || undefined,
+        category: r.category || undefined,
+        requiredExtension: r.requiredExtension || undefined,
         soldByBuildingTypes: r.soldBy,
         youOwn: owned.get(r.id) || 0,
         inDataset: SHIPPED_VEHICLE_TYPE_IDS.includes(String(r.id)),
@@ -4527,9 +4538,16 @@ async function vehicleCatalogue(ctx) {
 /**
  * The vehicles a building will sell you, from its own buy page.
  *
- * The building page is asked for its link rather than a path being assumed;
- * only if it offers none is the usual one tried, and a failure there is
- * reported rather than swallowed.
+ * The page is not a form. Each vehicle is a `.vehicle_type` card with its name
+ * in an `<h3>`, and the id is in the buy link:
+ *
+ *     /buildings/5681502/vehicle/5681502/13/credits?…   ->  13 is the Quint
+ *
+ * Every tab of that page — firetrucks, ambulances, trailers, containers — is in
+ * the markup already, hidden rather than fetched on demand, so one page has all
+ * of them. Vehicles the account cannot afford or has not unlocked are listed
+ * too, with the buttons disabled, which is exactly what makes this a catalogue
+ * rather than an inventory.
  */
 async function buyableAt(buildingId) {
     const get = async (url) => {
@@ -4538,30 +4556,58 @@ async function buyableAt(buildingId) {
         return new DOMParser().parseFromString(await res.text(), 'text/html');
     };
 
-    const page = await get(`/buildings/${buildingId}`);
-    const link = page.querySelector('a[href*="vehicles/new"], a[href*="vehicle_market"]');
-    const doc = link
-        ? await get(new URL(link.getAttribute('href'), location.origin).pathname)
-        : await get(`/buildings/${buildingId}/vehicles/new`);
+    /* The building's own link to its buy page first, so a game that moves the
+     * page is followed; the usual address only as a fallback. */
+    let doc = null;
+    let tried = [];
+    try {
+        const page = await get(`/buildings/${buildingId}`);
+        const link = page.querySelector('a[href*="vehicles/new"], a[href*="/vehicle/new"]');
+        if (link) {
+            const href = new URL(link.getAttribute('href'), location.origin);
+            tried.push(href.pathname);
+            doc = await get(href.pathname + href.search);
+        }
+    } catch (err) {
+        tried.push(`building page: ${err.message}`);
+    }
+    if (!doc || !doc.querySelector('.vehicle_type')) {
+        for (const path of [`/buildings/${buildingId}/vehicles/new`, `/buildings/${buildingId}/vehicle/new`]) {
+            try {
+                tried.push(path.replace(/\d+/g, '#'));
+                const candidate = await get(path);
+                if (candidate.querySelector('.vehicle_type')) { doc = candidate; break; }
+            } catch (err) { /* try the next */ }
+        }
+    }
+    if (!doc) throw new Error(`no buy page found (tried ${tried.join(', ')})`);
+
+    /* Which tab a card sits in is the game's own grouping — firetrucks,
+     * ambulances, containers — and worth keeping. */
+    const tabName = new Map();
+    for (const tab of doc.querySelectorAll('#tabs a[href^="#"]')) {
+        tabName.set(tab.getAttribute('href').slice(1), tab.textContent.trim());
+    }
 
     const out = [];
-    for (const option of doc.querySelectorAll('select option')) {
-        const id = Number(option.value);
-        const name = option.textContent.trim().replace(/\s*\([^)]*\)\s*$/, '');
-        if (!Number.isFinite(id) || id <= 0 || !name) continue;
+    for (const card of doc.querySelectorAll('.vehicle_type')) {
+        const link = card.querySelector('a[href*="/vehicle/"]');
+        const id = link && Number(/\/vehicle\/\d+\/(\d+)\//.exec(link.getAttribute('href'))?.[1]);
+        if (!Number.isFinite(id)) continue;
         if (out.some((o) => o.id === id)) continue;
-        out.push({ id, name });
-    }
-    /* A page with one option per vehicle as a radio or a link rather than a
-     * select: read those the same way. */
-    if (!out.length) {
-        for (const el of doc.querySelectorAll('[vehicle_type_id], [data-vehicle-type-id]')) {
-            const id = Number(el.getAttribute('vehicle_type_id') || el.getAttribute('data-vehicle-type-id'));
-            const name = (el.getAttribute('title') || el.textContent || '').trim().slice(0, 60);
-            if (!Number.isFinite(id) || id <= 0) continue;
-            if (out.some((o) => o.id === id)) continue;
-            out.push({ id, name: name || null });
-        }
+
+        const pane = card.closest('[role="tabpanel"]');
+        const needs = [...card.querySelectorAll('.alert')]
+            .map((a) => a.textContent.trim())
+            .find((t) => /^required extension:/i.test(t));
+
+        out.push({
+            id,
+            name: (card.querySelector('h3')?.textContent || '').trim() || null,
+            longName: (card.querySelector('b')?.textContent || '').trim() || null,
+            category: pane ? (tabName.get(pane.id) || pane.id) : null,
+            requiredExtension: needs ? needs.replace(/^required extension:\s*/i, '') : null,
+        });
     }
     return out;
 }

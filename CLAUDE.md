@@ -474,10 +474,25 @@ back on before they have seen a type themselves.
 ### Naming a vehicle type
 
 **The game sells every vehicle it has, and the buy page lists them.** A
-building's own page links to `…/vehicles/new`, which is a `<select>` of every
-type that building can buy: the id is the option's value, the name is its text.
-One page per *kind* of building covers the lot — a fire station and an ambulance
-station sell different vehicles, two fire stations sell the same ones.
+building's own page links to `…/vehicles/new`. That page is **not a form**: the
+first attempt looked for a `<select>` and came back with nothing on every kind of
+building. It is one `.vehicle_type` card per vehicle, the name in the card's
+`<h3>`, the long name in its `<b>`, and the id in the buy link —
+`/buildings/<b>/vehicle/<b>/13/credits` is the Quint.
+
+Every tab of that page — firetrucks, ambulances, trailers, containers — is in
+the markup already, hidden rather than fetched, so one request carries all of
+them. Vehicles the account cannot afford or has not unlocked are listed too,
+with their buttons disabled, and that is exactly what makes it a catalogue
+rather than an inventory. One page per *kind* of building covers the lot — a
+fire station and an ambulance station sell different vehicles, two fire stations
+sell the same ones.
+
+**The buy page names a type; it does not say what the type covers.** So an entry
+in `data/vehicle-types.json` may carry a name and no `capabilities`, and that is
+not the same as covering nothing: MissionMagician leaves a vehicle of such a
+type alone rather than judging it. Capabilities only ever come from a mission
+window's selection table, where the flags sit on the checkbox.
 
 That is **Diagnostics → Vehicle types**, and it is the answer to "what is type
 99". Learning names from mission windows still happens — the row carries

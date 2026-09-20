@@ -259,7 +259,13 @@ function mmKnownTypes() {
         learnt = JSON.parse(localStorage.getItem(MM_TYPES_KEY)) || {};
     } catch (e) { /* nothing learnt yet */ }
     const known = {};
-    for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) known[id] = t.capabilities || [];
+    /* A shipped entry may carry a name and nothing else: the buy pages name every
+     * type the game sells, but they do not say what a vehicle covers. An entry
+     * without capabilities stays unknown here, so a vehicle already at the mission
+     * is left alone rather than judged to cover nothing. */
+    for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) {
+        if (Array.isArray(t.capabilities)) known[id] = t.capabilities;
+    }
     // What this game taught wins: the player's own server is the truth here.
     for (const [id, t] of Object.entries(learnt)) known[id] = Array.isArray(t) ? t : (t.caps || []);
     return known;

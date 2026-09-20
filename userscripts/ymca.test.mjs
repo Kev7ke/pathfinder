@@ -99,16 +99,37 @@ await pg.evaluate(() => {
       return new Response(`<html><body><a href="/buildings/${m[1]}/vehicles/new">Buy vehicle</a>
         </body></html>`, { headers: { 'content-type': 'text/html' } });
     }
-    m = url.match(/^\/buildings\/(\d+)\/vehicles\/new$/);
+    m = url.match(/^\/buildings\/(\d+)\/vehicles\/new/);
     if (m) {
-      // A fire station sells engines and ladders; a police station sells patrol cars.
-      const fire = `<select name="vehicle[vehicle_type]">
-        <option value="33">Pumper Tanker (50,000 Credits)</option>
-        <option value="13">Quint</option>
-        <option value="99">Hovercraft Wrangler</option></select>`;
-      const police = `<select name="vehicle[vehicle_type]">
-        <option value="10">Patrol Car</option></select>`;
-      const b = buildings.find((x) => x.id === Number(m[1]));
+      // The real page: cards, not a form. The type id is in the buy link, every tab is already
+      // in the markup, and what you cannot afford is listed with its buttons disabled.
+      const id = m[1];
+      const card = (type, name, extra = '') => `
+        <div class="col-sm-3"><div class="vehicle_type well">
+          <h3>${name}</h3>${extra}
+          <a class="btn btn-success disabled" href="/buildings/${id}/vehicle/${id}/${type}/coins?building=${id}">25 Coins</a>
+          <a class="btn btn-success disabled" href="/buildings/${id}/vehicle/${id}/${type}/credits?building=${id}">19,000 Credits</a>
+        </div></div>`;
+      const fire = `
+        <ul id="tabs" class="nav nav-tabs">
+          <li class="active"><a href="#fire_engine" data-toggle="tab">Firetruck</a></li>
+          <li><a href="#ambulance" data-toggle="tab">Ambulance</a></li>
+        </ul>
+        <div class="tab-content">
+          <div role="tabpanel" class="tab-pane active" id="fire_engine">
+            ${card(13, 'Quint', '<b>Quint Fire Truck</b>')}
+            ${card(33, 'Pumper Tanker')}
+            ${card(901, 'Hovercraft Wrangler')}
+          </div>
+          <div role="tabpanel" class="tab-pane" id="ambulance">
+            ${card(5, 'ALS Ambulance',
+    '<div class="alert alert-info">Required extension: Ambulance Extension</div>')}
+          </div>
+        </div>`;
+      const police = `<ul id="tabs"><li><a href="#patrol" data-toggle="tab">Patrol</a></li></ul>
+        <div class="tab-content"><div role="tabpanel" class="tab-pane" id="patrol">
+          ${card(10, 'Patrol car')}</div></div>`;
+      const b = buildings.find((x) => x.id === Number(id));
       return new Response(`<html><body>${b && b.building_type === 5 ? police : fire}</body></html>`,
         { headers: { 'content-type': 'text/html' } });
     }
@@ -231,7 +252,7 @@ await pg.click('[data-do="report"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ymca'));
 const report = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('report keys       :', Object.keys(report).join(', '));
-assert.equal(report.ymca, '0.0.17');
+assert.equal(report.ymca, '0.0.18');
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 assert.ok(report.log.some((l) => l.where === 'renamer' || l.where === 'api'),
@@ -249,19 +270,26 @@ const fleet = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('vehicle types     :', JSON.stringify(fleet.types.map((t) => [t.id, t.name, t.youOwn])));
 assert.ok(fleet.types.some((t) => t.id === 13 && t.name === 'Quint'),
   'the buy page names every type it sells, so nothing has to be played through to find out');
-assert.ok(fleet.types.some((t) => t.id === 10 && t.name === 'Patrol Car'),
+assert.ok(fleet.types.some((t) => t.id === 10 && t.name === 'Patrol car'),
   'and a different kind of station sells different vehicles, so each kind is asked');
 assert.ok(fleet.types.some((t) => t.id === 33 && t.name === 'Pumper Tanker'),
-  'the price in brackets is not part of the name');
+  'the name is the card\'s heading, not the price on its button');
+// Every tab is in the markup already, so one page carries the ambulances too.
+const als = fleet.types.find((t) => t.id === 5);
+console.log('from another tab  :', JSON.stringify(als));
+assert.equal(als.category, 'Ambulance', 'the tab a vehicle sits in is the game\'s own grouping');
+assert.equal(als.requiredExtension, 'Ambulance Extension',
+  'and what it needs before it can be stationed');
+assert.equal(fleet.types.find((t) => t.id === 13).longName, 'Quint Fire Truck');
 console.log('not in dataset    :', JSON.stringify(fleet.missingFromDataset));
-assert.deepEqual(fleet.missingFromDataset, [99],
+assert.deepEqual(fleet.missingFromDataset, [901],
   'a type the repo does not carry is named, so it can be added without comparing two lists');
 assert.ok(!JSON.stringify(fleet).includes('FS01'), 'no station name may leave in the fleet export');
 // And it lands where every module reads it, not just in the clipboard.
 const shared = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-vehicle-types')));
-assert.equal(shared['99'].name, 'Hovercraft Wrangler',
+assert.equal(shared['901'].name, 'Hovercraft Wrangler',
   'a name learnt once must be a name the Renamer has too');
-console.log('shared store      :', JSON.stringify(shared['99']));
+console.log('shared store      :', JSON.stringify(shared['901']));
 
 // ---- one report carries what used to be four buttons ----
 console.log('report gathers    :',

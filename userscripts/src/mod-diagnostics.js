@@ -442,9 +442,9 @@ function moduleStore(moduleId) {
  * Learning names one mission at a time is no way to build a catalogue: it needs
  * somebody to keep playing until a type happens to be in range, and a type
  * added by a game update would stay nameless until it was. The buy page already
- * lists them all — a `<select>` of every vehicle a building can buy, with the
- * id as the option's value and the name as its text. That is the whole answer,
- * and it is one page per kind of building.
+ * lists them all — one `.vehicle_type` card per vehicle the building can buy,
+ * affordable or not, with the name in its heading and the id in its buy link.
+ * That is the whole answer, and it is one page per kind of building.
  *
  * Nothing here is guessed at. The buy page is found by following the building's
  * own link to it, so a game that moves it is followed rather than broken. What
@@ -469,11 +469,13 @@ async function vehicleCatalogue(ctx) {
             const options = await buyableAt(buildingId);
             if (!options.length) { failed.push({ buildingType: kind, why: 'no vehicle list on that page' }); continue; }
             reached.push({ buildingType: kind, offers: options.length });
-            for (const { id, name } of options) {
-                const row = types.get(id) || { id, name, soldBy: [] };
-                if (!row.name && name) row.name = name;
+            for (const offer of options) {
+                const row = types.get(offer.id) || { id: offer.id, soldBy: [] };
+                for (const k of ['name', 'longName', 'category', 'requiredExtension']) {
+                    if (!row[k] && offer[k]) row[k] = offer[k];
+                }
                 if (!row.soldBy.includes(kind)) row.soldBy.push(kind);
-                types.set(id, row);
+                types.set(offer.id, row);
             }
         } catch (err) {
             failed.push({ buildingType: kind, why: err.message });
@@ -497,6 +499,9 @@ async function vehicleCatalogue(ctx) {
         id: r.id,
         name: r.name || learnt[String(r.id)]?.name || null,
         capabilities: learnt[String(r.id)]?.caps || null,
+        longName: r.longName || undefined,
+        category: r.category || undefined,
+        requiredExtension: r.requiredExtension || undefined,
         soldByBuildingTypes: r.soldBy,
         youOwn: owned.get(r.id) || 0,
         inDataset: SHIPPED_VEHICLE_TYPE_IDS.includes(String(r.id)),
@@ -527,9 +532,16 @@ async function vehicleCatalogue(ctx) {
 /**
  * The vehicles a building will sell you, from its own buy page.
  *
- * The building page is asked for its link rather than a path being assumed;
- * only if it offers none is the usual one tried, and a failure there is
- * reported rather than swallowed.
+ * The page is not a form. Each vehicle is a `.vehicle_type` card with its name
+ * in an `<h3>`, and the id is in the buy link:
+ *
+ *     /buildings/5681502/vehicle/5681502/13/credits?…   ->  13 is the Quint
+ *
+ * Every tab of that page — firetrucks, ambulances, trailers, containers — is in
+ * the markup already, hidden rather than fetched on demand, so one page has all
+ * of them. Vehicles the account cannot afford or has not unlocked are listed
+ * too, with the buttons disabled, which is exactly what makes this a catalogue
+ * rather than an inventory.
  */
 async function buyableAt(buildingId) {
     const get = async (url) => {
@@ -538,30 +550,58 @@ async function buyableAt(buildingId) {
         return new DOMParser().parseFromString(await res.text(), 'text/html');
     };
 
-    const page = await get(`/buildings/${buildingId}`);
-    const link = page.querySelector('a[href*="vehicles/new"], a[href*="vehicle_market"]');
-    const doc = link
-        ? await get(new URL(link.getAttribute('href'), location.origin).pathname)
-        : await get(`/buildings/${buildingId}/vehicles/new`);
+    /* The building's own link to its buy page first, so a game that moves the
+     * page is followed; the usual address only as a fallback. */
+    let doc = null;
+    let tried = [];
+    try {
+        const page = await get(`/buildings/${buildingId}`);
+        const link = page.querySelector('a[href*="vehicles/new"], a[href*="/vehicle/new"]');
+        if (link) {
+            const href = new URL(link.getAttribute('href'), location.origin);
+            tried.push(href.pathname);
+            doc = await get(href.pathname + href.search);
+        }
+    } catch (err) {
+        tried.push(`building page: ${err.message}`);
+    }
+    if (!doc || !doc.querySelector('.vehicle_type')) {
+        for (const path of [`/buildings/${buildingId}/vehicles/new`, `/buildings/${buildingId}/vehicle/new`]) {
+            try {
+                tried.push(path.replace(/\d+/g, '#'));
+                const candidate = await get(path);
+                if (candidate.querySelector('.vehicle_type')) { doc = candidate; break; }
+            } catch (err) { /* try the next */ }
+        }
+    }
+    if (!doc) throw new Error(`no buy page found (tried ${tried.join(', ')})`);
+
+    /* Which tab a card sits in is the game's own grouping — firetrucks,
+     * ambulances, containers — and worth keeping. */
+    const tabName = new Map();
+    for (const tab of doc.querySelectorAll('#tabs a[href^="#"]')) {
+        tabName.set(tab.getAttribute('href').slice(1), tab.textContent.trim());
+    }
 
     const out = [];
-    for (const option of doc.querySelectorAll('select option')) {
-        const id = Number(option.value);
-        const name = option.textContent.trim().replace(/\s*\([^)]*\)\s*$/, '');
-        if (!Number.isFinite(id) || id <= 0 || !name) continue;
+    for (const card of doc.querySelectorAll('.vehicle_type')) {
+        const link = card.querySelector('a[href*="/vehicle/"]');
+        const id = link && Number(/\/vehicle\/\d+\/(\d+)\//.exec(link.getAttribute('href'))?.[1]);
+        if (!Number.isFinite(id)) continue;
         if (out.some((o) => o.id === id)) continue;
-        out.push({ id, name });
-    }
-    /* A page with one option per vehicle as a radio or a link rather than a
-     * select: read those the same way. */
-    if (!out.length) {
-        for (const el of doc.querySelectorAll('[vehicle_type_id], [data-vehicle-type-id]')) {
-            const id = Number(el.getAttribute('vehicle_type_id') || el.getAttribute('data-vehicle-type-id'));
-            const name = (el.getAttribute('title') || el.textContent || '').trim().slice(0, 60);
-            if (!Number.isFinite(id) || id <= 0) continue;
-            if (out.some((o) => o.id === id)) continue;
-            out.push({ id, name: name || null });
-        }
+
+        const pane = card.closest('[role="tabpanel"]');
+        const needs = [...card.querySelectorAll('.alert')]
+            .map((a) => a.textContent.trim())
+            .find((t) => /^required extension:/i.test(t));
+
+        out.push({
+            id,
+            name: (card.querySelector('h3')?.textContent || '').trim() || null,
+            longName: (card.querySelector('b')?.textContent || '').trim() || null,
+            category: pane ? (tabName.get(pane.id) || pane.id) : null,
+            requiredExtension: needs ? needs.replace(/^required extension:\s*/i, '') : null,
+        });
     }
     return out;
 }

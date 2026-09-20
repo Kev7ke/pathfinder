@@ -1,16 +1,278 @@
 {
-  "note": "MissionChief vehicle types, by the id the game uses in vehicle_type_id. Names come from the game's own vehicle list; capabilities are the plain attributes the game puts on a vehicle's checkbox in a mission window. Anything not seen from inside the game is absent rather than guessed.",
-  "source": "the player's own /api/vehicles and mission windows, via Diagnostics -> Copy the report",
-  "updated": "2026-09-19",
+  "note": "MissionChief vehicle types, by the id the game uses in vehicle_type_id. Names come from the game's own buy pages, which name every type it sells whether or not the player can afford one. Capabilities are the plain attributes the game puts on a vehicle's checkbox in a mission window, so a type only carries them once one has been seen in a selection table; a type with a name and no capabilities is named but not yet judged, and MissionMagician leaves such a vehicle alone rather than assuming it covers nothing. Nothing here is guessed.",
+  "source": "names: the game's own vehicle buy pages, via Diagnostics -> Vehicle types; capabilities: mission-window selection tables, via Diagnostics -> Copy the report",
+  "updated": "2026-09-20",
   "types": {
-    "3": { "name": "Battalion chief unit", "capabilities": ["elw"] },
-    "5": { "name": "ALS Ambulance", "capabilities": ["any_rtw"] },
-    "6": { "name": "Mobile air", "capabilities": ["gwa"] },
-    "7": { "name": "Water Tanker", "capabilities": ["gwl2wasser_only"] },
-    "10": { "name": "Patrol Car", "capabilities": ["fustw_or_police_motorcycle"] },
-    "13": { "name": "Quint", "capabilities": ["fire", "dlk"] },
-    "18": { "name": "Rescue Engine", "capabilities": ["fire", "rw"] },
-    "27": { "name": "BLS Ambulance", "capabilities": ["any_rtw"] },
-    "33": { "name": "Pumper Tanker", "capabilities": ["fire"] }
+    "0": {
+      "name": "Type 1 fire engine"
+    },
+    "1": {
+      "name": "Type 2 fire engine"
+    },
+    "2": {
+      "name": "Platform truck"
+    },
+    "3": {
+      "name": "Battalion chief unit",
+      "capabilities": [
+        "elw"
+      ]
+    },
+    "4": {
+      "name": "Heavy rescue vehicle"
+    },
+    "5": {
+      "name": "ALS Ambulance",
+      "capabilities": [
+        "any_rtw"
+      ]
+    },
+    "6": {
+      "name": "Mobile air",
+      "capabilities": [
+        "gwa"
+      ]
+    },
+    "7": {
+      "name": "Water Tanker",
+      "capabilities": [
+        "gwl2wasser_only"
+      ]
+    },
+    "8": {
+      "name": "Utility unit"
+    },
+    "9": {
+      "name": "HazMat"
+    },
+    "10": {
+      "name": "Patrol Car",
+      "capabilities": [
+        "fustw_or_police_motorcycle"
+      ]
+    },
+    "12": {
+      "name": "MCV",
+      "longName": "Mobile command vehicle"
+    },
+    "13": {
+      "name": "Quint",
+      "capabilities": [
+        "fire",
+        "dlk"
+      ],
+      "longName": "Quint Fire Truck"
+    },
+    "15": {
+      "name": "Fly-Car"
+    },
+    "17": {
+      "name": "Large ARFF Crash Tender",
+      "longName": "Large Aircraft Rescue and Firefighting Crash Tender"
+    },
+    "18": {
+      "name": "Rescue Engine",
+      "capabilities": [
+        "fire",
+        "rw"
+      ]
+    },
+    "20": {
+      "name": "Mass Casualty Unit"
+    },
+    "21": {
+      "name": "Heavy Rescue + Light Boat"
+    },
+    "22": {
+      "name": "Light Boat Trailer"
+    },
+    "27": {
+      "name": "BLS Ambulance",
+      "capabilities": [
+        "any_rtw"
+      ]
+    },
+    "28": {
+      "name": "EMS Rescue"
+    },
+    "29": {
+      "name": "EMS Chief"
+    },
+    "30": {
+      "name": "Type 3 engine"
+    },
+    "31": {
+      "name": "Type 5 engine"
+    },
+    "32": {
+      "name": "Type 7 engine"
+    },
+    "33": {
+      "name": "Pumper Tanker",
+      "capabilities": [
+        "fire"
+      ]
+    },
+    "34": {
+      "name": "Crew Carrier"
+    },
+    "38": {
+      "name": "Type 4 engine"
+    },
+    "39": {
+      "name": "Type 6 engine"
+    },
+    "40": {
+      "name": "Dozer Trailer"
+    },
+    "41": {
+      "name": "Crew cab semi"
+    },
+    "48": {
+      "name": "EMS Fire Engine/Ambulance"
+    },
+    "49": {
+      "name": "Tactical Ambulance"
+    },
+    "50": {
+      "name": "Hazmat Ambulance"
+    },
+    "59": {
+      "name": "EMS Operations Support"
+    },
+    "60": {
+      "name": "EMS Mobile Command Unit"
+    },
+    "61": {
+      "name": "ALS Rescue Ambulance"
+    },
+    "62": {
+      "name": "Fire Investigator Unit"
+    },
+    "63": {
+      "name": "Fire Prevention Unit"
+    },
+    "64": {
+      "name": "Foam Tender"
+    },
+    "65": {
+      "name": "Foam Trailer"
+    },
+    "66": {
+      "name": "Lifeguard Truck"
+    },
+    "67": {
+      "name": "Lifeguard Rescue"
+    },
+    "68": {
+      "name": "Lifeguard Supervisor"
+    },
+    "73": {
+      "name": "Small Coastal Boat Trailer"
+    },
+    "74": {
+      "name": "Wildland MCC",
+      "longName": "Wildland Mobile Command Center"
+    },
+    "77": {
+      "name": "Tanker Semi Truck Trailer"
+    },
+    "78": {
+      "name": "Tanker Trailer"
+    },
+    "79": {
+      "name": "Small ARFF Crash Tender",
+      "longName": "Small Aircraft Rescue and Firefighting Crash Tender"
+    },
+    "80": {
+      "name": "Medium ARFF Crash Tender",
+      "longName": "Medium Aircraft Rescue and Firefighting Crash Tender"
+    },
+    "91": {
+      "name": "Flood Equipment Trailer"
+    },
+    "92": {
+      "name": "Mobile Air Trailer"
+    },
+    "93": {
+      "name": "Light Tower Trailer"
+    },
+    "94": {
+      "name": "Energy Generator Trailer"
+    },
+    "95": {
+      "name": "Double Light Boat Trailer"
+    },
+    "96": {
+      "name": "Small Heavy Rescue Trailer"
+    },
+    "97": {
+      "name": "Large Heavy Rescue Trailer"
+    },
+    "98": {
+      "name": "Small HazMat Trailer"
+    },
+    "99": {
+      "name": "Large HazMat Trailer"
+    },
+    "100": {
+      "name": "Tiller Ladder Trailer"
+    },
+    "103": {
+      "name": "Fire Traffic Control Unit"
+    },
+    "104": {
+      "name": "Fire Traffic Blocker Unit"
+    },
+    "107": {
+      "name": "Fire Wrecker"
+    },
+    "109": {
+      "name": "CCTU",
+      "longName": "Critical Care Transport Unit"
+    },
+    "116": {
+      "name": "Small Fire Equipment Trailer"
+    },
+    "117": {
+      "name": "Large Fire Equipment Trailer"
+    },
+    "118": {
+      "name": "Semi Fire Equipment Trailer"
+    },
+    "126": {
+      "name": "Hooklift Truck"
+    },
+    "127": {
+      "name": "WTC",
+      "longName": "Water Tanker Container"
+    },
+    "128": {
+      "name": "FBPC",
+      "longName": "Fire Breath Protection Container"
+    },
+    "129": {
+      "name": "USARC",
+      "longName": "Urban Search and Rescue Container"
+    },
+    "130": {
+      "name": "HazMat"
+    },
+    "131": {
+      "name": "ICPC",
+      "longName": "Incident Command Post Container"
+    },
+    "132": {
+      "name": "CWFT",
+      "longName": "Combined Water and Foam Tanker"
+    },
+    "133": {
+      "name": "FWDC",
+      "longName": "Flood and Water Damage Container"
+    },
+    "134": {
+      "name": "FRC",
+      "longName": "Fire Rolling Container"
+    }
   }
 }
