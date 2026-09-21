@@ -1456,6 +1456,33 @@ assert.deepEqual(
 console.log('crew numbers      : saved as typed');
 await pg.click('#ymca-back');
 
+// ---- HighFive switches on and off beside the game's own Alliance Radio ----
+await pg.evaluate(() => {
+  const radio = document.createElement('div');
+  radio.className = 'flex-row';
+  radio.innerHTML = `<div class="flex-fixed-size">
+    <a id="alliance_radio_off" class="btn_alliance_radio btn btn-danger btn-xs pull-right"
+      href="#" style="display:none">Alliance Radio: Off</a>
+    <a id="alliance_radio_on" class="btn_alliance_radio btn btn-success btn-xs pull-right"
+      href="#">Alliance Radio: On</a></div>`;
+  document.body.append(radio);
+  window.YMCA.switchElement('highfive', false);
+  window.YMCA.switchElement('highfive', true);
+});
+await pg.waitForSelector('#ymca-hf-btn');
+const hfBtn = '.flex-fixed-size #ymca-hf-btn';
+assert.equal(await pg.locator(hfBtn).count(), 1, 'it lands beside the radio, not somewhere else');
+assert.equal((await pg.textContent(hfBtn)).trim(), 'HighFive: On');
+await pg.evaluate((sel) => document.querySelector(sel).click(), hfBtn);
+await pg.waitForTimeout(120);
+console.log('radio row button  :', (await pg.textContent(hfBtn)).trim());
+assert.equal((await pg.textContent(hfBtn)).trim(), 'HighFive: Off', 'and it toggles');
+assert.equal(await pg.evaluate(() =>
+  JSON.parse(localStorage.getItem('ymca-highfive-cfg')).advance), false,
+'it is the same setting the transport page carries, not a second one');
+await pg.evaluate((sel) => document.querySelector(sel).click(), hfBtn);
+await pg.waitForTimeout(120);
+
 // ---- EagleEye holds ShutEye, and the group switch carries it ----
 await pg.click('.ymca-tile[data-mod="elementfriend"]');
 await pg.waitForSelector('.ymca-tile.el[data-el="eagleeye"]');
@@ -1569,6 +1596,67 @@ await pg.waitForTimeout(150);
 console.log('patients back     :', JSON.stringify(await seen()));
 assert.deepEqual(await seen(), ['mission_bar_outer_506247649', 'mission_patients_506247649'],
   'what is put back comes back, and nothing else with it');
+
+// ---- water: best fit, and what is already carrying it counts ----
+// Arrival order sent eleven engines for what four could carry; biggest-first then sent the one
+// enormous tanker for a job a smaller one covers. Best fit is the smallest that finishes it,
+// and the biggest only while nothing on its own would.
+await mission.evaluate(() => {
+  document.getElementById('mission_vehicle_at_mission')?.remove();
+  document.getElementById('mission_vehicle_driving')?.remove();
+  document.getElementById('vehicle_show_table_body_all').innerHTML = '';
+  // Tanks the game states on each checkbox: two big, three middling, one small.
+  const tanks = [[301, 30000], [302, 12000], [303, 4000], [304, 4000], [305, 4000], [306, 500]];
+  for (const [id, water] of tanks) {
+    const tr = document.createElement('tr');
+    tr.className = 'vehicle_select_table_tr';
+    tr.setAttribute('vehicle_id', String(id));
+    tr.setAttribute('data-distance', '5');
+    tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox" value="${id}"
+      id="vehicle_checkbox_${id}" name="vehicle_ids[]" vehicle_type_id="33" fms="2"
+      fire="1" wasser_amount="${water}"></td>
+      <td id="vehicle_sort_${id}" timevalue="${300 + id}">5 min.</td>`;
+    document.getElementById('vehicle_show_table_body_all').append(tr);
+  }
+  window.__catalogue = [{
+    id: '311', name: 'Warehouse fire', average_credits: 9000,
+    requirements: { water_needed: 20000 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  localStorage.removeItem('ymca-missionmagician-tanks');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '311');
+});
+await mission.waitForTimeout(1200);
+const waterPicked = await mission.evaluate(() =>
+  [...document.querySelectorAll('.vehicle_checkbox')]
+    .filter((b) => b.checked).map((b) => Number(b.getAttribute('wasser_amount'))));
+const waterBtn = await mission.textContent('#ymca-mm-panel [data-do="select"]');
+await mission.click('#ymca-mm-panel [data-do="select"]');
+await mission.waitForTimeout(400);
+const took = await mission.evaluate(() => [...document.querySelectorAll('.vehicle_checkbox')]
+  .filter((b) => b.checked).map((b) => Number(b.getAttribute('wasser_amount'))));
+console.log('water picked      :', JSON.stringify(took), waterBtn.trim());
+assert.deepEqual(took.sort((a, b) => b - a), [12000, 4000, 4000],
+  '20,000 wanted: 12,000 + 4,000 + 4,000 lands on it exactly, and the 30,000 tanker '
+  + 'stays free for the next call');
+await mission.click('#ymca-mm-panel [data-do="clear"]');
+await mission.waitForTimeout(300);
+
+// And a tank already on its way counts. The type is learnt off the checkbox above, so the row
+// at the mission needs only its type id — which is all such a row ever carries.
+await mission.evaluate(() => {
+  const t = document.createElement('table');
+  t.id = 'mission_vehicle_driving';
+  t.innerHTML = '<tbody><tr id="vehicle_row_96"><td vehicle_type_id="33">driving</td></tr></tbody>';
+  document.getElementById('col_right').append(t);
+});
+await mission.waitForTimeout(1200);
+const withTank = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('water on the way  :', JSON.stringify(withTank.find((r) => /Water/.test(r[4]))));
+assert.equal(withTank.find((r) => /Water/.test(r[4]))?.[1], '500 gal.',
+  'the last tank seen for that type is what a row on its way is carrying');
+await mission.evaluate(() => document.getElementById('mission_vehicle_driving')?.remove());
 
 // ---- StationFascination filters by an attribute the game already wrote ----
 await pg.evaluate(() => {
@@ -1691,6 +1779,23 @@ assert.deepEqual(sortable, ['Free beds', 'Distance'],
 
 const order = () => pg.$$eval('#own-hospitals tbody tr', (rows) => rows
   .filter((r) => r.style.display !== 'none').map((r) => r.cells[0].textContent.trim()));
+
+// The game's own order puts your own hospitals above nearer ones, so the first transport page
+// ever opened sets the sort to the column that names itself a distance, with a ceiling of 50.
+const started = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-highfive-cfg')));
+console.log('first time        :', JSON.stringify({ sortBy: started.sortBy, max: started.max }));
+assert.equal(started.sortBy, 'Distance', 'the heading is what says which column is the distance');
+assert.equal(started.max, 50, 'and fifty of whatever it counts in, so nothing goes on a tour');
+assert.deepEqual(await order(),
+  ['St Anne', 'County', 'Mercy General', 'Riverside', 'Lakeview', 'Hillcrest'],
+  'nearest first, without anybody choosing it — and all six are inside fifty');
+await pg.fill('#hf-max', '15');
+await pg.waitForTimeout(200);
+assert.deepEqual(await order(), ['St Anne', 'County', 'Mercy General'],
+  'and the ceiling is what keeps an ambulance off a world tour');
+
+await pg.fill('#hf-max', '');
+await pg.waitForTimeout(200);
 await pg.selectOption('#hf-sort', 'Distance');
 await pg.waitForTimeout(150);
 console.log('sorted by distance:', JSON.stringify(await order()));

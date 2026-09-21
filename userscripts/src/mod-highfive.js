@@ -136,6 +136,10 @@ function hfCapturePage() {
                 rows: table ? table.querySelectorAll('tr').length : null,
                 tableId: hfShape(table?.id) || undefined,
                 tableClass: classOf(table) || undefined,
+                /* The headings, because they are what says which column is the
+                 * distance — a number cannot say that about itself. */
+                headings: [...(table?.querySelectorAll('thead th, thead td') || [])]
+                    .map((th) => (th.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40)),
                 rowAttributes: [...row.attributes].map((a) => a.name),
                 cells: [...(row.cells || [])].map((c) => ({
                     tag: c.tagName.toLowerCase(),
@@ -239,9 +243,17 @@ function hfPanel(el, ctx) {
       <label style="display:block;margin-top:6px;font-weight:400;cursor:pointer">
         <input type="checkbox" data-cfg="closeWhenDone"> Close the window when there is nothing
         left</label>
+      <label style="display:block;margin-top:10px">Wait before closing
+        <input type="range" data-wait min="0" max="2000" step="50"
+          value="${Number.isFinite(Number(hfCfg(ctx).closeAfter))
+        ? Number(hfCfg(ctx).closeAfter) : HF_CLOSE_DEFAULT}" style="vertical-align:middle;
+          width:200px;margin:0 8px">
+        <b data-wait-shows></b></label>
       <p class="ymca-dim" style="margin:6px 0 0;font-size:12px">The game works out which vehicle
         is next and links to it; this follows that link once you have picked. It never picks for
-        you and never repeats your click \u2014 assigning a hospital cannot be undone.</p>
+        you and never repeats your click \u2014 assigning a hospital cannot be undone. The wait
+        is only long enough to be sure nothing moved you on; if it closes too early, push it up
+        and tell me the number that worked.</p>
     </div>
 
     <div class="ymca-card">
@@ -306,6 +318,16 @@ function hfPanel(el, ctx) {
         ? `sortable by ${ctx.esc(last.sortableColumns.join(', '))}`
         : 'no column read as a number'}.`
         : 'No transport page seen yet. Open a vehicle that is transporting.';
+
+    const wait = el.querySelector('[data-wait]');
+    const shows = el.querySelector('[data-wait-shows]');
+    const sayWait = () => { shows.textContent = `${wait.value} ms`; };
+    sayWait();
+    wait.addEventListener('input', sayWait);
+    wait.addEventListener('change', () => {
+        ctx.store.write('cfg', { ...hfCfg(ctx), closeAfter: Number(wait.value) });
+        ctx.status(`Closing after ${wait.value} ms.`);
+    });
 
     el.querySelectorAll('[data-cfg]').forEach((box) => {
         box.checked = hfCfg(ctx)[box.dataset.cfg] !== false;
@@ -421,6 +443,19 @@ const hfRowsOf = (table) => [...table.querySelectorAll('tr')]
  * of its cells read as a number. That way a column this has never heard of
  * sorts just as well, and a game update that adds one needs no change here.
  */
+/**
+ * Which column is the distance, by the name the table gives it.
+ *
+ * A number cannot say whether it is kilometres or a price, so the heading is
+ * asked — the one place the page does say. The vocabulary is small and read
+ * off real tables, English and German both, because this game leaks German
+ * (`gefangener`, `gw_gefahrgut`). A heading that matches nothing is not a
+ * failure: the list keeps the game's own order and the panel says so, and the
+ * capture carries the headings so the next spelling can be added rather than
+ * guessed at.
+ */
+const HF_DISTANCE_WORDS = /distan|entfernung|abstand|\bkm\b|\bmiles?\b|\bmi\b/i;
+
 function hfColumns(table) {
     const rows = hfRowsOf(table);
     if (!rows.length) return [];
@@ -434,7 +469,11 @@ function hfColumns(table) {
         // All one value is a column nobody would sort by.
         if (new Set(values).size < 2) continue;
         const label = (heads[i]?.textContent || '').replace(/\s+/g, ' ').trim();
-        out.push({ index: i, label: label || `Column ${i + 1}` });
+        out.push({
+            index: i,
+            label: label || `Column ${i + 1}`,
+            distance: HF_DISTANCE_WORDS.test(label),
+        });
     }
     return out;
 }
@@ -523,8 +562,29 @@ function hfOnPickPage(ctx) {
     if (!link) return false;
 
     const next = document.querySelector(HF_NEXT);
-    const cfg = hfCfg(ctx);
     const columns = hfTables().flatMap(hfColumns);
+
+    /* NEAREST FIRST, AND FIFTY OF WHATEVER THAT COLUMN COUNTS IN.
+     *
+     * The game's own order puts your own hospitals above nearer ones, which is
+     * not an order anybody driving there would choose. So the first time a
+     * transport page is opened the sort is set to the distance column and a
+     * ceiling of fifty goes with it — sending an ambulance across the map is a
+     * mistake you only notice afterwards, and a default that cannot make it is
+     * worth more than one that can be changed.
+     *
+     * Only ever the first time: `sortBy` being undefined is what "nobody has
+     * chosen yet" looks like, and an empty string is a choice. */
+    const cfg = hfCfg(ctx);
+    if (cfg.sortBy === undefined) {
+        const nearest = columns.find((c) => c.distance);
+        cfg.sortBy = nearest ? nearest.label : '';
+        if (nearest && cfg.max === undefined) cfg.max = 50;
+        ctx.store.write('cfg', cfg);
+        ctx.log.info('first transport page', nearest
+            ? `sorted by ${nearest.label}, at most ${cfg.max}`
+            : 'no column in this table names itself a distance');
+    }
     const haveSections = !!(hfSectionRows('own-hospitals') || hfSectionRows('alliance-hospitals'));
     const total = document.querySelectorAll(HF_PICK_LINK).length;
 
@@ -679,7 +739,11 @@ function hfCloseWindow(ctx) {
     ctx.log.info('nothing left in status 5, pressed Escape');
 }
 
-const HF_CLOSE_AFTER = 1000;
+/* Half of what it was. It waits only to be sure nothing navigated us on, and
+ * every tenth of a second of that is one the player spends looking at a page
+ * they are done with. The slider in the settings is how the right number gets
+ * found; whatever comes back, a little is added back as a buffer. */
+const HF_CLOSE_DEFAULT = 500;
 
 function hfAfterPick(ctx) {
     if (!HF_PICKED.test(location.pathname)) return false;
@@ -699,7 +763,9 @@ function hfAfterPick(ctx) {
     if (!href) {
         ctx.log.info('picked, and this page names no next vehicle');
         if (hfCfg(ctx).closeWhenDone !== false) {
-            setTimeout(() => hfCloseWindow(ctx), HF_CLOSE_AFTER);
+            const wait = Number(hfCfg(ctx).closeAfter);
+            setTimeout(() => hfCloseWindow(ctx),
+                Number.isFinite(wait) && wait >= 0 ? wait : HF_CLOSE_DEFAULT);
         }
         return true;
     }
@@ -723,6 +789,46 @@ function hfFollowJump(ctx) {
     location.href = jump.href;
 }
 
+const HF_BUTTON_ID = 'ymca-hf-btn';
+
+/**
+ * On and off beside the game's own Alliance Radio.
+ *
+ * `#alliance_radio_on` sits in a `.flex-fixed-size` with its Off twin, and a
+ * switch for "does it move me on by itself" belongs next to the other switch
+ * about what happens without you. It is the same `advance` setting the panel
+ * on the transport page carries — one thing, two places to reach it.
+ */
+function hfPaintButton(ctx) {
+    const btn = document.getElementById(HF_BUTTON_ID);
+    if (!btn) return;
+    const on = hfCfg(ctx).advance !== false;
+    btn.className = `btn btn-xs pull-right ${on ? 'btn-success' : 'btn-danger'}`;
+    btn.textContent = `HighFive: ${on ? 'On' : 'Off'}`;
+}
+
+function hfMountButton(ctx) {
+    if (document.getElementById(HF_BUTTON_ID)) return true;
+    const radio = document.getElementById('alliance_radio_on')
+        || document.getElementById('alliance_radio_off');
+    if (!radio || !radio.parentElement) return false;
+
+    const btn = document.createElement('a');
+    btn.id = HF_BUTTON_ID;
+    btn.href = '#';
+    btn.setAttribute('role', 'button');
+    btn.title = 'Go straight to the next transport after you pick a destination';
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        ctx.store.write('cfg', { ...hfCfg(ctx), advance: hfCfg(ctx).advance === false });
+        hfPaintButton(ctx);
+        ctx.log.info(`advance ${hfCfg(ctx).advance === false ? 'off' : 'on'} from the radio row`);
+    });
+    radio.parentElement.append(btn);
+    hfPaintButton(ctx);
+    return true;
+}
+
 YMCA.inject('highfive', (ctx) => {
     /* The page a pick lands on is the first thing asked about, because it is
      * the one that proves a pick happened. */
@@ -732,8 +838,12 @@ YMCA.inject('highfive', (ctx) => {
      * player can switch HighFive on while looking at the map and open a
      * transport a moment later, and marking it finished here would mean the
      * bar never appeared until the next reload. */
-    if (!/^\/vehicles\/\d+/.test(location.pathname)) return false;
-    return hfOnPickPage(ctx);
+    if (/^\/vehicles\/\d+/.test(location.pathname)) return hfOnPickPage(ctx);
+    /* Everywhere else the switch beside the radio is placed, but this is never
+     * finished here: a page that is not a transport page is not a job done, and
+     * the map can still become one without a fresh document. */
+    hfMountButton(ctx);
+    return false;
 });
 
 YMCA.register({
@@ -752,6 +862,11 @@ YMCA.register({
     /* On. It stopped being a promise the moment the game's own
      * #next-vehicle-fms-5 turned out to exist. */
     defaultOn: true,
+
+    onSwitch(on, ctx) {
+        if (!on) document.getElementById(HF_BUTTON_ID)?.remove();
+        else hfMountButton(ctx);
+    },
 
     async mount(el, ctx) { hfPanel(el, ctx); },
     settings(el, ctx) { hfPanel(el, ctx); },

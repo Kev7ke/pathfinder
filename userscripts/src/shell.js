@@ -602,7 +602,12 @@ YMCA.inject = function inject(moduleId, fn) {
 
 YMCA.startInjection = (moduleId) => {
     const held = injections.get(moduleId);
-    if (held && !held.done) runInjection(moduleId, held.fn);
+    if (!held) return;
+    /* Switched off and on again means "do it again", even for an injection that
+     * finished: what it placed was taken away when it went off, and refusing to
+     * re-run left the switch looking dead on the very page it was flicked. */
+    held.done = false;
+    runInjection(moduleId, held.fn);
 };
 
 /**

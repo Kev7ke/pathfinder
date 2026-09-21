@@ -219,6 +219,21 @@ of its cells read as a number and they are not all the same. A column nobody has
 heard of sorts just as well, and a game update that adds one needs no change
 here.
 
+**Nearest first, and fifty of whatever that column counts in.** The game's own
+order puts your own hospitals above nearer ones, which is not an order anybody
+driving there would choose. So the first time a transport page is opened the
+sort is set to the column that **names itself** a distance and a ceiling of
+fifty goes with it: sending an ambulance across the map is a mistake you only
+notice afterwards, and a default that cannot make it is worth more than one that
+can be changed. Only ever the first time — `sortBy` being undefined is what
+"nobody has chosen yet" looks like, and an empty string is a choice.
+
+**A number cannot say whether it is kilometres or a price, so the heading is
+asked.** The distance vocabulary is small, read off real tables, and English and
+German both, because this game leaks German. A heading that matches nothing is
+not a failure: the list keeps the game's own order, the panel says so, and the
+capture carries the headings so the next spelling is added rather than guessed.
+
 **The range is a ceiling on the column being sorted by**, not a distance this
 knows the units of. Sort by distance and "at most 20" is twenty of whatever that
 column counts in; sort by price and it is a price. The page names the column and
@@ -506,6 +521,11 @@ itself. A state that is not on screen is simply not sampled this time and what
 was learnt before is remembered, so after a few page loads all three are known
 and a game update repaints them without anybody editing a hex.
 
+**A switch that was flicked off and on again means "do it again".** The shell
+used to refuse to re-run a finished injection, which left the switch looking
+dead on the very page it was flicked: what the module had placed was taken away
+when it went off, and nothing put it back. Switching on clears `done` first.
+
 **Two switches mean two different things.** ElementFriend decides whether
 ShutEye is part of this install; the button in `#missions-panel-main` — the row
 holding the game's own Emergency and Patient transport filters — decides whether
@@ -612,19 +632,48 @@ sentence under the table instead, in the game's own English — which
 order. That sentence earns its place: it is why a call can sit unfinished with
 every row green.
 
-**Water is filled by the tank, not by the clock.** Adding vehicles in arrival
-order sends whatever is close, and what is close is engines: asked for 20,000
-gallons the panel picked eleven when four were wanted, because each moved the
-bar a little. A Quint carries a few hundred gallons, a Water Tanker several
-thousand. Biggest tank first, ties broken by travel time.
+**Water: the biggest tank that still fits, and only then the smallest that
+finishes it.** Two wrong answers got here. Adding vehicles in arrival order
+sends whatever is close, and what is close is engines: asked for 20,000 gallons
+the panel picked eleven when four were wanted. Biggest-first fixed that and
+overshot the other way — a fire wanting 20,000 took the one tanker carrying
+30,000, spending a vehicle half again over and leaving it out of reach of the
+next call. **The question is how little is wasted, not how few are sent.** So
+the biggest tank that fits inside what is left, over and over: 12,000 + 4,000 +
+4,000 lands on 20,000 exactly. Only when nothing fits any more does the smallest
+tank that would finish it go, because then some overshoot is the whole choice.
+Big tanks still go first while they fit, so eleven engines are only reached when
+nothing bigger is left — which is exactly when they are the right answer. Ties
+broken by travel time.
+
+**A tank already on its way counted for nothing.** The amount lines shipped with
+`onScene: 0` because the tally beside them counts vehicles by flag and a tank is
+not a flag — so a call with two Water Tankers and eight Pumper Tankers already
+driving to it was asked for the full 20,000 again, and the panel sent the fleet
+twice. A row at the mission carries a type id and nothing else, so **the tank is
+learnt off the selection table's checkboxes** (`wasser_amount`,
+`foam_amount_display`) exactly as the flags are, and looked up by type. A zero is
+stored as a zero — knowing a patrol car carries nothing is an answer; not knowing
+what a tanker carries is not, and the panel says which of the two it is.
 
 **The flag vocabulary is everything the game has ever flagged**, not only what
 is in the table now. A HazMat out of range today still taught `hazmat` the day
 it was in a selection list, and `hazmat_vehicles` is no less real a requirement
 for the vehicle being busy.
 
-**D ticks.** The button carries the key so it can be found, and the handler
-stands aside for anything being typed into and for any modifier chord.
+**The keys are the player's.** `d` was written into the handler, which is fine
+until somebody's layout, their browser or the game itself already wants it. Tick
+and untick are one letter each, set in ElementFriend, **and empty is a real
+answer** — a key nobody wants is one that gets in the way of something else.
+Letters only: a digit is one of the game's own dispatch orders and a chord is a
+browser shortcut. They are read on every press rather than captured when the
+panel drew, so a change takes effect without reopening the mission, and the
+button carries whichever letter is set so it can still be found.
+
+**The switches stack, the buttons keep the last line.** They were one row until
+a fourth switch pushed the buttons off the end — and the one thing that must
+never move is the button the cursor is already on. Switches wrap on the left,
+buttons sit hard right on a line of their own.
 
 **One height, whatever the mission asks for.** A panel that grows with the
 requirement count moves the buttons under the cursor between one mission and the

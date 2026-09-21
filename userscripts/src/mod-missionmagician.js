@@ -421,6 +421,51 @@ function mmKnownTypes() {
     return known;
 }
 
+const MM_TANKS_KEY = 'ymca-missionmagician-tanks';
+
+/**
+ * How much a type carries, learnt the same way its flags are.
+ *
+ * WATER ALREADY ON THE WAY COUNTED FOR NOTHING. The amount lines were written
+ * with `onScene: 0` because the tally beside them counts vehicles by flag and
+ * a tank is not a flag — so a call with two Water Tankers and eight Pumper
+ * Tankers already driving to it was asked for the full 20,000 gallons again,
+ * and the panel sent the fleet twice.
+ *
+ * A row at the mission carries a type id and nothing else, so what it holds
+ * has to be looked up — and the selection table states it on every checkbox as
+ * `wasser_amount` and `foam_amount_display`. So the tank is read off the
+ * player's own game exactly as the flags are, and a type nobody has seen in a
+ * selection list yet stays unknown rather than being counted as empty.
+ *
+ * A zero is stored as a zero. Knowing a patrol car carries nothing is an
+ * answer; not knowing what a tanker carries is not, and the panel says which
+ * of the two it is.
+ */
+function mmKnownTanks() {
+    try {
+        return JSON.parse(localStorage.getItem(MM_TANKS_KEY)) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function mmLearnTanks(vehicles) {
+    const tanks = mmKnownTanks();
+    let changed = false;
+    for (const v of vehicles) {
+        if (!v.typeId) continue;
+        const had = tanks[v.typeId];
+        if (had && had.water === v.water && had.foam === v.foam) continue;
+        tanks[v.typeId] = { water: v.water || 0, foam: v.foam || 0 };
+        changed = true;
+    }
+    if (changed) {
+        try { localStorage.setItem(MM_TANKS_KEY, JSON.stringify(tanks)); } catch (e) { /* private */ }
+    }
+    return tanks;
+}
+
 function mmLearnTypes(vehicles) {
     let learnt = {};
     try {
@@ -874,6 +919,11 @@ async function mmPlan(page, ctx, cfg) {
     const vehicles = free.concat(busy);
     const untimed = vehicles.filter((v) => v.seconds === null).length;
     const scene = mmOnScene(mmLearnTypes(vehicles), cfg.countDriving !== false);
+    const tanks = mmLearnTanks(vehicles);
+    /* What is already at the mission or on its way is carrying water too. */
+    const sceneCarries = (which) => scene.typeIds
+        .reduce((n, id) => n + (tanks[id] ? tanks[id][which] : 0), 0);
+    scene.unknownTank = scene.typeIds.filter((id) => !tanks[id]).length;
     const patients = mmPatients(record);
 
     const picked = new Map();
@@ -948,26 +998,49 @@ async function mmPlan(page, ctx, cfg) {
         for (const [key, rule] of Object.entries(MM_AMOUNTS)) {
             const wanted = requirements[key];
             if (!wanted) continue;
-            const carried = (v) => (key === 'water_needed' ? v.water : v.foam);
-            let have = [...picked.values()].reduce((n, v) => n + carried(v), 0);
-            /* Biggest tank first, and only then the nearest.
+            const which = key === 'water_needed' ? 'water' : 'foam';
+            const carried = (v) => v[which];
+            const onScene = sceneCarries(which);
+            let have = onScene + [...picked.values()].reduce((n, v) => n + carried(v), 0);
+            /* THE BIGGEST TANK THAT STILL FITS, AND ONLY THEN THE SMALLEST THAT
+             * FINISHES IT.
              *
-             * Filling in arrival order sends whatever happens to be close, and
-             * what is close is engines: a Quint carries a few hundred gallons,
-             * a Water Tanker several thousand. Asked for 20,000 gallons the
-             * panel picked eleven engines — four were wanted — because each one
-             * moved the bar a little. One tanker is worth ten of them, so the
-             * bar is filled by the tank and ties are broken by the clock. */
-            const byTank = vehicles.filter((v) => carried(v) && !picked.has(v.id))
-                .sort((a, b) => carried(b) - carried(a) || mmOrder(a, b));
-            for (const v of byTank) {
-                if (have >= wanted) break;
-                picked.set(v.id, v);
-                have += carried(v);
+             * Two wrong answers got here. Filling in arrival order sent
+             * whatever happened to be close, and what is close is engines:
+             * asked for 20,000 gallons the panel picked eleven when four were
+             * wanted. Biggest-first fixed that and overshot the other way — a
+             * fire wanting 20,000 took the one tanker that carries 30,000,
+             * spending a vehicle half again over and leaving it out of reach of
+             * the next call.
+             *
+             * What both missed is that the question is how little is wasted,
+             * not how few are sent. So: the biggest tank that still fits inside
+             * what is left, over and over, which lands as close to the figure
+             * as the fleet allows — 12,000 then 4,000 then 4,000 for a 20,000
+             * fire rather than one 30,000 tanker. Only when nothing fits any
+             * more does the smallest tank that would finish it go, because at
+             * that point some overshoot is the whole choice.
+             *
+             * Big tanks still go first while they fit, so the eleven engines
+             * never come back: they are only reached when nothing bigger is
+             * left, which is exactly when they are the right answer. Ties are
+             * broken by the clock, as ever. */
+            const bySmallest = (a, b) => carried(a) - carried(b) || mmOrder(a, b);
+            const byBiggest = (a, b) => carried(b) - carried(a) || mmOrder(a, b);
+            const pool = vehicles.filter((v) => carried(v) && !picked.has(v.id));
+            while (have < wanted && pool.length) {
+                const remaining = wanted - have;
+                const fits = pool.filter((v) => carried(v) <= remaining);
+                const next = fits.length
+                    ? fits.sort(byBiggest)[0]
+                    : pool.slice().sort(bySmallest)[0];
+                pool.splice(pool.indexOf(next), 1);
+                picked.set(next.id, next);
+                have += carried(next);
             }
             lines.push({
                 key, label: rule.label, icon: rule.icon, wanted,
-                found: 0, unit: rule.unit, carries: key, onScene: 0,
+                found: onScene, unit: rule.unit, carries: key, onScene,
             });
         }
 
@@ -1073,6 +1146,34 @@ function mmCrewTraining(record) {
  * hold the HazMat training is still not something any page says, so it is
  * still not claimed. The sentence beside it stays the game's own. */
 const MM_CREW_KEY = 'ymca-missionmagician-crew';
+const MM_KEYS_KEY = 'ymca-missionmagician-keys';
+
+/**
+ * The keys that tick and untick.
+ *
+ * `d` was written into the handler, which is fine until somebody's keyboard
+ * layout, their browser or the game itself already wants it. They are one
+ * letter each, set in ElementFriend, and **empty is a real answer**: a player
+ * who does not want a hotkey at all should not have to find one nobody uses.
+ *
+ * Letters only. A digit or a punctuation mark is something the game's own
+ * dispatch orders are on, and a modifier chord is a browser shortcut.
+ */
+function mmKeys() {
+    let held = {};
+    try {
+        held = JSON.parse(localStorage.getItem(MM_KEYS_KEY)) || {};
+    } catch (e) { /* nothing set */ }
+    const letter = (v, fallback) => {
+        if (typeof v !== 'string') return fallback;
+        const one = v.trim().slice(0, 1).toLowerCase();
+        return /^[a-z]$/.test(one) ? one : '';
+    };
+    return {
+        tick: letter(held.tick, 'd'),
+        clear: letter(held.clear, ''),
+    };
+}
 
 function mmCrewOnBoard() {
     try {
@@ -1151,7 +1252,22 @@ async function mmSettings(el, ctx) {
         </tr>`;
         }).join('');
 
+    const keys = mmKeys();
     el.innerHTML = `
+    <div class="ymca-card">
+      <b>Keys</b>
+      <p class="ymca-dim" style="margin:4px 0 9px;font-size:12px">One letter each, and
+        <b>empty is a real answer</b> &mdash; a key nobody wants is a key that gets in the way of
+        something the game or the browser already uses. Letters only; a chord is a browser
+        shortcut and a digit is one of the game&rsquo;s own dispatch orders.</p>
+      <div class="ymca-row">
+        <label>Tick the plan<br><input maxlength="1" size="2" data-key="tick"
+          value="${ctx.esc(keys.tick)}" placeholder="\u2014" style="width:52px"></label>
+        <label>Untick everything<br><input maxlength="1" size="2" data-key="clear"
+          value="${ctx.esc(keys.clear)}" placeholder="\u2014" style="width:52px"></label>
+      </div>
+    </div>
+
     <div class="ymca-note">A mission can ask for trained crew &mdash; eight with HazMat, say
       &mdash; and they ride on whatever you send. Nothing in the game says how many people are
       on a vehicle: <b>Max. Crew</b> on the buy page is the cap you set, not the count. So this
@@ -1171,6 +1287,16 @@ async function mmSettings(el, ctx) {
         : '<div class="ymca-note warn">No vehicles yet, so there is nothing to state.</div>'}`;
 
     el.addEventListener('input', (e) => {
+        const key = e.target.closest('[data-key]');
+        if (key) {
+            const one = key.value.trim().slice(0, 1).toLowerCase();
+            key.value = /^[a-z]$/.test(one) ? one : '';
+            const held = mmKeys();
+            held[key.dataset.key] = key.value;
+            ctx.store.write('keys', held);
+            ctx.status(key.value ? `${key.dataset.key} is ${key.value}.` : 'No key for that.');
+            return;
+        }
         const box = e.target.closest('[data-crew]');
         if (!box) return;
         const held = mmCrewOnBoard();
@@ -1608,6 +1734,10 @@ const MM_SWITCH_CSS = `
   mask-image:linear-gradient(to bottom,#000 100%,#000)}
 
 /* The glyphs sit on the text baseline and take its colour. */
+#${MM_PANEL_ID} .mm-switches{display:flex;flex-wrap:wrap;align-items:center;gap:7px 14px;
+  margin-bottom:8px}
+#${MM_PANEL_ID} .mm-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:7px;
+  justify-content:flex-end}
 #${MM_PANEL_ID} .mm-key{display:inline-block;margin-left:5px;padding:0 5px;border-radius:3px;
   font:600 11px/17px "Helvetica Neue",Helvetica,Arial;text-transform:uppercase;
   background:rgba(255,255,255,.22);box-shadow:inset 0 -1px 0 rgba(0,0,0,.25)}
@@ -1706,18 +1836,31 @@ function mmMountPanel(ctx) {
         if (done) done.hidden = false;
     };
 
-    /* D ticks. The game's own dispatch orders are on single letters too, so this
-     * stays out of the way of anything being typed and of any chord — a D with
-     * a modifier is a browser shortcut, not a dispatch. */
+    /* The keys are read on every press rather than captured here, so changing
+     * one in ElementFriend takes effect without reopening the mission. The
+     * game's own dispatch orders are on single letters too, so this stays out
+     * of the way of anything being typed and of any chord — a letter with a
+     * modifier is a browser shortcut, not a dispatch. */
     document.addEventListener('keydown', (e) => {
-        if (e.key !== 'd' && e.key !== 'D') return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const pressed = (e.key || '').toLowerCase();
+        if (!/^[a-z]$/.test(pressed)) return;
+        const keys = mmKeys();
+        const what = pressed === keys.tick ? 'tick' : pressed === keys.clear ? 'clear' : null;
+        if (!what) return;
         const on = e.target;
         if (on && (on.isContentEditable || /^(input|textarea|select)$/i.test(on.tagName))) return;
         if (!document.getElementById(MM_PANEL_ID)) return;
         e.preventDefault();
-        tick();
-        ctx.status?.('Ticked.');
+        if (what === 'tick') {
+            tick();
+            ctx.status?.('Ticked.');
+            return;
+        }
+        mmClear();
+        const done = document.getElementById('mm-panel-done');
+        if (done) done.hidden = true;
+        ctx.status?.('Unticked.');
     });
 
     panel.addEventListener('click', (e) => {
@@ -2022,7 +2165,12 @@ async function mmCopyState(ctx, plan, panel) {
             unknownType: plan.scene.unknown - plan.scene.unreadable,
             rowSaidNoType: plan.scene.unreadable,
             typeIds: plan.scene.typeIds,
+            tankNotKnown: plan.scene.unknownTank,
         } : null,
+        /* What each type carries, read off the selection table's checkboxes.
+         * A water line that asks for the whole amount again is answered by
+         * whichever of these is missing. */
+        tanksByType: mmKnownTanks(),
         vehiclesInRange: page.rows.length,
         followUpTabPresent: page.followUpOffered,
         vehicleTypesLearnt: Object.keys(mmKnownTypes()).length,
@@ -2080,6 +2228,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
     </div>`;
     }
 
+    const keys = mmKeys();
     const rows = plan.lines.map((l) => {
         // mmRecount fills this and keeps it filled, so it is never rendered stale.
         const cell = l.unmatched
@@ -2088,7 +2237,8 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         const num = 'text-right" style="width:1%;white-space:nowrap';
         return `<tr data-row="${ctx.esc(l.key)}">
       <td class="${num}">${ctx.fmt(l.wanted)}${l.unit ? ` ${l.unit}` : ''}</td>
-      <td class="${num}">${l.onScene || '&ndash;'}</td>
+      <td class="${num}">${l.onScene
+        ? `${ctx.fmt(l.onScene)}${l.unit ? ` ${l.unit}` : ''}` : '&ndash;'}</td>
       <td class="${num}" data-ticked="${ctx.esc(l.key)}">0</td>
       <td class="${num};padding-right:10px"><b>${cell}</b></td>
       <td>${ctx.esc(l.label)}${mmIcon(l.icon)}${
@@ -2133,6 +2283,13 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         The catalogue says this mission can produce up to <b>${plan.patients.count}</b> patients.
         This window has not said how many it has, so no ambulance is picked for them.</p>` : ''}
 
+      ${plan.scene.unknownTank && plan.lines.some((l) => l.unit)
+        ? `<p class="text-muted" style="margin:0 0 8px">
+        ${plan.scene.unknownTank} already there or on the way ${plan.scene.unknownTank > 1
+            ? 'carry tanks' : 'carries a tank'} this has not seen in a selection list yet, so
+        whatever ${plan.scene.unknownTank > 1 ? 'they are' : 'it is'} carrying is not counted
+        below.</p>` : ''}
+
       ${plan.scene.total || plan.scene.drivingSeen ? `<p class="text-muted" style="margin:0 0 8px">
         ${[plan.scene.atCount ? `<b>${plan.scene.atCount}</b> at the mission` : '',
         plan.scene.drivingSeen ? `<b>${plan.scene.drivingSeen}</b> on the way${
@@ -2148,20 +2305,28 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         <button type="button" class="btn btn-xs btn-default" data-do="type">Copy this mission
           type</button> to have it added.</div>` : ''}
 
-      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+      <!-- The switches stack on the left and the buttons keep the last line to
+           themselves, hard right. They were one row: a fourth switch pushed the
+           buttons off the end, and the one thing that must never move is the
+           button the cursor is already on. -->
+      <div class="mm-switches">
         ${mmSwitch('fastestFirst', 'Fastest first', cfg.fastestFirst !== false)}
         ${mmSwitch('ambulancePerPatient', 'Ambulance per patient', cfg.ambulancePerPatient !== false)}
         ${mmSwitch('countDriving', 'Count what is on the way', cfg.countDriving !== false)}
-        <span style="display:inline-flex;align-items:center;gap:4px">
-          ${mmSwitch('followUp', `Follow-up${plan.followUp ? ` (${plan.followUp})` : ''}`,
+        ${mmSwitch('followUp', `Follow-up${plan.followUp ? ` (${plan.followUp})` : ''}`,
         cfg.followUp === true, !plan.followUpOffered)}
-        </span>
-        <span style="flex:1 1 auto"></span>
+      </div>
+      <div class="mm-buttons">
         ${plan.surplus.length ? `<button type="button" class="btn btn-warning btn-sm"
           data-do="cancel">Cancel ${plan.surplus.length} unused</button>` : ''}
         <button type="button" class="btn btn-success btn-sm" data-do="select"
-          title="or press D">Tick ${plan.pick.length} vehicles <kbd class="mm-key">d</kbd></button>
-        <button type="button" class="btn btn-default btn-sm" data-do="clear">Untick everything</button>
+          ${keys.tick ? `title="or press ${ctx.esc(keys.tick.toUpperCase())}"` : ''}
+          >Tick ${plan.pick.length} vehicles${keys.tick
+        ? ` <kbd class="mm-key">${ctx.esc(keys.tick)}</kbd>` : ''}</button>
+        <button type="button" class="btn btn-default btn-sm" data-do="clear"
+          ${keys.clear ? `title="or press ${ctx.esc(keys.clear.toUpperCase())}"` : ''}
+          >Untick everything${keys.clear
+        ? ` <kbd class="mm-key">${ctx.esc(keys.clear)}</kbd>` : ''}</button>
         <button type="button" class="btn btn-default btn-sm" data-do="report"
           title="copy what this panel is seeing">&#8942;</button>
       </div>
