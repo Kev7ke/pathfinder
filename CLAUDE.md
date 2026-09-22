@@ -659,6 +659,24 @@ taken off whoever is there and whoever is driving, so nothing is subtracted
 twice. A type whose crew has never been stated carries **nobody** rather than a
 guess, and the panel says how many of those it picked.
 
+**A training is not seats, and filling it with seats sent an ambulance to a
+HazMat call.** `Missing Personnel` on such a call is a shortfall of people who
+hold that training, and the mission names which one —
+`personnel_educations: { gw_gefahrgut: 1 }`. Any vehicle with a seat satisfies
+a count of seats, which is exactly what went wrong. So where the mission names
+a training, **only the vehicles the game flags for it are candidates**, and the
+flag is derived from the key against the vocabulary the page already carries:
+`gw_gefahrgut` finds `gwgefahrgut`, because **the game spells a capability with
+and without its underscores** and the derivation reads both now. Still nothing
+invented — the flag has to be one some vehicle in that table actually carries.
+
+**What is still not claimed is that the people aboard a HazMat hold the HazMat
+training.** No page says that. The claim is the other way round: a vehicle the
+game does not flag for the training cannot be the one that brings it, so it is
+not picked. Where nothing in range carries the flag, **nothing is picked at
+all** and the panel says so — sending the wrong vehicle is worse than sending
+none.
+
 **`average_credits` is the game's own figure**, in the catalogue the
 `#mission_help` link points at, so the panel can show what a call is worth
 without measuring anything.

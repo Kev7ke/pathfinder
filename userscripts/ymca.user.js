@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.46
+// @version      0.0.47
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.46',
+    version: '0.0.47',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2493,7 +2493,14 @@ function mmDeriveRule(key, vocab) {
         return null;
     }
 
-    const flag = [key, trim(key), shorten(key), shorten(trim(key))].find(has);
+    /* AND WITHOUT ITS UNDERSCORES. The game spells the same capability two ways
+     * and says so itself: the mission asks for `gw_gefahrgut` and the vehicle
+     * wears `gwgefahrgut`. That is the same vocabulary read a little wider, not
+     * a name invented — the flag still has to be one some vehicle in the table
+     * actually carries. */
+    const squash = (n) => n.replace(/_/g, '');
+    const flag = [key, trim(key), shorten(key), shorten(trim(key)),
+        squash(key), squash(shorten(key))].find(has);
     return flag ? { flag, derived: flag } : null;
 }
 
@@ -3177,6 +3184,7 @@ async function mmPlan(page, ctx, cfg) {
     const picked = new Map();
     const lines = [];
     let plannedCrewUnknown = 0;
+    let plannedCrewUntrained = false;
 
     if (requirements) {
         /* A requirement whose value is not a number is not a count of vehicles.
@@ -3335,11 +3343,41 @@ async function mmPlan(page, ctx, cfg) {
         const personnel = mmPersonnelWanted();
         if (personnel) {
             const crew = scene.crew || mmKnownCrew();
-            const carried = (v) => crew[v.typeId] || 0;
+            /* A TRAINING IS NOT SEATS, and filling it with seats was wrong.
+             *
+             * `Missing Personnel` on a HazMat call is a shortfall of people who
+             * hold that training, and the mission names which one:
+             * `personnel_educations: { gw_gefahrgut: 1 }`. Any vehicle with a
+             * seat in it will satisfy a count of seats, which is how an
+             * ambulance got sent to a call that wanted a HazMat crew.
+             *
+             * So where the mission names a training, only the vehicles the game
+             * flags for that training are candidates. The flag is derived from
+             * the key against the vocabulary the page itself carries —
+             * `gw_gefahrgut` finds `gwgefahrgut` — so nothing is invented.
+             *
+             * WHAT IS STILL NOT CLAIMED is that the people aboard a HazMat hold
+             * the HazMat training. No page says that. What is claimed is the
+             * other way round: a vehicle the game does not flag for the
+             * training cannot be the one that brings it, so it is not picked.
+             * Where nothing in range carries the flag, **nothing is picked** and
+             * the panel says so — sending the wrong vehicle is worse than
+             * sending none. */
+            const trainings = Object.keys(record?.requirements?.personnel_educations || {});
+            let trained = null;
+            for (const key of trainings) {
+                const found = mmRuleFor(key, vocab);
+                if (found) { trained = found.rule; break; }
+            }
+            const fits = (v) => !trained || mmMeets(v, trained);
+            const carried = (v) => (fits(v) ? crew[v.typeId] || 0 : 0);
             let have = [...picked.values()].reduce((n, v) => n + carried(v), 0);
             const bySmallest = (a, b) => carried(a) - carried(b) || mmOrder(a, b);
             const byBiggest = (a, b) => carried(b) - carried(a) || mmOrder(a, b);
             const pool = vehicles.filter((v) => carried(v) && !picked.has(v.id));
+            /* Nothing in range that could bring the training. Said plainly,
+             * rather than filled with whatever had a seat. */
+            plannedCrewUntrained = !!trained && !pool.length && have < personnel.wanted;
             while (have < personnel.wanted && pool.length) {
                 const left = personnel.wanted - have;
                 const fits = pool.filter((v) => carried(v) <= left);
@@ -3350,9 +3388,10 @@ async function mmPlan(page, ctx, cfg) {
                 picked.set(next.id, next);
                 have += carried(next);
             }
+            const named = (mmCrewTraining(record) || [])[0];
             lines.push({
                 key: 'personnel',
-                label: `Crew \u2014 ${personnel.label}`,
+                label: `Crew \u2014 ${trained && named ? named.label : personnel.label}`,
                 icon: 'star',
                 wanted: personnel.wanted,
                 found: 0,
@@ -3372,6 +3411,7 @@ async function mmPlan(page, ctx, cfg) {
 
     return {
         crewUnknown: plannedCrewUnknown,
+        crewUntrained: plannedCrewUntrained,
         name,
         requirements,
         /* Training the crew has to bring, in the game's own English: the
@@ -4734,6 +4774,10 @@ function mmGamePanelHtml(plan, cfg, ctx) {
             ? 'carry tanks' : 'carries a tank'} this has not seen in a selection list yet, so
         whatever ${plan.scene.unknownTank > 1 ? 'they are' : 'it is'} carrying is not counted
         below.</p>` : ''}
+
+      ${plan.crewUntrained ? `<p class="text-muted" style="margin:0 0 8px">
+        Nothing in range carries the training this call is short of, so nothing is picked for
+        it — a vehicle the game does not flag for it cannot be the one that brings it.</p>` : ''}
 
       ${plan.crewUnknown ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.crewUnknown} of the vehicles picked ${plan.crewUnknown > 1 ? 'have' : 'has'} never

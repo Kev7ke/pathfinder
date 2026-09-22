@@ -1414,6 +1414,64 @@ await mission.evaluate(() => {
   document.getElementById('mission_vehicle_driving')?.remove();
 });
 
+// ---- a training is not seats ----
+// `Missing Personnel` on a HazMat call is a shortfall of people holding that training, and the
+// mission names which one. Any vehicle with a seat satisfies a count of seats, which is how an
+// ambulance got sent to a call that wanted HazMat crew. Only what the game flags for the
+// training is a candidate — `gw_gefahrgut` in the requirement, `gwgefahrgut` on the vehicle.
+await mission.evaluate(() => {
+  // Crew measured off the game's own column for both types.
+  localStorage.setItem('ymca-missionmagician-crew-seen', JSON.stringify({ 5: 3, 9: 3 }));
+  const short = document.createElement('div');
+  short.id = 'ymca-test-personnel';
+  short.setAttribute('data-requirement-type', 'personnel');
+  short.innerHTML = '<b>Missing Personnel:</b> 2 HazMat';
+  document.body.append(short);
+  window.__catalogue = [{
+    id: '1202', name: 'Chemical', requirements: { personnel_educations: { gw_gefahrgut: 2 } },
+    additional: { personnel_educations: { HazMat: 2 } },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1202');
+  document.getElementById('vehicle_show_table_body_all').innerHTML = `
+    <tr class="vehicle_select_table_tr" vehicle_id="501" data-distance="1"><td>
+      <input type="checkbox" class="vehicle_checkbox" value="501" id="vehicle_checkbox_501"
+      name="vehicle_ids[]" vehicle_type_id="5" any_rtw="1" rtw="1" fms="2"></td>
+      <td id="vehicle_sort_501" timevalue="10">x</td></tr>
+    <tr class="vehicle_select_table_tr" vehicle_id="502" data-distance="9"><td>
+      <input type="checkbox" class="vehicle_checkbox" value="502" id="vehicle_checkbox_502"
+      name="vehicle_ids[]" vehicle_type_id="9" gwgefahrgut="1" gw_gefahrgut_only="1" fms="2"></td>
+      <td id="vehicle_sort_502" timevalue="90">x</td></tr>`;
+});
+await mission.waitForTimeout(1300);
+await mission.click('#ymca-mm-panel [data-do="select"]');
+await mission.waitForTimeout(400);
+const forTraining = await mission.$$eval('.vehicle_checkbox:checked', (bs) =>
+  bs.map((b) => b.getAttribute('vehicle_type_id')));
+console.log('trained crew      :', JSON.stringify(forTraining), '(9 is the HazMat, 5 the ambulance)');
+assert.deepEqual(forTraining, ['9'],
+  'the nearer ambulance has seats and none of the training, so it is not the one sent');
+
+// And where nothing in range carries it, nothing is picked rather than the wrong thing.
+await mission.evaluate(() => {
+  document.getElementById('vehicle_show_table_body_all').innerHTML = `
+    <tr class="vehicle_select_table_tr" vehicle_id="501" data-distance="1"><td>
+      <input type="checkbox" class="vehicle_checkbox" value="501" id="vehicle_checkbox_501"
+      name="vehicle_ids[]" vehicle_type_id="5" any_rtw="1" rtw="1" fms="2"></td>
+      <td id="vehicle_sort_501" timevalue="10">x</td></tr>`;
+});
+await mission.waitForTimeout(1300);
+const saidSo = (await mission.textContent('#ymca-mm-panel')).replace(/\s+/g, ' ');
+console.log('nothing carries it:', /Nothing in range carries the training/.test(saidSo));
+assert.match(saidSo, /Nothing in range carries the training/,
+  'it says so rather than filling a training with whatever had a seat');
+assert.match(await mission.textContent('#ymca-mm-panel [data-do="select"]'), /Tick 0 vehicles/,
+  'and picks nothing at all');
+await mission.evaluate(() => {
+  document.getElementById('ymca-test-personnel')?.remove();
+  localStorage.removeItem('ymca-missionmagician-crew-seen');
+});
+
 // ---- water comes from the tank, not from whatever is nearest ----
 // Filling the bar in arrival order sends whatever is close, and what is close is engines: asked
 // for 20,000 gallons the panel picked eleven when four were wanted, because each moved it a
