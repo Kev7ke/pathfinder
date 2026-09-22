@@ -37,6 +37,16 @@
  * distance carries its unit, free beds are `n / n`, tax ends in `%`, and the
  * department is a label that says Yes or No. A row that answers none of them is
  * left out rather than guessed at.
+ *
+ * THE POLICE BRANCH IS READ THE SAME WAY, WITHOUT HAVING BEEN SEEN. A prison is
+ * `/vehicles/<id>/gefangener/<cell>` and its list has never come back from a
+ * capture, so nothing here is written for it specially — and nothing needs to
+ * be, as long as it states its figures the way the hospital list does. Free
+ * cells as `n / n` and a distance with its unit are all the rule needs; a page
+ * with no tax column and no department label simply has neither read, which
+ * leaves it a plain distance case. That is the safe end to be wrong on, and if
+ * a prison list turns out to say it differently the capture button on that page
+ * is what settles it.
  * ------------------------------------------------------------------------ */
 
 const HFA_BUTTON_ID = 'ymca-hfa-btn';
@@ -61,9 +71,12 @@ function hfaRead(tr) {
     const tax = rest.map((t) => /^(\d[\d.,]*)\s*%$/.exec(t)).find(Boolean);
     const label = tr.querySelector('.label');
     const said = (label?.textContent || '').trim();
+    const href = link.getAttribute('href') || '';
     return {
         row: tr,
-        href: link.getAttribute('href'),
+        href,
+        // The link carries both ids; the second one is the facility.
+        facilityId: (/\/(?:patient|gefangener)\/(-?\d+)/.exec(href) || [])[1] || '',
         name: (tr.cells[0]?.firstChild?.textContent || cells[0] || '').trim().slice(0, 60),
         km: distance ? hfNum(distance) : null,
         free: beds ? Number(beds[1]) : null,
@@ -106,6 +119,69 @@ function hfaChoose(rows, cfg) {
         : { pick: nearest, why: 'nearest', pool: pool.length, treating: treating.length };
 }
 
+/* ------------------------------------------------------------ the feedback */
+
+const HFA_TOASTS_ID = 'ymca-hfa-toasts';
+const HFA_TOAST_LIVES = 45e3;
+
+/**
+ * Where a transport went, in the corner, still there on the next page.
+ *
+ * THE TOP DOCUMENT IS WHY IT SURVIVES. Everything else here happens inside the
+ * vehicle window, which is a frame that reloads on every send — anything drawn
+ * in there is gone before it can be read. The map's own document does not
+ * reload, so that is where the blocks go, and they stack up as the queue works
+ * through itself.
+ *
+ * Both halves are links: the vehicle by its own id, the facility by the id the
+ * destination link carried. `lightbox-open` is the game's own class for opening
+ * one of its pages over the map, so these open the way the game's own links do,
+ * and stay plain links if that handler is not bound.
+ */
+function hfaTopDocument() {
+    try {
+        return window.top !== window.self ? window.top.document : document;
+    } catch (e) {
+        return document;   // a frame from somewhere else is not ours to draw in
+    }
+}
+
+function hfaToast(ctx, vehicle, pick) {
+    const doc = hfaTopDocument();
+    let box = doc.getElementById(HFA_TOASTS_ID);
+    if (!box) {
+        box = doc.createElement('div');
+        box.id = HFA_TOASTS_ID;
+        box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147482000;'
+            + 'display:flex;flex-direction:column-reverse;gap:5px;max-width:270px';
+        doc.body.append(box);
+    }
+    const line = doc.createElement('div');
+    /* The game's own alert, so it follows the game into whatever theme it is
+     * wearing rather than carrying a colour of its own. */
+    line.className = 'alert alert-success';
+    line.style.cssText = 'margin:0;padding:5px 9px;font-size:12px;line-height:1.35;'
+        + 'box-shadow:0 1px 4px rgba(0,0,0,.35)';
+    line.innerHTML = `<a class="lightbox-open" href="/vehicles/${encodeURIComponent(vehicle.id)}"
+    >${esc(vehicle.name)}</a> &rarr; <a class="lightbox-open"
+    href="/buildings/${encodeURIComponent(pick.facilityId)}">${esc(pick.name)}</a>
+    <span style="opacity:.75">&middot; ${esc(String(pick.km))}</span>`;
+    box.append(line);
+    while (box.children.length > 8) box.firstElementChild.remove();
+    setTimeout(() => line.remove(), HFA_TOAST_LIVES);
+    ctx.log.info('sent', `${vehicle.name} to ${pick.name}`);
+}
+
+/** What this page is a transport for. The id is in the path; the name is the
+ * heading the game put on it, and `#<id>` where it did not put one. */
+function hfaVehicle() {
+    const id = (/^\/vehicles\/(\d+)/.exec(location.pathname) || [])[1] || '';
+    const head = [...document.querySelectorAll('h1, h2, h3')]
+        .map((h) => (h.textContent || '').replace(/\s+/g, ' ').trim())
+        .find((t) => t && t.length < 60);
+    return { id, name: head || `#${id}` };
+}
+
 /* ------------------------------------------------------------- the sending */
 
 let hfaArmed = false;
@@ -144,6 +220,16 @@ function hfaRun(ctx) {
 
     const { pick, why, treating } = choice;
     hfaArmed = true;
+
+    /* GREEN ON THE CELLS, NOT ON THE ROW. Bootstrap's own table styling and the
+     * game's dark theme both put a background on `td`, so a colour on the `<tr>`
+     * sits behind them and nothing shows. `.success` is the game's own class for
+     * exactly this and it is defined for both, so it is set on the row and on
+     * every cell of it — which also means it follows the theme instead of
+     * carrying a colour of YMCA's own. */
+    pick.row.classList.add('success');
+    for (const cell of pick.row.cells) cell.classList.add('success');
+    pick.row.scrollIntoView({ block: 'nearest' });
     const hold = hfaHold(cfg);
     const bar = hfaSay(ctx, `<b>HighFive Auto</b> &rarr; ${ctx.esc(pick.name)}
     &middot; ${ctx.esc(String(pick.km))} away${pick.tax !== null
@@ -159,13 +245,17 @@ function hfaRun(ctx) {
         hfaArmed = false;
         ctx.store.write('cfg', { ...hfaCfg(ctx), auto: false });
         hfaPaintButton(ctx);
+        pick.row.classList.remove('success');
+        for (const cell of pick.row.cells) cell.classList.remove('success');
         hfaSay(ctx, '<b>Stopped.</b> Auto is off; pick this one yourself.', true);
         ctx.log.info('stopped by the player');
     });
 
     setTimeout(() => {
         if (cancelled || hfaCfg(ctx).auto !== true) return;
-        ctx.log.info('sending', `${pick.km} away, ${why}`);
+        /* The block goes up before the navigation, because the frame this runs
+         * in is about to be replaced and the map's document is not. */
+        hfaToast(ctx, hfaVehicle(), pick);
         location.href = pick.href;
     }, hold);
     return true;

@@ -211,6 +211,69 @@ function mmPatientProbe() {
     };
 }
 
+/**
+ * What the window itself says is still missing.
+ *
+ * THE CATALOGUE IS NOT THE WHOLE REQUIREMENT. A skateboard accident wants an
+ * ambulance, produces no patient, and lists neither — so the panel read the
+ * mission as finished while the game went on asking. The window is not
+ * guessing: `#missing_text` is the game's own "Missing Vehicles: 1 Ambulance",
+ * and the same trick that reads the help page reads this — lowercase a label,
+ * join it with underscores, and it is the vocabulary `/einsaetze.json` already
+ * uses.
+ *
+ * IT IS A SHORTFALL, NOT A TOTAL, exactly as the patient line is: the game
+ * counts what is still wanted, so what is already there has to be added back
+ * rather than subtracted again.
+ *
+ * Only a key nothing else already asks for is taken, and only one a rule can be
+ * found for. A label this cannot turn into a requirement is left alone rather
+ * than invented — the catalogue keys stay the spine, and this fills the gaps
+ * the catalogue does not admit to.
+ */
+function mmMissingFromWindow() {
+    const box = document.getElementById('missing_text')
+        || document.querySelector('.alert-missing-vehicles');
+    const text = (box?.textContent || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
+    if (!text) return [];
+    const out = [];
+    const seen = new Set();
+    const re = /(\d+)\s*x?\s+([A-Za-z][A-Za-z ]*?)(?=\s*[,.;]|\s*$)/g;
+    let m = re.exec(text);
+    while (m) {
+        const n = Number(m[1]);
+        const key = m[2].trim().toLowerCase().replace(/\s+/g, '_');
+        if (n > 0 && key && !seen.has(key)) {
+            seen.add(key);
+            out.push({ key, wanted: n });
+        }
+        m = re.exec(text);
+    }
+    return out;
+}
+
+/** The same key, however the window spelled it: as itself, or as a plural. */
+function mmRuleFor(key, vocab) {
+    for (const candidate of [key, `${key}s`, key.replace(/s$/, '')]) {
+        if (MM_REQUIREMENTS[candidate]) return { rule: MM_REQUIREMENTS[candidate], key: candidate };
+        const found = mmDeriveRule(candidate, vocab);
+        if (found) {
+            const label = mmPretty(candidate);
+            return {
+                key: candidate,
+                rule: {
+                    ...found, label, icon: mmIconFor(candidate, label),
+                    source: `the game flags ${found.derived} on the vehicles that answer it`,
+                },
+            };
+        }
+    }
+    return null;
+}
+
+/** Keys this plan took from the window rather than from the catalogue. */
+const mmFromWindow = new Set();
+
 /** Requirements that are an amount to reach, not a count of vehicles. */
 const MM_AMOUNTS = {
     water_needed: { attr: 'wasser_amount', label: 'Water', unit: 'gal.', icon: 'drop' },
@@ -918,6 +981,7 @@ async function mmPlan(page, ctx, cfg) {
     if (cfg.fastestFirst !== false) { free.sort(mmOrder); busy.sort(mmOrder); }
     const vehicles = free.concat(busy);
     const untimed = vehicles.filter((v) => v.seconds === null).length;
+    mmFromWindow.clear();
     const scene = mmOnScene(mmLearnTypes(vehicles), cfg.countDriving !== false);
     const tanks = mmLearnTanks(vehicles);
     /* What is already at the mission or on its way is carrying water too. */
@@ -935,7 +999,9 @@ async function mmPlan(page, ctx, cfg) {
          * crew at the mission — carried by whatever is sent, not sent itself —
          * and as a row it read "Personnel educations, wanted [object Object]". */
         const wants = Object.entries(requirements)
-            .filter(([key, n]) => !MM_AMOUNTS[key] && typeof n === 'number');
+            .filter(([key, n]) => !MM_AMOUNTS[key] && typeof n === 'number')
+            // [key, how many, is that a shortfall rather than a total]
+            .map(([key, n]) => [key, n, false]);
         /* Patients are not a requirement key. They want ambulances, so they are
          * counted into the ambulance line rather than shown beside it — one each
          * unless told otherwise. An `ambulances` requirement and the patients
@@ -944,7 +1010,7 @@ async function mmPlan(page, ctx, cfg) {
             const perPatient = cfg.ambulancePerPatient === false ? 1 : patients.count;
             const existing = wants.find(([key]) => key === 'ambulances');
             if (existing) existing[1] = Math.max(existing[1], perPatient);
-            else wants.push(['patients', perPatient]);
+            else wants.push(['patients', perPatient, patients.total === false]);
         }
 
         /* What the game's own words can answer. Every flag on every checkbox in
@@ -954,8 +1020,21 @@ async function mmPlan(page, ctx, cfg) {
         const vocab = new Set(vehicles.flatMap((v) => v.flags));
         for (const caps of Object.values(mmKnownTypes())) for (const f of caps) vocab.add(f);
 
+        /* And whatever the window says is still missing that the catalogue
+         * never mentioned — a skateboard accident wants an ambulance, lists
+         * none and produces no patient. What the game is asking for out loud
+         * is not something to argue with. */
+        for (const { key, wanted } of mmMissingFromWindow()) {
+            const found = mmRuleFor(key, vocab);
+            if (!found) continue;
+            if (wants.some(([k]) => k === found.key)) continue;
+            if (found.key === 'patients' || MM_AMOUNTS[found.key]) continue;
+            wants.push([found.key, wanted, true]);
+            mmFromWindow.add(found.key);
+        }
+
         const needs = [];
-        for (const [key, wanted] of wants) {
+        for (const [key, wanted, isShortfall] of wants) {
             let rule = MM_REQUIREMENTS[key];
             if (!rule) {
                 const found = mmDeriveRule(key, vocab);
@@ -976,8 +1055,7 @@ async function mmPlan(page, ctx, cfg) {
             const onScene = mmSceneCount(scene, rule);
             /* A shortfall is counted on top of what is there; a total has what
              * is there counted against it. */
-            const shortfall = key === 'patients' && patients && patients.total === false;
-            needs.push({ key, rule, wanted: shortfall ? wanted + onScene : wanted, onScene });
+            needs.push({ key, rule, wanted: isShortfall ? wanted + onScene : wanted, onScene });
         }
 
         for (const v of mmAllocate(needs, vehicles)) picked.set(v.id, v);
@@ -990,6 +1068,7 @@ async function mmPlan(page, ctx, cfg) {
                 key: n.key, label: n.rule.label, icon: n.rule.icon, wanted: n.wanted,
                 rule: n.rule, onScene: n.onScene, found: n.onScene,
                 derived: n.rule.derived || null,
+                fromWindow: mmFromWindow.has(n.key),
             });
         }
 
@@ -1822,6 +1901,10 @@ function mmMountPanel(ctx) {
         panel.innerHTML = mmGamePanelHtml(plan, cfg, ctx);
         mmRecount(panel, plan);
         mmWatchScroll(panel);
+        /* A mission that has just opened with Auto armed presses Tick itself.
+         * Keyed on the mission, so the several redraws a window goes through
+         * while it fills press it once. */
+        mmaAfterDraw(panel, ctx);
     };
     const redraw = () => {
         clearTimeout(timer);
@@ -1834,6 +1917,10 @@ function mmMountPanel(ctx) {
         ctx.log.info('ticked vehicles', `${n} in the mission window`);
         const done = panel.querySelector('#mm-panel-done');
         if (done) done.hidden = false;
+        /* The game fires `change` on every box, so the counts and the table's
+         * own green land in the same turn — but only after this one, which is
+         * why the judge is asked on the next frame rather than here. */
+        requestAnimationFrame(() => mmaAfterTick(panel, ctx));
     };
 
     /* The keys are read on every press rather than captured here, so changing
@@ -1893,6 +1980,12 @@ function mmMountPanel(ctx) {
 
     panel.addEventListener('change', (e) => {
         const key = e.target.dataset.cfg;
+        /* Auto is its own module and its own store: this is only the switch. */
+        if (key === 'mmaOn') {
+            mmaSetArmed(e.target.checked);
+            ctx.log.info(`dispatch when green ${e.target.checked ? 'on' : 'off'}`);
+            return;
+        }
         if (!['fastestFirst', 'ambulancePerPatient', 'followUp', 'countDriving'].includes(key)) return;
         const cfg = ctx.store.read('cfg', {});
         cfg[key] = e.target.checked;
@@ -2245,6 +2338,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
     l.key === 'patients' && plan.patients
         ? `<small> &middot; ${plan.patients.count} patient${
             plan.patients.count > 1 ? 's' : ''}, as this window states</small>` : ''}${
+    l.fromWindow ? '<small> &middot; as this window states</small>' : ''}${
     /* Nothing here maps this one; the flag was read off the checkboxes in this
      * very table. It counts the same, and it says which it is. */
     l.derived ? `<small title="matched on the game's own ${ctx.esc(l.derived)} flag,
@@ -2313,6 +2407,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         ${mmSwitch('fastestFirst', 'Fastest first', cfg.fastestFirst !== false)}
         ${mmSwitch('ambulancePerPatient', 'Ambulance per patient', cfg.ambulancePerPatient !== false)}
         ${mmSwitch('countDriving', 'Count what is on the way', cfg.countDriving !== false)}
+        ${mmaAvailable() ? mmSwitch('mmaOn', 'Dispatch when green', mmaArmed()) : ''}
         ${mmSwitch('followUp', `Follow-up${plan.followUp ? ` (${plan.followUp})` : ''}`,
         cfg.followUp === true, !plan.followUpOffered)}
       </div>
@@ -2334,5 +2429,6 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         have no travel time yet, ordered by distance until the game works them out</small>` : ''}
       <div class="alert alert-info" id="mm-panel-done" hidden style="padding:6px 10px;margin:8px 0 0">
         Ticked.</div>
+      <div id="mma-note" hidden></div>
     </div>`;
 }

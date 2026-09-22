@@ -53,6 +53,7 @@ userscripts/
     mod-stepops.js
     mod-renamer.js
     mod-missionmagician.js
+    mod-missionmagicianauto.js
     mod-recruitroom.js
     mod-trackops.js
     mod-elementfriend.js
@@ -306,6 +307,26 @@ the panel asked for one more than it needed. Present-but-unreadable is a third
 answer and it has to be one: counted as there, said on screen, and carried in
 the report as `rowSaidNoType` beside the type ids that were read.
 
+**Green on the cells, not on the row.** Bootstrap's own table styling and the
+game's dark theme both put a background on `td`, so a colour on the `<tr>` sits
+behind them and nothing shows. `.success` is the game's own class for exactly
+this and it is defined for both, so it goes on the row **and** on every cell —
+which also means it follows the theme instead of carrying a colour of YMCA's own.
+
+**The feedback lives in the top document.** Everything HighFive Auto does
+happens inside the vehicle window, which is a frame that reloads on every
+send — anything drawn in there is gone before it can be read. The map's own
+document does not reload, so the blocks go there and stack up as the queue works
+through itself, each one linking the vehicle and the facility by the ids the
+destination link carried.
+
+**The police branch is read the same way, without having been seen.** Nothing is
+written for `/gefangener/` specially and nothing needs to be, as long as it
+states its figures the way the hospital list does: free cells as `n / n` and a
+distance with its unit are all the rule needs. A page with no tax column and no
+department label simply has neither read, which leaves it a plain distance
+case — the safe end to be wrong on.
+
 **A capture button says where it is being pressed, before it is pressed.** The
 first one was taken on the map and came back with 67 building links and no
 destinations — a whole round trip spent on a button that could have said so.
@@ -412,7 +433,21 @@ reading only the first misses every call where nothing is being flagged.
 `querySelectorAll('#patient_button_text strong, #patient_button_form strong')`
 reads whichever of the two the page holds first — and `#patient_button_form`
 sits before `#patient_button_text` — so "most sure first" was never what
-happened. Readings that are ranked have to be separate queries.
+happened. Readings that are ranked have to be separate queries. **It caught the
+dispatch button too**: `'#alert_next_btn, .alert_next'` handed back whichever
+the page held first, which was not the one meant, and the press went nowhere.
+
+**The catalogue is not the whole requirement.** A skateboard accident wants an
+ambulance, produces no patient and lists neither — so the panel read the mission
+as finished while the game went on asking. `#missing_text` is the game saying it
+out loud, and the same trick that reads the help page reads it: lowercase a
+label, join it with underscores, and it is the vocabulary `/einsaetze.json`
+already uses. **It is a shortfall, not a total**, exactly as the patient line is,
+so what is already there is added back rather than subtracted twice. Only a key
+nothing else already asks for is taken, and only one a rule can be found for —
+a label this cannot turn into a requirement is left alone rather than invented,
+and the row says **as this window states** so it is never mistaken for a
+catalogue line.
 
 **`possible_patient` does not dispatch anything.** It is the most a mission
 *can* produce — 8 on a tunnel fire — and ticking eight ambulances because eight
@@ -986,6 +1021,23 @@ the log without a module having to remember to log it.
   back, so MissionMagician ticks the game's own checkboxes and stops; the player
   presses Dispatch. The preview is the whole product, and that is not a
   limitation to be lifted later.
+- **MissionMagician Auto is the third exception, and it was asked for.** It
+  presses the game's own **Dispatch and Next** — `a#alert_next_btn.alert_next`,
+  the one control that keeps a queue moving — but only after a Tick the player
+  pressed, and **only on a green table**: one line short and it says so and
+  stops, which is the case the panel exists for. Armed, it also presses Tick
+  itself when a mission opens, keyed on the mission so the several redraws a
+  window goes through press it once. A table that stays short is tried again a
+  second later, three times by default, because the game fills a window over
+  several seconds and the vehicle arriving late is often the one that would have
+  finished it. Then it takes `#mission_next_mission_btn` — whose href names the
+  mission it goes to, so **a button pointing at the mission already open is a
+  loop, not a way on**, and is treated as no button at all. Where there is none,
+  the window closes with Escape.
+  **A module handed somebody else's context asks the shell for its own.**
+  `mmaAfterTick` is called with MissionMagician's `ctx`, and `ctx.store` is
+  namespaced to whoever owns it — so reading its own hold through it read a
+  setting that was never written, and waited the default in silence.
 - **HighFive Auto is the second exception, and it was asked for.** It presses
   the destination button as well as the next-vehicle one, so a queue of radio
   calls works through itself instead of being clicked one hospital at a time.

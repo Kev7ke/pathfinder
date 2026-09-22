@@ -1389,7 +1389,8 @@ const elements = await pg.$$eval('.ymca-tile.el', (b) => b.map((x) => x.dataset.
 console.log('elements          :', JSON.stringify(elements));
 await pg.screenshot({ path: '/tmp/ymca-elements.png' });
 assert.deepEqual(elements,
-  ['renamer', 'missionmagician', 'trackops', 'highfive', 'highfiveauto', 'eagleeye'],
+  ['renamer', 'missionmagician', 'missionmagicianauto', 'trackops', 'highfive', 'highfiveauto',
+    'eagleeye'],
   'every switchable module that is not in a group should have an element tile');
 assert.equal(await pg.locator('.ymca-tile.el[data-el="shuteye"]').count(), 0,
   'a module in a group is listed inside the group, not beside it');
@@ -1399,8 +1400,10 @@ for (const id of ['renamer', 'missionmagician', 'trackops', 'highfive', 'eagleey
     `${id} should be on until somebody says otherwise`);
 }
 // Everything else here shows or moves. This one sends, so it waits to be asked for.
-assert.equal(await pg.locator('.ymca-switch[data-sw="highfiveauto"] input').isChecked(), false,
-  'a module that writes is off until somebody switches it on');
+for (const id of ['highfiveauto', 'missionmagicianauto']) {
+  assert.equal(await pg.locator(`.ymca-switch[data-sw="${id}"] input`).isChecked(), false,
+    `${id} writes, so it is off until somebody switches it on`);
+}
 
 // A switch takes the tool out of the launcher, not just out of this page.
 await pg.click('.ymca-switch[data-sw="trackops"]');
@@ -1600,6 +1603,129 @@ await pg.waitForTimeout(150);
 console.log('patients back     :', JSON.stringify(await seen()));
 assert.deepEqual(await seen(), ['mission_bar_outer_506247649', 'mission_patients_506247649'],
   'what is put back comes back, and nothing else with it');
+
+// ---- what the window says is missing, that the catalogue never mentioned ----
+// A skateboard accident wants an ambulance, produces no patient and lists neither, so the panel
+// read it as finished while the game went on asking. #missing_text is the game saying it out
+// loud, and it counts what is STILL missing, so what is there is added back rather than
+// subtracted twice.
+await mission.evaluate(() => {
+  document.getElementById('mission_vehicle_at_mission')?.remove();
+  document.getElementById('mission_vehicle_driving')?.remove();
+  const tbody = document.getElementById('vehicle_show_table_body_all');
+  tbody.innerHTML = '';
+  const add = (id, attrs) => {
+    const tr = document.createElement('tr');
+    tr.className = 'vehicle_select_table_tr';
+    tr.setAttribute('vehicle_id', String(id));
+    tr.setAttribute('data-distance', '1');
+    tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox" value="${id}"
+      id="vehicle_checkbox_${id}" name="vehicle_ids[]" fms="2" ${attrs}></td>
+      <td id="vehicle_sort_${id}" timevalue="${id}">1 min.</td>`;
+    tbody.append(tr);
+  };
+  add(501, 'vehicle_type_id="13" fire="1" dlk="1"');
+  add(502, 'vehicle_type_id="5" any_rtw="1" rtw="1"');
+  document.getElementById('missing_text').textContent = 'Missing Vehicles: 1 Ambulance';
+  window.__catalogue = [{
+    id: '314', name: 'Skateboard accident', requirements: { firetrucks: 1 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '314');
+  document.getElementById('mission-form').setAttribute('action', '/missions/506003400/alarm');
+});
+await mission.waitForTimeout(1300);
+const skate = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('skateboard        :', JSON.stringify(skate));
+assert.ok(skate.some((r) => /Ambulances/.test(r[4]) && /this window states/.test(r[4])),
+  'the ambulance the catalogue never mentioned is a line, and says where it came from');
+assert.ok(/Tick 2 vehicles/.test(await mission.textContent('#ymca-mm-panel [data-do="select"]')),
+  'and it is picked: an engine for the catalogue, an ambulance for the window');
+await mission.evaluate(() => { document.getElementById('missing_text').textContent = ''; });
+
+// ---- MissionMagician Auto dispatches only on a green table ----
+// The press that sends is downstream of a press the player made, and the thing it waits for is
+// the table saying it is finished. One line short and it says so instead.
+await mission.evaluate(() => {
+  document.getElementById('mission_vehicle_at_mission')?.remove();
+  document.getElementById('mission_vehicle_driving')?.remove();
+  document.getElementById('vehicle_show_table_body_all').innerHTML = '';
+  const tbody = document.getElementById('vehicle_show_table_body_all');
+  for (const id of [401, 402]) {
+    const tr = document.createElement('tr');
+    tr.className = 'vehicle_select_table_tr';
+    tr.setAttribute('vehicle_id', String(id));
+    tr.setAttribute('data-distance', '1');
+    tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox" value="${id}"
+      id="vehicle_checkbox_${id}" name="vehicle_ids[]" vehicle_type_id="13" fms="2"
+      fire="1" dlk="1"></td><td id="vehicle_sort_${id}" timevalue="${id}">1 min.</td>`;
+    tbody.append(tr);
+  }
+  const next = document.createElement('a');
+  next.id = 'alert_next_btn';
+  next.className = 'btn btn-success alert_next';
+  next.href = '#';
+  window.__dispatched = 0;
+  next.addEventListener('click', () => { window.__dispatched += 1; });
+  document.body.append(next);
+  window.__catalogue = [{ id: '312', name: 'Two engines', requirements: { firetrucks: 3 } }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  localStorage.setItem('ymca-elements', JSON.stringify({ missionmagicianauto: true }));
+  localStorage.setItem('ymca-missionmagicianauto-cfg',
+    JSON.stringify({ on: true, hold: 120, tries: 2, closeAfter: 150 }));
+  const onward = document.createElement('a');
+  onward.id = 'mission_next_mission_btn';
+  onward.href = '/missions/999888?ift=sw';
+  window.__wentOn = 0;
+  onward.addEventListener('click', (e) => { e.preventDefault(); window.__wentOn += 1; });
+  document.body.append(onward);
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '312');
+});
+// Armed, it presses Tick itself the moment the panel draws. Three wanted, two in range: it
+// tries again a second later, and when it is still short it takes the game's own Next Mission.
+await mission.waitForTimeout(3600);
+const short = (await mission.textContent('#mma-note')).replace(/\s+/g, ' ').trim();
+console.log('auto held back    :', short.slice(0, 70));
+assert.equal(await mission.evaluate(() => window.__dispatched), 0,
+  'a table that is still short dispatches nothing at all');
+assert.equal(await mission.evaluate(() => window.__wentOn), 1,
+  'and it moves on to the mission the game is offering');
+
+// Now the mission only wants two, so ticking covers it and the button gets pressed.
+await mission.evaluate(() => {
+  window.__catalogue = [{ id: '313', name: 'Two engines', requirements: { firetrucks: 2 } }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '313');
+  // A new mission is a new page in the game; here it is a new form action, which is what
+  // the run-through keys on so a redraw does not press Tick twice for one mission.
+  document.getElementById('mission-form').setAttribute('action', '/missions/506003399/alarm');
+  // The panel watches the markup, not the attributes, so give it something to see.
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(2000);
+console.log('auto dispatched   :', (await mission.textContent('#mma-note')).replace(/\s+/g, ' ')
+  .trim().slice(0, 60));
+assert.ok(await mission.evaluate(() => window.__dispatched) >= 1,
+  'green table, Dispatch and Next gets pressed — the game\'s own button');
+
+// Switched off in ElementFriend, the switch is not even in the panel.
+await mission.evaluate(() => {
+  window.YMCA.switchElement('missionmagicianauto', false);
+  window.__dispatched = 0;
+});
+await mission.evaluate(() =>
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr')));
+await mission.waitForTimeout(1200);
+assert.equal(await mission.locator('#ymca-mm-panel [data-cfg="mmaOn"]').count(), 0,
+  'the panel switch is only there while the tile is on');
+await mission.click('#ymca-mm-panel [data-do="select"]');
+await mission.waitForTimeout(800);
+assert.equal(await mission.evaluate(() => window.__dispatched), 0, 'and nothing is dispatched');
+await mission.evaluate(() => {
+  document.getElementById('alert_next_btn')?.remove();
+  document.getElementById('mission_next_mission_btn')?.remove();
+});
 
 // ---- water: best fit, and what is already carrying it counts ----
 // Arrival order sent eleven engines for what four could carry; biggest-first then sent the one
@@ -1903,7 +2029,13 @@ console.log('highfive off      : a pick arms nothing');
       <td><a class="btn btn-success" href="/vehicles/15079874/patient/${id}"
         >Transport Patient</a></td>
       <td class="hidden-xs"></td></tr>`;
-  await auto.setContent(`<html><body><table id="own-hospitals">
+  // A frame, because that is what a vehicle window is — and the whole point of putting the
+  // feedback in the top document is that the frame is about to be replaced.
+  await auto.setContent('<html><body><iframe id="f" src="/README.md" '
+    + 'style="width:100%;height:600px"></iframe></body></html>');
+  await auto.waitForSelector('#f');
+  const inner = auto.frames().find((f) => f !== auto.mainFrame());
+  await inner.setContent(`<html><body><table id="own-hospitals">
     <thead><tr><th>Buildings</th><th>Free beds</th><th>Distance</th><th>Department</th>
       <th></th><th></th></tr></thead>
     <tbody>
@@ -1913,19 +2045,38 @@ console.log('highfive off      : a pick arms nothing');
       ${row('Faraway', 44, 9, '80.00', 0, 'Yes')}
       ${row('Full up', 45, 0, '1.00', 0, 'Yes')}
     </tbody></table></body></html>`);
-  await auto.evaluate(() => {
+  await inner.evaluate(() => {
     history.replaceState({}, '', '/vehicles/15079874');
     localStorage.setItem('ymca-elements', JSON.stringify({ highfiveauto: true }));
-    localStorage.setItem('ymca-highfiveauto-cfg', JSON.stringify({ auto: true, hold: 150 }));
+    localStorage.setItem('ymca-highfiveauto-cfg', JSON.stringify({ auto: true, hold: 700 }));
   });
-  await auto.addScriptTag({ content: script });
-  await auto.waitForSelector('#ymca-hfa-bar');
-  const said = (await auto.textContent('#ymca-hfa-bar')).replace(/\s+/g, ' ').trim();
+  await inner.addScriptTag({ content: script });
+  await inner.waitForSelector('#ymca-hfa-bar');
+  const said = (await inner.textContent('#ymca-hfa-bar')).replace(/\s+/g, ' ').trim();
   console.log('auto chose        :', said.slice(0, 110));
   assert.match(said, /Mercy General/,
     'County is the nearest that can treat, but it charges and Mercy General is free');
-  await auto.waitForURL(/patient\/41$/, { timeout: 8000 });
-  console.log('auto sent         :', new URL(auto.url()).pathname);
+  // Green on the cells, not on the row: the theme puts a background on `td`, so a colour on
+  // the `<tr>` alone sits behind it and nothing shows.
+  const green = await inner.evaluate(() => {
+    const tr = [...document.querySelectorAll('#own-hospitals tbody tr')]
+      .find((r) => r.querySelector('a[href*="/patient/41"]'));
+    return { row: tr.classList.contains('success'),
+      cells: [...tr.cells].every((c) => c.classList.contains('success')) };
+  });
+  console.log('green row         :', JSON.stringify(green));
+  assert.ok(green.row && green.cells, 'the chosen row is marked before it is sent');
+
+  // The block goes in the top document, because the frame it was chosen in is about to reload.
+  await auto.waitForSelector('#ymca-hfa-toasts a[href="/buildings/41"]');
+  const toast = (await auto.textContent('#ymca-hfa-toasts')).replace(/\s+/g, ' ').trim();
+  console.log('feedback block    :', toast.slice(0, 60));
+  assert.match(toast, /Mercy General/, 'it says where the transport went');
+
+  await auto.waitForFunction(
+    () => /patient\/41$/.test(document.getElementById('f').contentWindow.location.pathname),
+    null, { timeout: 8000 });
+  console.log('auto sent         : the frame went to the destination, the block stayed put');
   assert.equal(autoErrs.length, 0);
   await auto.close();
 }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.40
+// @version      0.0.41
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.40',
+    version: '0.0.41',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1055,6 +1055,8 @@ const ICONS = {
     diagnostics: '<circle cx="15" cy="15" r="9"/><path d="M22 22 L30 30"/>',
     missionmagician: '<path d="M7 27 L24 10"/><path d="M22 5 L24 10 L29 12 L24 14 L22 19 L20 14 '
         + 'L15 12 L20 10 Z"/>',
+    missionmagicianauto: '<path d="M7 27 L24 10"/><path d="M22 5 L24 10 L29 12 L24 14 L22 19 '
+        + 'L20 14 L15 12 L20 10 Z"/><path d="M4 8 h8"/><path d="M4 14 h5"/>',
     recruitroom: '<circle cx="13" cy="11" r="5"/><path d="M4 29c0-5 4-9 9-9s9 4 9 9"/>'
         + '<path d="M24 9v10M19 14h10"/>',
     trackops: '<path d="M5 29 H30"/><rect x="7" y="18" width="5" height="11"/>'
@@ -2258,6 +2260,69 @@ function mmPatientProbe() {
     };
 }
 
+/**
+ * What the window itself says is still missing.
+ *
+ * THE CATALOGUE IS NOT THE WHOLE REQUIREMENT. A skateboard accident wants an
+ * ambulance, produces no patient, and lists neither — so the panel read the
+ * mission as finished while the game went on asking. The window is not
+ * guessing: `#missing_text` is the game's own "Missing Vehicles: 1 Ambulance",
+ * and the same trick that reads the help page reads this — lowercase a label,
+ * join it with underscores, and it is the vocabulary `/einsaetze.json` already
+ * uses.
+ *
+ * IT IS A SHORTFALL, NOT A TOTAL, exactly as the patient line is: the game
+ * counts what is still wanted, so what is already there has to be added back
+ * rather than subtracted again.
+ *
+ * Only a key nothing else already asks for is taken, and only one a rule can be
+ * found for. A label this cannot turn into a requirement is left alone rather
+ * than invented — the catalogue keys stay the spine, and this fills the gaps
+ * the catalogue does not admit to.
+ */
+function mmMissingFromWindow() {
+    const box = document.getElementById('missing_text')
+        || document.querySelector('.alert-missing-vehicles');
+    const text = (box?.textContent || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
+    if (!text) return [];
+    const out = [];
+    const seen = new Set();
+    const re = /(\d+)\s*x?\s+([A-Za-z][A-Za-z ]*?)(?=\s*[,.;]|\s*$)/g;
+    let m = re.exec(text);
+    while (m) {
+        const n = Number(m[1]);
+        const key = m[2].trim().toLowerCase().replace(/\s+/g, '_');
+        if (n > 0 && key && !seen.has(key)) {
+            seen.add(key);
+            out.push({ key, wanted: n });
+        }
+        m = re.exec(text);
+    }
+    return out;
+}
+
+/** The same key, however the window spelled it: as itself, or as a plural. */
+function mmRuleFor(key, vocab) {
+    for (const candidate of [key, `${key}s`, key.replace(/s$/, '')]) {
+        if (MM_REQUIREMENTS[candidate]) return { rule: MM_REQUIREMENTS[candidate], key: candidate };
+        const found = mmDeriveRule(candidate, vocab);
+        if (found) {
+            const label = mmPretty(candidate);
+            return {
+                key: candidate,
+                rule: {
+                    ...found, label, icon: mmIconFor(candidate, label),
+                    source: `the game flags ${found.derived} on the vehicles that answer it`,
+                },
+            };
+        }
+    }
+    return null;
+}
+
+/** Keys this plan took from the window rather than from the catalogue. */
+const mmFromWindow = new Set();
+
 /** Requirements that are an amount to reach, not a count of vehicles. */
 const MM_AMOUNTS = {
     water_needed: { attr: 'wasser_amount', label: 'Water', unit: 'gal.', icon: 'drop' },
@@ -2965,6 +3030,7 @@ async function mmPlan(page, ctx, cfg) {
     if (cfg.fastestFirst !== false) { free.sort(mmOrder); busy.sort(mmOrder); }
     const vehicles = free.concat(busy);
     const untimed = vehicles.filter((v) => v.seconds === null).length;
+    mmFromWindow.clear();
     const scene = mmOnScene(mmLearnTypes(vehicles), cfg.countDriving !== false);
     const tanks = mmLearnTanks(vehicles);
     /* What is already at the mission or on its way is carrying water too. */
@@ -2982,7 +3048,9 @@ async function mmPlan(page, ctx, cfg) {
          * crew at the mission — carried by whatever is sent, not sent itself —
          * and as a row it read "Personnel educations, wanted [object Object]". */
         const wants = Object.entries(requirements)
-            .filter(([key, n]) => !MM_AMOUNTS[key] && typeof n === 'number');
+            .filter(([key, n]) => !MM_AMOUNTS[key] && typeof n === 'number')
+            // [key, how many, is that a shortfall rather than a total]
+            .map(([key, n]) => [key, n, false]);
         /* Patients are not a requirement key. They want ambulances, so they are
          * counted into the ambulance line rather than shown beside it — one each
          * unless told otherwise. An `ambulances` requirement and the patients
@@ -2991,7 +3059,7 @@ async function mmPlan(page, ctx, cfg) {
             const perPatient = cfg.ambulancePerPatient === false ? 1 : patients.count;
             const existing = wants.find(([key]) => key === 'ambulances');
             if (existing) existing[1] = Math.max(existing[1], perPatient);
-            else wants.push(['patients', perPatient]);
+            else wants.push(['patients', perPatient, patients.total === false]);
         }
 
         /* What the game's own words can answer. Every flag on every checkbox in
@@ -3001,8 +3069,21 @@ async function mmPlan(page, ctx, cfg) {
         const vocab = new Set(vehicles.flatMap((v) => v.flags));
         for (const caps of Object.values(mmKnownTypes())) for (const f of caps) vocab.add(f);
 
+        /* And whatever the window says is still missing that the catalogue
+         * never mentioned — a skateboard accident wants an ambulance, lists
+         * none and produces no patient. What the game is asking for out loud
+         * is not something to argue with. */
+        for (const { key, wanted } of mmMissingFromWindow()) {
+            const found = mmRuleFor(key, vocab);
+            if (!found) continue;
+            if (wants.some(([k]) => k === found.key)) continue;
+            if (found.key === 'patients' || MM_AMOUNTS[found.key]) continue;
+            wants.push([found.key, wanted, true]);
+            mmFromWindow.add(found.key);
+        }
+
         const needs = [];
-        for (const [key, wanted] of wants) {
+        for (const [key, wanted, isShortfall] of wants) {
             let rule = MM_REQUIREMENTS[key];
             if (!rule) {
                 const found = mmDeriveRule(key, vocab);
@@ -3023,8 +3104,7 @@ async function mmPlan(page, ctx, cfg) {
             const onScene = mmSceneCount(scene, rule);
             /* A shortfall is counted on top of what is there; a total has what
              * is there counted against it. */
-            const shortfall = key === 'patients' && patients && patients.total === false;
-            needs.push({ key, rule, wanted: shortfall ? wanted + onScene : wanted, onScene });
+            needs.push({ key, rule, wanted: isShortfall ? wanted + onScene : wanted, onScene });
         }
 
         for (const v of mmAllocate(needs, vehicles)) picked.set(v.id, v);
@@ -3037,6 +3117,7 @@ async function mmPlan(page, ctx, cfg) {
                 key: n.key, label: n.rule.label, icon: n.rule.icon, wanted: n.wanted,
                 rule: n.rule, onScene: n.onScene, found: n.onScene,
                 derived: n.rule.derived || null,
+                fromWindow: mmFromWindow.has(n.key),
             });
         }
 
@@ -3869,6 +3950,10 @@ function mmMountPanel(ctx) {
         panel.innerHTML = mmGamePanelHtml(plan, cfg, ctx);
         mmRecount(panel, plan);
         mmWatchScroll(panel);
+        /* A mission that has just opened with Auto armed presses Tick itself.
+         * Keyed on the mission, so the several redraws a window goes through
+         * while it fills press it once. */
+        mmaAfterDraw(panel, ctx);
     };
     const redraw = () => {
         clearTimeout(timer);
@@ -3881,6 +3966,10 @@ function mmMountPanel(ctx) {
         ctx.log.info('ticked vehicles', `${n} in the mission window`);
         const done = panel.querySelector('#mm-panel-done');
         if (done) done.hidden = false;
+        /* The game fires `change` on every box, so the counts and the table's
+         * own green land in the same turn — but only after this one, which is
+         * why the judge is asked on the next frame rather than here. */
+        requestAnimationFrame(() => mmaAfterTick(panel, ctx));
     };
 
     /* The keys are read on every press rather than captured here, so changing
@@ -3940,6 +4029,12 @@ function mmMountPanel(ctx) {
 
     panel.addEventListener('change', (e) => {
         const key = e.target.dataset.cfg;
+        /* Auto is its own module and its own store: this is only the switch. */
+        if (key === 'mmaOn') {
+            mmaSetArmed(e.target.checked);
+            ctx.log.info(`dispatch when green ${e.target.checked ? 'on' : 'off'}`);
+            return;
+        }
         if (!['fastestFirst', 'ambulancePerPatient', 'followUp', 'countDriving'].includes(key)) return;
         const cfg = ctx.store.read('cfg', {});
         cfg[key] = e.target.checked;
@@ -4292,6 +4387,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
     l.key === 'patients' && plan.patients
         ? `<small> &middot; ${plan.patients.count} patient${
             plan.patients.count > 1 ? 's' : ''}, as this window states</small>` : ''}${
+    l.fromWindow ? '<small> &middot; as this window states</small>' : ''}${
     /* Nothing here maps this one; the flag was read off the checkboxes in this
      * very table. It counts the same, and it says which it is. */
     l.derived ? `<small title="matched on the game's own ${ctx.esc(l.derived)} flag,
@@ -4360,6 +4456,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         ${mmSwitch('fastestFirst', 'Fastest first', cfg.fastestFirst !== false)}
         ${mmSwitch('ambulancePerPatient', 'Ambulance per patient', cfg.ambulancePerPatient !== false)}
         ${mmSwitch('countDriving', 'Count what is on the way', cfg.countDriving !== false)}
+        ${mmaAvailable() ? mmSwitch('mmaOn', 'Dispatch when green', mmaArmed()) : ''}
         ${mmSwitch('followUp', `Follow-up${plan.followUp ? ` (${plan.followUp})` : ''}`,
         cfg.followUp === true, !plan.followUpOffered)}
       </div>
@@ -4381,8 +4478,326 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         have no travel time yet, ordered by distance until the game works them out</small>` : ''}
       <div class="alert alert-info" id="mm-panel-done" hidden style="padding:6px 10px;margin:8px 0 0">
         Ticked.</div>
+      <div id="mma-note" hidden></div>
     </div>`;
 }
+
+/* --------------------------------------------------------------------------
+ * MissionMagician Auto — press Dispatch when the table is green.
+ *
+ * The panel works out what a mission needs and ticks the vehicles that match;
+ * the player presses Dispatch. This presses that too — but only after the
+ * player has pressed Tick, and only when every line the panel can judge is
+ * covered. So the press that sends is still downstream of a press the player
+ * made, and the thing it waits for is the table saying it is finished.
+ *
+ * IT DISPATCHES, AND AN ALARM CANNOT BE TAKEN BACK. That is the rule this repo
+ * was built on and it is broken here on purpose and on request — the third
+ * deliberate exception, after RecruitRoom and HighFive Auto. What stands in for
+ * the backup it cannot have:
+ *
+ *   - off until switched on, with its own tile in ElementFriend, and a switch
+ *     in the panel itself that is only there while the tile is on;
+ *   - it fires on a Tick the player pressed, never on a redraw, never on a
+ *     mission opening, and never twice for one press;
+ *   - **only on a green table**. One line short and it says so and stops, which
+ *     is the case the panel exists for;
+ *   - a hold with a Stop beside it before it presses anything.
+ *
+ * WHICH BUTTON. `Dispatch and Next` is `a#alert_next_btn.alert_next`, which
+ * posts the form and loads the next mission into the same frame — the one
+ * control that keeps a queue moving. Where the page does not carry it, nothing
+ * is pressed and the panel says so rather than reaching for one of the other
+ * four, which do something else.
+ * ------------------------------------------------------------------------ */
+
+/* Two separate queries, in the order written. A selector list answers in
+ * DOCUMENT order, so `'#alert_next_btn, .alert_next'` hands back whichever the
+ * page holds first — which is the same trap the patient readings fell into. */
+const mmaNextButton = () => document.getElementById('alert_next_btn')
+    || document.querySelector('.alert_next');
+
+function mmaCfg(ctx) {
+    return ctx.store.read('cfg', {});
+}
+const mmaHold = (cfg) => (Number.isFinite(Number(cfg.hold)) ? Number(cfg.hold) : 900);
+
+/** Is the tile switched on at all? The panel asks before it draws its switch. */
+function mmaAvailable() {
+    return YMCA.isOn('missionmagicianauto');
+}
+
+/** And is it armed right now? The switch in the panel writes this. */
+function mmaArmed() {
+    try {
+        return (JSON.parse(localStorage.getItem('ymca-missionmagicianauto-cfg')) || {}).on === true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function mmaSetArmed(on) {
+    let held = {};
+    try {
+        held = JSON.parse(localStorage.getItem('ymca-missionmagicianauto-cfg')) || {};
+    } catch (e) { /* nothing set */ }
+    held.on = !!on;
+    try {
+        localStorage.setItem('ymca-missionmagicianauto-cfg', JSON.stringify(held));
+    } catch (e) { /* private window */ }
+}
+
+/**
+ * Called by the panel once a Tick the player asked for has happened.
+ *
+ * The table is the judge: `mmRecount` puts `mm-ok` on it when every line it can
+ * judge is covered and `mm-short` while one is not, so this reads the same
+ * answer the player is looking at rather than working it out a second way.
+ */
+function mmaAfterTick(panel, ctx) {
+    if (!mmaAvailable() || !mmaArmed()) return;
+    /* ITS OWN STORE, NOT THE PANEL'S. This is called from MissionMagician's
+     * tick with MissionMagician's context, and `ctx.store` is namespaced to
+     * whoever owns it — so reading the hold through it read a setting that was
+     * never written and quietly waited the default. A module that is handed
+     * somebody else's context asks the shell for its own. */
+    const own = YMCA.contextFor('missionmagicianauto');
+    const note = panel.querySelector('#mma-note');
+    const say = (html, bad) => {
+        if (!note) return;
+        note.hidden = false;
+        note.className = `alert ${bad ? 'alert-warning' : 'alert-success'}`;
+        note.style.cssText = 'padding:6px 10px;margin:8px 0 0';
+        note.innerHTML = html;
+    };
+
+    const table = panel.querySelector('.mm-table');
+    if (!table || !table.classList.contains('mm-ok')) {
+        mmaNotGreen(panel, own, say);
+        return;
+    }
+    mmaRun.shortOn = null;
+
+    const button = mmaNextButton();
+    if (!button) {
+        say('<b>Not dispatched.</b> This window has no <i>Dispatch and Next</i> button, and '
+            + 'nothing else here does the same thing.', true);
+        own.log.warn('no dispatch-and-next on this page');
+        return;
+    }
+
+    const hold = mmaHold(mmaCfg(own));
+    say(`<b>Everything is covered.</b> Dispatching in a moment.
+    <button type="button" class="btn btn-xs btn-danger" data-do="mma-stop"
+      style="margin-left:8px">Stop</button>`);
+
+    let cancelled = false;
+    note.querySelector('[data-do="mma-stop"]').addEventListener('click', () => {
+        cancelled = true;
+        mmaSetArmed(false);
+        say('<b>Stopped.</b> Auto is off; press Dispatch yourself.', true);
+        own.log.info('stopped by the player');
+        panel.querySelectorAll('[data-cfg="mmaOn"]').forEach((b) => { b.checked = false; });
+    });
+
+    setTimeout(() => {
+        if (cancelled || !mmaArmed()) return;
+        own.log.info('dispatching', 'every line covered');
+        button.click();
+    }, hold);
+}
+
+/* ----------------------------------------------------------- the run-through */
+
+/**
+ * What it is in the middle of.
+ *
+ * `shortOn` is the mission it has been trying and failing to fill, with how
+ * many tries have gone by; `tickedOn` is the mission it has already pressed
+ * Tick for, so a redraw does not press it again. Both are one mission at a
+ * time, because that is all there ever is.
+ */
+const mmaRun = { shortOn: null, tries: 0, tickedOn: null };
+
+const mmaMissionId = () => (/\/missions\/(\d+)/.exec(
+    document.getElementById('mission-form')?.getAttribute('action') || location.pathname,
+) || [])[1] || '';
+
+/**
+ * Red, and still red after trying again.
+ *
+ * The first time through is not a verdict: the game fills a mission window in
+ * over several seconds, and a vehicle that arrives late is exactly the one that
+ * would have finished the table. So it ticks again, a second apart, twice more.
+ * Only then is the mission left alone — on to the next one the game offers, and
+ * where it offers none, the window closes.
+ */
+function mmaNotGreen(panel, own, say) {
+    const mission = mmaMissionId();
+    if (mmaRun.shortOn !== mission) {
+        mmaRun.shortOn = mission;
+        mmaRun.tries = 0;
+    }
+    mmaRun.tries += 1;
+    const cfg = mmaCfg(own);
+    const allowed = Number.isFinite(Number(cfg.tries)) ? Number(cfg.tries) : 3;
+
+    if (mmaRun.tries < allowed) {
+        say(`<b>Still short.</b> Trying again &mdash; ${mmaRun.tries} of ${allowed}.`, true);
+        own.log.info('short, trying again', `${mmaRun.tries} of ${allowed}`);
+        setTimeout(() => {
+            if (!mmaArmed() || mmaMissionId() !== mission) return;
+            panel.querySelector('[data-do="select"]')?.click();
+        }, 1000);
+        return;
+    }
+
+    say('<b>Still short after ' + allowed + ' tries.</b> Moving on.', true);
+    own.log.info('short after every try', `${allowed} on mission ${mission}`);
+    mmaMoveOn(own, say, mission);
+}
+
+/**
+ * On to the next mission, or out.
+ *
+ * `#mission_next_mission_btn` is the game's own "Next Mission" with the count
+ * beside it, and its href names the mission it goes to — so a button pointing
+ * at the mission already open is not a way on, it is a loop, and it is treated
+ * as no button at all. Where there is no way on, Escape closes the window the
+ * same way it does when a transport queue runs out.
+ */
+function mmaMoveOn(own, say, mission) {
+    const next = document.getElementById('mission_next_mission_btn');
+    const goesTo = (/\/missions\/(\d+)/.exec(next?.getAttribute('href') || '') || [])[1] || '';
+    if (next && goesTo && goesTo !== mission) {
+        own.log.info('next mission', goesTo);
+        setTimeout(() => { if (mmaArmed()) next.click(); }, 400);
+        return;
+    }
+    const cfg = mmaCfg(own);
+    const wait = Number.isFinite(Number(cfg.closeAfter)) ? Number(cfg.closeAfter) : 600;
+    say(`<b>Nothing else to go to.</b> Closing in ${wait} ms.`, true);
+    own.log.info('no next mission, closing', next ? 'it points at this one' : 'no button');
+    setTimeout(() => {
+        if (!mmaArmed()) return;
+        const press = (doc) => {
+            for (const type of ['keydown', 'keyup']) {
+                doc.dispatchEvent(new KeyboardEvent(type, {
+                    key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
+                    bubbles: true, cancelable: true,
+                }));
+            }
+        };
+        try {
+            if (window.top !== window.self) press(window.top.document);
+        } catch (e) { /* a frame from somewhere else is not ours to close */ }
+        press(document);
+    }, wait);
+}
+
+/**
+ * A mission that has just opened, with Auto armed: press Tick.
+ *
+ * Called once the panel has drawn. Keyed on the mission id so a redraw — and
+ * the game redraws a mission window several times as it fills — presses it
+ * once, not once per redraw.
+ */
+function mmaAfterDraw(panel, ctx) {
+    if (!mmaAvailable() || !mmaArmed()) return;
+    const mission = mmaMissionId();
+    if (!mission || mmaRun.tickedOn === mission) return;
+    if (!panel.querySelector('.mm-table')) return;
+    mmaRun.tickedOn = mission;
+    mmaRun.shortOn = null;
+    mmaRun.tries = 0;
+    YMCA.contextFor('missionmagicianauto').log.info('new mission, ticking', mission);
+    setTimeout(() => {
+        if (mmaArmed() && mmaMissionId() === mission) {
+            panel.querySelector('[data-do="select"]')?.click();
+        }
+    }, 300);
+}
+
+YMCA.register({
+    id: 'missionmagicianauto',
+    title: 'MissionMagician Auto',
+    tagline: 'Dispatch when it is green',
+    description: 'Presses the game’s own Dispatch and Next once you have ticked and every '
+        + 'line is covered. It dispatches, and an alarm cannot be taken back.',
+
+    mainTile: false,
+    optional: true,
+    /* Off. It sends vehicles. */
+    defaultOn: false,
+
+    settings(el, ctx) {
+        const cfg = mmaCfg(ctx);
+        el.innerHTML = `
+      <div class="ymca-note bad"><b>This one dispatches.</b> MissionMagician ticks and stops on
+        purpose &mdash; an alarm cannot be taken back. With this on, the tick you press is
+        followed by the game&rsquo;s own <i>Dispatch and Next</i>, and only then.</div>
+
+      <div class="ymca-card">
+        <b>When it fires</b>
+        <ol class="ymca-dim" style="margin:8px 0 0;padding-left:20px">
+          <li>You pressed Tick &mdash; the button or the key. Never a redraw, never a mission
+            opening, never twice for one press.</li>
+          <li>The table is green: every line it can judge is covered. One short and it says so
+            and stops.</li>
+          <li>The window carries <i>Dispatch and Next</i>. Where it does not, nothing is pressed
+            and the panel says why.</li>
+        </ol>
+      </div>
+
+      <div class="ymca-card">
+        <b>Settings</b>
+        <label style="display:block;margin-top:8px">Hold before dispatching
+          <input type="range" data-hold min="0" max="4000" step="100"
+            value="${ctx.esc(String(mmaHold(cfg)))}"
+            style="vertical-align:middle;width:200px;margin:0 8px">
+          <b data-hold-shows></b></label>
+        <label style="display:block;margin-top:10px">Tries before moving on
+          <input type="number" data-tries min="1" max="9" style="width:64px;margin:0 6px"
+            value="${ctx.esc(String(Number.isFinite(Number(cfg.tries)) ? cfg.tries : 3))}">
+          <span class="ymca-dim">one a second &mdash; a vehicle arriving late is often the one
+            that would have finished it</span></label>
+        <label style="display:block;margin-top:10px">Wait before closing
+          <input type="range" data-close min="0" max="3000" step="100"
+            value="${ctx.esc(String(Number.isFinite(Number(cfg.closeAfter))
+        ? cfg.closeAfter : 600))}" style="vertical-align:middle;width:180px;margin:0 8px">
+          <b data-close-shows></b></label>
+        <p class="ymca-dim" style="margin:6px 0 0;font-size:12px">The hold is how long Stop is
+          reachable. The switch that arms it sits in the panel, in the mission itself. When a
+          mission stays short, it goes on to the game's own <i>Next Mission</i>; where that
+          button is missing or points back at the same mission, the window closes.</p>
+      </div>`;
+
+        const tries = el.querySelector('[data-tries]');
+        tries.addEventListener('input', () => {
+            ctx.store.write('cfg', { ...mmaCfg(ctx), tries: Number(tries.value) || 1 });
+            ctx.status(`${tries.value} tries.`);
+        });
+        const closing = el.querySelector('[data-close]');
+        const closeShows = el.querySelector('[data-close-shows]');
+        const sayClose = () => { closeShows.textContent = `${closing.value} ms`; };
+        sayClose();
+        closing.addEventListener('input', sayClose);
+        closing.addEventListener('change', () => {
+            ctx.store.write('cfg', { ...mmaCfg(ctx), closeAfter: Number(closing.value) });
+            ctx.status(`Closing after ${closing.value} ms.`);
+        });
+
+        const hold = el.querySelector('[data-hold]');
+        const shows = el.querySelector('[data-hold-shows]');
+        const say = () => { shows.textContent = `${hold.value} ms`; };
+        say();
+        hold.addEventListener('input', say);
+        hold.addEventListener('change', () => {
+            ctx.store.write('cfg', { ...mmaCfg(ctx), hold: Number(hold.value) });
+            ctx.status(`Holding ${hold.value} ms.`);
+        });
+    },
+});
 
 /* --------------------------------------------------------------------------
  * RecruitDude — every station's hiring, on one screen.
@@ -6647,6 +7062,16 @@ YMCA.inject('highfive', (ctx) => {
  * distance carries its unit, free beds are `n / n`, tax ends in `%`, and the
  * department is a label that says Yes or No. A row that answers none of them is
  * left out rather than guessed at.
+ *
+ * THE POLICE BRANCH IS READ THE SAME WAY, WITHOUT HAVING BEEN SEEN. A prison is
+ * `/vehicles/<id>/gefangener/<cell>` and its list has never come back from a
+ * capture, so nothing here is written for it specially — and nothing needs to
+ * be, as long as it states its figures the way the hospital list does. Free
+ * cells as `n / n` and a distance with its unit are all the rule needs; a page
+ * with no tax column and no department label simply has neither read, which
+ * leaves it a plain distance case. That is the safe end to be wrong on, and if
+ * a prison list turns out to say it differently the capture button on that page
+ * is what settles it.
  * ------------------------------------------------------------------------ */
 
 const HFA_BUTTON_ID = 'ymca-hfa-btn';
@@ -6671,9 +7096,12 @@ function hfaRead(tr) {
     const tax = rest.map((t) => /^(\d[\d.,]*)\s*%$/.exec(t)).find(Boolean);
     const label = tr.querySelector('.label');
     const said = (label?.textContent || '').trim();
+    const href = link.getAttribute('href') || '';
     return {
         row: tr,
-        href: link.getAttribute('href'),
+        href,
+        // The link carries both ids; the second one is the facility.
+        facilityId: (/\/(?:patient|gefangener)\/(-?\d+)/.exec(href) || [])[1] || '',
         name: (tr.cells[0]?.firstChild?.textContent || cells[0] || '').trim().slice(0, 60),
         km: distance ? hfNum(distance) : null,
         free: beds ? Number(beds[1]) : null,
@@ -6716,6 +7144,69 @@ function hfaChoose(rows, cfg) {
         : { pick: nearest, why: 'nearest', pool: pool.length, treating: treating.length };
 }
 
+/* ------------------------------------------------------------ the feedback */
+
+const HFA_TOASTS_ID = 'ymca-hfa-toasts';
+const HFA_TOAST_LIVES = 45e3;
+
+/**
+ * Where a transport went, in the corner, still there on the next page.
+ *
+ * THE TOP DOCUMENT IS WHY IT SURVIVES. Everything else here happens inside the
+ * vehicle window, which is a frame that reloads on every send — anything drawn
+ * in there is gone before it can be read. The map's own document does not
+ * reload, so that is where the blocks go, and they stack up as the queue works
+ * through itself.
+ *
+ * Both halves are links: the vehicle by its own id, the facility by the id the
+ * destination link carried. `lightbox-open` is the game's own class for opening
+ * one of its pages over the map, so these open the way the game's own links do,
+ * and stay plain links if that handler is not bound.
+ */
+function hfaTopDocument() {
+    try {
+        return window.top !== window.self ? window.top.document : document;
+    } catch (e) {
+        return document;   // a frame from somewhere else is not ours to draw in
+    }
+}
+
+function hfaToast(ctx, vehicle, pick) {
+    const doc = hfaTopDocument();
+    let box = doc.getElementById(HFA_TOASTS_ID);
+    if (!box) {
+        box = doc.createElement('div');
+        box.id = HFA_TOASTS_ID;
+        box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147482000;'
+            + 'display:flex;flex-direction:column-reverse;gap:5px;max-width:270px';
+        doc.body.append(box);
+    }
+    const line = doc.createElement('div');
+    /* The game's own alert, so it follows the game into whatever theme it is
+     * wearing rather than carrying a colour of its own. */
+    line.className = 'alert alert-success';
+    line.style.cssText = 'margin:0;padding:5px 9px;font-size:12px;line-height:1.35;'
+        + 'box-shadow:0 1px 4px rgba(0,0,0,.35)';
+    line.innerHTML = `<a class="lightbox-open" href="/vehicles/${encodeURIComponent(vehicle.id)}"
+    >${esc(vehicle.name)}</a> &rarr; <a class="lightbox-open"
+    href="/buildings/${encodeURIComponent(pick.facilityId)}">${esc(pick.name)}</a>
+    <span style="opacity:.75">&middot; ${esc(String(pick.km))}</span>`;
+    box.append(line);
+    while (box.children.length > 8) box.firstElementChild.remove();
+    setTimeout(() => line.remove(), HFA_TOAST_LIVES);
+    ctx.log.info('sent', `${vehicle.name} to ${pick.name}`);
+}
+
+/** What this page is a transport for. The id is in the path; the name is the
+ * heading the game put on it, and `#<id>` where it did not put one. */
+function hfaVehicle() {
+    const id = (/^\/vehicles\/(\d+)/.exec(location.pathname) || [])[1] || '';
+    const head = [...document.querySelectorAll('h1, h2, h3')]
+        .map((h) => (h.textContent || '').replace(/\s+/g, ' ').trim())
+        .find((t) => t && t.length < 60);
+    return { id, name: head || `#${id}` };
+}
+
 /* ------------------------------------------------------------- the sending */
 
 let hfaArmed = false;
@@ -6754,6 +7245,16 @@ function hfaRun(ctx) {
 
     const { pick, why, treating } = choice;
     hfaArmed = true;
+
+    /* GREEN ON THE CELLS, NOT ON THE ROW. Bootstrap's own table styling and the
+     * game's dark theme both put a background on `td`, so a colour on the `<tr>`
+     * sits behind them and nothing shows. `.success` is the game's own class for
+     * exactly this and it is defined for both, so it is set on the row and on
+     * every cell of it — which also means it follows the theme instead of
+     * carrying a colour of YMCA's own. */
+    pick.row.classList.add('success');
+    for (const cell of pick.row.cells) cell.classList.add('success');
+    pick.row.scrollIntoView({ block: 'nearest' });
     const hold = hfaHold(cfg);
     const bar = hfaSay(ctx, `<b>HighFive Auto</b> &rarr; ${ctx.esc(pick.name)}
     &middot; ${ctx.esc(String(pick.km))} away${pick.tax !== null
@@ -6769,13 +7270,17 @@ function hfaRun(ctx) {
         hfaArmed = false;
         ctx.store.write('cfg', { ...hfaCfg(ctx), auto: false });
         hfaPaintButton(ctx);
+        pick.row.classList.remove('success');
+        for (const cell of pick.row.cells) cell.classList.remove('success');
         hfaSay(ctx, '<b>Stopped.</b> Auto is off; pick this one yourself.', true);
         ctx.log.info('stopped by the player');
     });
 
     setTimeout(() => {
         if (cancelled || hfaCfg(ctx).auto !== true) return;
-        ctx.log.info('sending', `${pick.km} away, ${why}`);
+        /* The block goes up before the navigation, because the frame this runs
+         * in is about to be replaced and the map's document is not. */
+        hfaToast(ctx, hfaVehicle(), pick);
         location.href = pick.href;
     }, hold);
     return true;
