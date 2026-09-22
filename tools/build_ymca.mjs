@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.49';
+export const VERSION = '0.0.50';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -159,6 +159,14 @@ function build() {
             // what a crew requirement is answered with.
             if (t.crew) lean.crew = t.crew;
             if (t.education) lean.education = t.education;
+            /* What a vehicle of this type actually carries and actually seats,
+             * both MEASURED off the game — the tank off a selection checkbox,
+             * the seats off the at-mission table's Crew column. They are not
+             * `crew` above, which is the buy page's Max. Crew and a cap
+             * somebody set. Without them here every install starts blind on
+             * water and on people, however many reports have come back. */
+            if (t.tank) lean.tank = t.tank;
+            if (t.crewSeen) lean.crewSeen = t.crewSeen;
             return [id, lean];
         })));
     const parts = [

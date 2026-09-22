@@ -1120,6 +1120,17 @@ each copied one thing are gone and what they copied rides in the report.
   could not match**, and **whatever HighFive has captured**. Deliberately carries
   **no** building names or coordinates. Half of "it does nothing" is "it is
   switched off", and that is not something a player thinks to mention.
+- **Copy what is missing** — the difference between what this install has
+  learnt and what `data/vehicle-types.json` carries: types with no entry, entries
+  with no capabilities, no `tank`, no `crewSeen`, and the requirements nothing
+  could match. **Everything else here says what the game says; this says what is
+  new**, which is the only thing a round trip is ever really spent on. Asking for
+  a whole report and reading four sections of it for the three lines that are new
+  is work on both sides, and the repo ships inside the very script doing the
+  comparing — so it is taken in the page rather than by hand afterwards. It costs
+  nothing but a look at localStorage, so **the same line is on screen the moment
+  Diagnostics opens**, including when it says there is nothing to send. It rides
+  in **Send this one** as `missingFromRepo`.
 - **Send feedback** — a typed note packaged with the version, the page, which
   tool was open and the last 25 log entries. Nothing is transmitted; it lands on
   the clipboard for the player to paste wherever they like.
@@ -1349,6 +1360,26 @@ instead of waiting for each type to happen to be in range of an open mission.
 Where a page carries no such element the type is reported as unanswered, with
 the ids and classes that page *did* have, so the next read knows where to look.
 
+**The repo ships what it has measured, not only what it has named.** Three
+fields, and each answers a different question:
+
+| | |
+|---|---|
+| `capabilities` | the plain attributes off a selection checkbox — what the vehicle covers |
+| `tank` | `{water, foam, bonus}` off `wasser_amount`, `foam_amount_display` and `water_modifier_raw` — what it carries and by how much it lifts the total. A zero is an answer; an absent `tank` is not |
+| `crewSeen` | how many it actually seats, off the at-mission table's Crew column |
+
+`crewSeen` is **not** `crew`, which is the buy page's `Max. Crew` — a cap
+somebody set, kept because the game states it and never used as a measurement.
+
+**A figure with no repo fallback is a figure every install starts blind on.**
+Capabilities were shipped and tanks were not, so four rounds of reports came
+back and a fresh browser still knew nothing about water or people until it had
+watched enough missions to learn each type again. `mmKnownTanks` and
+`mmKnownCrew` read the shipped table first and lay the player's own game over
+the top; the writers keep to their own store, so a repo figure is never frozen
+into somebody's browser where a later read could not correct it.
+
 **Missing capabilities do not stop a vehicle being sent.** In a mission window
 the flags come off each checkbox, so picking and ticking works for every vehicle
 in the game whatever the dataset holds. The dataset answers a narrower
@@ -1403,6 +1434,10 @@ not written down has to be asked for again.
   and foam they carry between them, and which requirement each one is there
   for. A report that cannot answer the question it was pressed for is a round
   trip spent for nothing.
+- A **tank or a crew figure** in `tanksByType` / `crewByType` goes into the same
+  entry as `tank` and `crewSeen`. Both rode in no export at all until 0.0.50 —
+  they are measured off the game, and a measurement that arrives once and is not
+  written down has to be asked for again.
 - A **requirement key** in `missionmagician.unmatchedRequirements` gets an entry
   in `MM_REQUIREMENTS`, or stays listed as unmatched on purpose with a reason.
 - **Mission types** the catalogue does not carry mean `data/missions.json` is

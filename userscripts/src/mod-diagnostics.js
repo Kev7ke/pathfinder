@@ -66,6 +66,16 @@ YMCA.register({
       </div>
 
       <div class="ymca-card">
+        <b>What the repo is missing</b>
+        <p class="ymca-sub" style="margin:4px 0 6px">Everything else here says what the game
+          says. This says what is <i>new</i> &mdash; the vehicle types, the tanks, the seats and
+          the requirements this game has taught your install that the repo does not carry. When
+          it says there is nothing, there is nothing to send.</p>
+        <p data-gap style="margin:0 0 10px"></p>
+        <button class="ymca-btn primary" data-do="gap">Copy what is missing</button>
+      </div>
+
+      <div class="ymca-card">
         <b>Hand over game data</b>
         <p class="ymca-sub" style="margin:4px 0 10px"><b>Vehicle types</b> is the one to send when
           a vehicle YMCA does not know turns up: nothing can be counted by a type it cannot name.
@@ -95,6 +105,20 @@ YMCA.register({
         <textarea id="ymca-diag-out" rows="14" style="width:100%;font-family:ui-monospace,monospace;
           font-size:11.5px" readonly></textarea>
       </div>`;
+
+        /* Said on opening rather than behind a press: a reading somebody has to
+         * remember to ask for is a reading they will not have when it matters,
+         * and this one costs nothing but a look at localStorage. */
+        const gapLine = el.querySelector('[data-gap]');
+        try {
+            const gap = repoGap();
+            gapLine.textContent = repoGapLine(gap);
+            gapLine.className = gap.counts.types || gap.counts.unmatchedRequirements
+                ? 'ymca-accent' : 'ymca-dim';
+        } catch (err) {
+            gapLine.textContent = `Could not be worked out: ${err.message}`;
+            gapLine.className = 'ymca-warn';
+        }
 
         const out = el.querySelector('#ymca-diag-out');
         const put = (obj, what) => {
@@ -232,6 +256,14 @@ async function run(what, ctx, put) {
      * captions, no mission instance ids. The reason there are two buttons is
      * that one of them can be posted in public and the other cannot.
      */
+    if (what === 'gap') {
+        const gap = repoGap();
+        put(gap, `what the repo is missing \u2014 ${gap.counts.types} type`
+            + `${gap.counts.types === 1 ? '' : 's'}`);
+        ctx.log.info('repo gap copied', `${gap.counts.types} types`);
+        return;
+    }
+
     if (what === 'dataset') {
         ctx.status('Gathering\u2026');
         const data = {
@@ -288,6 +320,9 @@ async function run(what, ctx, put) {
 
         /* What the other modules have worked out, read from their stores so a
          * module can change or go without breaking this. */
+        /* The difference, taken here rather than by hand afterwards. The whole
+         * file still carries everything; this is the part that is news. */
+        data.missingFromRepo = repoGap();
         data.trackops = moduleStore('trackops');
         data.missionmagician = moduleStore('missionmagician');
         data.highfive = moduleStore('highfive');
@@ -298,7 +333,9 @@ async function run(what, ctx, put) {
         ctx.download('ymca-dataset.json', text);
         out.value = text;
         ctx.status(`Downloaded ymca-dataset.json \u2014 ${Math.round(text.length / 1024)} KB, `
-            + `${Object.keys(types).length} vehicle types. Nothing in it is yours.`);
+            + `${Object.keys(types).length} vehicle types, `
+            + `${data.missingFromRepo.counts.types} of them with something the repo does not `
+            + 'have. Nothing in it is yours.');
         ctx.log.info('dataset exported', `${Math.round(text.length / 1024)} KB`);
         return;
     }
@@ -509,6 +546,104 @@ function interfaceProbe() {
  * Counts and the game's own constants only. No mission instances, no balance,
  * no names.
  */
+/**
+ * WHAT THIS INSTALL KNOWS AND THE REPO DOES NOT.
+ *
+ * Every other button here answers "what does the game say"; this one answers
+ * "what is missing from the file", which is the only question a round trip is
+ * ever really spent on. Asking for a fresh report and reading four sections of
+ * it to find the three new lines is work on both sides, and it is work a
+ * comparison does for nothing: the repo ships in this very script, so the
+ * difference can be taken here rather than by hand afterwards.
+ *
+ * Four things can be new, and each has one home in `data/vehicle-types.json`:
+ * a type with no entry at all, an entry with no `capabilities`, one with no
+ * `tank` and one with no `crewSeen`. Requirements nothing could match ride
+ * along because they are the same kind of answer — something the repo has to
+ * learn from a game it cannot see.
+ *
+ * It reads stores and the shipped table. Nothing is fetched, so it can be run
+ * on any page and on mount, which is what makes the notice above the buttons
+ * possible at all.
+ */
+function repoGap() {
+    const read = (key, fallback) => {
+        try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch (e) {
+            return fallback;
+        }
+    };
+    const learnt = read('ymca-vehicle-types', {}) || {};
+    const mm = read('ymca-missionmagician-types', {}) || {};
+    const tanks = read('ymca-missionmagician-tanks', {}) || {};
+    const crew = read('ymca-missionmagician-crew-seen', {}) || {};
+    const unmatched = read('ymca-missionmagician-unmatched', []) || [];
+
+    const capsOf = (t) => (Array.isArray(t) ? t : (t && t.caps) || t?.capabilities || []);
+    const nameOf = (id) => (learnt[id] && !Array.isArray(learnt[id]) && learnt[id].name)
+        || (mm[id] && !Array.isArray(mm[id]) && mm[id].name) || null;
+
+    const ids = new Set([...Object.keys(learnt), ...Object.keys(mm),
+        ...Object.keys(tanks), ...Object.keys(crew)]);
+    const types = {};
+    const counts = { noEntry: 0, noCapabilities: 0, noTank: 0, noCrew: 0 };
+    for (const id of [...ids].sort((a, b) => Number(a) - Number(b))) {
+        const shipped = SHIPPED_VEHICLE_TYPES[id];
+        const caps = capsOf(learnt[id]).length ? capsOf(learnt[id]) : capsOf(mm[id]);
+        const why = [];
+        const entry = {};
+        if (!shipped) { why.push('no entry in the repo'); counts.noEntry += 1; }
+        if (nameOf(id) && (!shipped || !shipped.name)) entry.name = nameOf(id);
+        if (caps.length && !(shipped && shipped.capabilities && shipped.capabilities.length)) {
+            entry.capabilities = caps;
+            why.push('the repo has no capabilities for it');
+            counts.noCapabilities += 1;
+        }
+        /* A zero tank is an answer — knowing a patrol car carries nothing is
+         * knowing something — so what counts as missing is the repo having no
+         * `tank` at all, never the figure being nought. */
+        if (tanks[id] && !(shipped && shipped.tank)) {
+            entry.tank = tanks[id];
+            why.push('the repo has no tank for it');
+            counts.noTank += 1;
+        }
+        if (crew[id] > 0 && !(shipped && shipped.crewSeen)) {
+            entry.crewSeen = crew[id];
+            why.push('the repo has no measured crew for it');
+            counts.noCrew += 1;
+        }
+        if (why.length) types[id] = { ...entry, why };
+    }
+
+    const total = Object.keys(types).length;
+    return {
+        note: 'What this install has measured that data/vehicle-types.json does not carry. '
+            + 'Type ids, flags, tanks and seats — the type, never the vehicle, and nothing '
+            + 'about the account.',
+        ymca: YMCA.version,
+        at: new Date().toISOString(),
+        counts: { ...counts, types: total, unmatchedRequirements: unmatched.length },
+        types,
+        unmatchedRequirements: unmatched,
+    };
+}
+
+/** The one line that says whether pressing anything here is worth it. */
+function repoGapLine(gap) {
+    const c = gap.counts;
+    if (!c.types && !c.unmatchedRequirements) {
+        return 'Nothing here that the repo does not already have.';
+    }
+    const bits = [];
+    if (c.noEntry) bits.push(`${c.noEntry} vehicle type${c.noEntry === 1 ? '' : 's'} it has never heard of`);
+    if (c.noCapabilities) bits.push(`${c.noCapabilities} with flags it does not carry`);
+    if (c.noTank) bits.push(`${c.noTank} tank${c.noTank === 1 ? '' : 's'}`);
+    if (c.noCrew) bits.push(`${c.noCrew} crew figure${c.noCrew === 1 ? '' : 's'}`);
+    if (c.unmatchedRequirements) {
+        bits.push(`${c.unmatchedRequirements} requirement${c.unmatchedRequirements === 1 ? '' : 's'} nothing could match`);
+    }
+    return `This game has taught YMCA ${bits.join(', ')} that the repo does not have.`;
+}
+
 function moduleStore(moduleId) {
     const read = (key, fallback) => {
         try {
@@ -566,10 +701,26 @@ function moduleStore(moduleId) {
         // Published by MissionMagician into its own store, so this stays a reader.
         const claimed = new Set(read('mappedFlags', []) || []);
 
+        /* WHAT IT MEASURED, NOT ONLY WHAT IT FLAGGED. Tanks and crew live in
+         * stores of their own and rode in no export at all, so three rounds of
+         * reports could come back and the repo still start every install blind
+         * on water and on people. They are the game's own figures — a tank off
+         * a selection checkbox, seats off the at-mission Crew column — and a
+         * figure that arrives once and is not written down has to be asked for
+         * again. */
+        const readKey = (key, fallback) => {
+            try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch (e) {
+                return fallback;
+            }
+        };
         return {
             vehicleTypesLearnt: Object.keys(types).length,
             learntTypes: types,
             capabilitiesByType: capsByType,
+            typeNames: Object.fromEntries(Object.entries(types)
+                .filter(([, t]) => t && t.name).map(([id, t]) => [id, t.name])),
+            tanksByType: readKey('ymca-missionmagician-tanks', {}),
+            crewByType: readKey('ymca-missionmagician-crew-seen', {}),
             flagVocabulary: Object.fromEntries(Object.entries(vocabulary)
                 .sort(([a], [b]) => a.localeCompare(b))),
             /* The flags no requirement asks for yet: whatever answers an

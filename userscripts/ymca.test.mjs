@@ -315,6 +315,42 @@ assert.equal(report.ymca, VERSION, 'the report must carry the version the build 
 assert.equal(report.entryPoint, 'navbar', 'the report should say how YMCA was reached');
 assert.ok(report.log.length > 0, 'the report carries no log');
 
+// ---- what the repo is missing, said without anybody asking for it ----
+// Four rounds went on asking for a report and reading it for the three lines that were new.
+// The repo ships inside this very script, so the difference can be taken here instead.
+await pg.evaluate(() => {
+  localStorage.setItem('ymca-missionmagician-types', JSON.stringify({
+    999: { caps: ['fire', 'newfangled'], name: 'Something Nobody Ships' },
+  }));
+  localStorage.setItem('ymca-missionmagician-tanks', JSON.stringify({
+    999: { water: 3000, foam: 0, bonus: 25 },
+  }));
+  localStorage.setItem('ymca-missionmagician-crew-seen', JSON.stringify({ 999: 3 }));
+});
+// It is worked out on opening, so stepping out and back in is what redraws it.
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="diagnostics"]');
+await pg.waitForSelector('[data-do="gap"]');
+const gapSaid = (await pg.textContent('[data-gap]')).replace(/\s+/g, ' ').trim();
+console.log('repo gap said     :', gapSaid);
+assert.match(gapSaid, /never heard of/, 'the notice says a type is new without being pressed');
+await pg.click('[data-do="gap"]');
+await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('noCapabilities'));
+const gap = JSON.parse(await pg.inputValue('#ymca-diag-out'));
+console.log('repo gap          :', JSON.stringify(gap.types['999']));
+assert.deepEqual(gap.types['999'].capabilities, ['fire', 'newfangled'],
+  'the flags this game taught ride in it');
+assert.deepEqual(gap.types['999'].tank, { water: 3000, foam: 0, bonus: 25 },
+  'and the tank, which no export carried at all before');
+assert.equal(gap.types['999'].crewSeen, 3, 'and the seats measured off the Crew column');
+assert.equal(gap.types['999'].name, 'Something Nobody Ships', 'named, so it can be written down');
+// A type the repo already carries in full is not news.
+assert.ok(!gap.types['13'], 'the Quint is shipped, so it is not in what is missing');
+await pg.evaluate(() => {
+  localStorage.removeItem('ymca-missionmagician-tanks');
+  localStorage.removeItem('ymca-missionmagician-crew-seen');
+});
+
 // ---- the catalogue reads itself, so no install waits on a release ----
 // The buy pages name every type the game sells, and the sweep reads them on its own a few
 // seconds after the page settles. Nobody presses anything, and nobody exports anything.

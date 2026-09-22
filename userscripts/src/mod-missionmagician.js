@@ -560,7 +560,7 @@ const MM_TANKS_KEY = 'ymca-missionmagician-tanks';
  * answer; not knowing what a tanker carries is not, and the panel says which
  * of the two it is.
  */
-function mmKnownTanks() {
+function mmStoredTanks() {
     try {
         return JSON.parse(localStorage.getItem(MM_TANKS_KEY)) || {};
     } catch (e) {
@@ -568,8 +568,28 @@ function mmKnownTanks() {
     }
 }
 
+/**
+ * THE REPO IS THE HEAD START, THIS GAME IS THE TRUTH.
+ *
+ * Capabilities were shipped and tanks were not, so every install began blind on
+ * water however many reports had come back — a figure that arrives once and is
+ * not written down has to be asked for again. Shipped first, what this game
+ * taught laid over the top, and the writer keeps to its own store so a repo
+ * figure is never frozen into somebody's browser.
+ */
+function mmKnownTanks() {
+    const tanks = {};
+    for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) {
+        if (t.tank && typeof t.tank === 'object') {
+            tanks[id] = { water: t.tank.water || 0, foam: t.tank.foam || 0,
+                bonus: t.tank.bonus || 0 };
+        }
+    }
+    return { ...tanks, ...mmStoredTanks() };
+}
+
 function mmLearnTanks(vehicles) {
-    const tanks = mmKnownTanks();
+    const tanks = mmStoredTanks();
     let changed = false;
     for (const v of vehicles) {
         if (!v.typeId) continue;
@@ -582,7 +602,9 @@ function mmLearnTanks(vehicles) {
     if (changed) {
         try { localStorage.setItem(MM_TANKS_KEY, JSON.stringify(tanks)); } catch (e) { /* private */ }
     }
-    return tanks;
+    /* What was just learnt over what the repo shipped: a type this game has
+     * never put in a selection table still answers from the file. */
+    return mmKnownTanks();
 }
 
 function mmLearnTypes(vehicles) {
@@ -651,10 +673,19 @@ function mmCrewColumn(table) {
     return cell ? cell.cellIndex : -1;
 }
 
-function mmKnownCrew() {
+function mmStoredCrew() {
     try {
         return JSON.parse(localStorage.getItem(MM_CREW_SEEN_KEY)) || {};
     } catch (e) { return {}; }
+}
+
+/** Shipped seats first, what this game stated over the top. See mmKnownTanks. */
+function mmKnownCrew() {
+    const crew = {};
+    for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) {
+        if (t.crewSeen > 0) crew[id] = t.crewSeen;
+    }
+    return { ...crew, ...mmStoredCrew() };
 }
 
 function mmWriteCrew(crew) {
@@ -719,6 +750,10 @@ function mmOnScene(known, countDriving = true) {
      * once per row. A table that does not carry one simply teaches nothing. */
     const crewColumn = new Map();
     const crew = mmKnownCrew();
+    /* What this game has stated, kept apart from what the repo shipped: only
+     * the first is written back, so a repo figure is never frozen into a
+     * browser where a later read could not correct it. */
+    const crewSeenHere = mmStoredCrew();
     let learntCrew = false;
     const take = (rows) => {
         for (const row of rows) {
@@ -733,8 +768,9 @@ function mmOnScene(known, countDriving = true) {
             const at = table ? crewColumn.get(table) : -1;
             if (at >= 0) {
                 const said = Number((row.cells[at]?.textContent || '').trim());
-                if (Number.isFinite(said) && said > 0 && crew[typeId] !== said) {
+                if (Number.isFinite(said) && said > 0 && crewSeenHere[typeId] !== said) {
                     crew[typeId] = said;
+                    crewSeenHere[typeId] = said;
                     learntCrew = true;
                 }
             }
@@ -750,7 +786,7 @@ function mmOnScene(known, countDriving = true) {
     const drivingCount = countDriving ? take(driving) : 0;
     /* Counted or not, how many are on the way is worth saying. */
     const drivingSeen = driving.length;
-    if (learntCrew) mmWriteCrew(crew);
+    if (learntCrew) mmWriteCrew(crewSeenHere);
     return {
         counts, vehicles, unknown, unreadable, total, typeIds,
         atCount, drivingCount, drivingSeen, countDriving, crew,
