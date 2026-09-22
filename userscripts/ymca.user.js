@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.48
+// @version      0.0.49
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.48',
+    version: '0.0.49',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2623,8 +2623,9 @@ function mmLearnTanks(vehicles) {
     for (const v of vehicles) {
         if (!v.typeId) continue;
         const had = tanks[v.typeId];
-        if (had && had.water === v.water && had.foam === v.foam) continue;
-        tanks[v.typeId] = { water: v.water || 0, foam: v.foam || 0 };
+        if (had && had.water === v.water && had.foam === v.foam
+            && had.bonus === (v.waterBonus || 0)) continue;
+        tanks[v.typeId] = { water: v.water || 0, foam: v.foam || 0, bonus: v.waterBonus || 0 };
         changed = true;
     }
     if (changed) {
@@ -2996,6 +2997,13 @@ function mmVehicle(row) {
         distance: Number(row.getAttribute('data-distance')) || 0,
         water: num('wasser_amount'),
         foam: num('foam_amount_display'),
+        /* A TANKER MULTIPLIES WHAT IS THERE, AND THE GAME SAYS BY HOW MUCH.
+         * `water_modifier_raw` sits on the same checkbox as `wasser_amount` —
+         * 25 on a Water Tanker and on a Pumper Tanker — and the game's own
+         * `calculateWaterBar` sums it across the ticked boxes into
+         * `water_total_modifier` beside the plain total. So the bonus is read,
+         * not a number anybody here worked out. */
+        waterBonus: num('water_modifier_raw') || num('water_modifier'),
         /* Everything the game flagged, so a requirement nothing here maps can
          * still be answered from the page's own vocabulary. */
         flags: mmFlagsOn(box),
@@ -3284,47 +3292,88 @@ async function mmPlan(page, ctx, cfg) {
             if (!wanted) continue;
             const which = key === 'water_needed' ? 'water' : 'foam';
             const carried = (v) => v[which];
+
+            /* A TANKER MULTIPLIES WHAT IS THERE, AND ADDING THE LOADS UP IGNORED
+             * IT — which is why the panel sent three times the water asked for.
+             *
+             * The game writes `water_modifier_raw` on a tanker's own checkbox —
+             * 25 on a Water Tanker and on a Pumper Tanker, absent on a Quint —
+             * and its own `calculateWaterBar` sums those across the ticked boxes
+             * into `water_total_modifier` beside the plain total. So the bonus
+             * is the game's own field, applied the way the game's own code adds
+             * it up: the loads are totalled and the percentages raise the lot.
+             *
+             * That is why WATER TANKERS FILL A FIRE FIRST without being named:
+             * a tanker carries a big load *and* lifts everything already there,
+             * so its gain outgrows any engine's the moment anything is on
+             * scene. Foam carries no such field, so foam is a plain sum.
+             *
+             * THE GAME'S OWN BAR IS NOT THE MEASURE. It counts what is actually
+             * available, not what the call is short of, so nothing here is
+             * calibrated against it. */
+            const bonusOf = (v) => (which === 'water' ? v.waterBonus || 0 : 0);
+            const sceneBonus = which === 'water'
+                ? scene.typeIds.reduce((n, id) => n + (tanks[id]?.bonus || 0), 0) : 0;
             const onScene = sceneCarries(which);
-            let have = onScene + [...picked.values()].reduce((n, v) => n + carried(v), 0);
-            /* THE BIGGEST TANK THAT STILL FITS, AND ONLY THEN THE SMALLEST THAT
-             * FINISHES IT.
+
+            let base = onScene;
+            let bonus = sceneBonus;
+            for (const v of picked.values()) { base += carried(v); bonus += bonusOf(v); }
+            const effective = (b, m) => Math.round(b * (1 + m / 100));
+            /* What adding this one would really be worth, at this moment: its
+             * own load raised by every percentage already committed, plus its
+             * own percentage raising everything already there. */
+            const gain = (v) => effective(base + carried(v), bonus + bonusOf(v))
+                - effective(base, bonus);
+
+            /* THE BIGGEST THAT STILL FITS — WHILE IT IS ACTUALLY FILLING THE
+             * GAP — AND OTHERWISE THE SMALLEST THAT FINISHES IT.
              *
-             * Two wrong answers got here. Filling in arrival order sent
-             * whatever happened to be close, and what is close is engines:
-             * asked for 20,000 gallons the panel picked eleven when four were
-             * wanted. Biggest-first fixed that and overshot the other way — a
-             * fire wanting 20,000 took the one tanker that carries 30,000,
-             * spending a vehicle half again over and leaving it out of reach of
-             * the next call.
+             * Four wrong answers got here. Filling in arrival order sent
+             * whatever happened to be close, and what is close is engines.
+             * Biggest-first overshot the other way — a fire wanting 20,000 took
+             * the one tanker carrying 30,000. So: how little is wasted, not how
+             * few are sent.
              *
-             * What both missed is that the question is how little is wasted,
-             * not how few are sent. So: the biggest tank that still fits inside
-             * what is left, over and over, which lands as close to the figure
-             * as the fleet allows — 12,000 then 4,000 then 4,000 for a 20,000
-             * fire rather than one 30,000 tanker. Only when nothing fits any
-             * more does the smallest tank that would finish it go, because at
-             * that point some overshoot is the whole choice.
+             * Then "the smallest" turned out to mean the smallest of the whole
+             * pool rather than the smallest that finishes, which dribbled
+             * fifty-gallon brush trucks in one at a time.
              *
-             * Big tanks still go first while they fit, so the eleven engines
-             * never come back: they are only reached when nothing bigger is
-             * left, which is exactly when they are the right answer. Ties are
-             * broken by the clock, as ever. */
-            const bySmallest = (a, b) => carried(a) - carried(b) || mmOrder(a, b);
-            const byBiggest = (a, b) => carried(b) - carried(a) || mmOrder(a, b);
+             * AND A VEHICLE THAT FITS IS NOT THEREFORE WORTH SENDING. Once the
+             * tankers are on, what is left is small and every engine in the
+             * fleet fits it — five of them went where one more tanker would
+             * have done, which is the nine-appliance send that was complained
+             * about. A vehicle covering less than half of what is left is not
+             * filling the gap, so where one vehicle can finish the job instead,
+             * that one goes. Not at any price: a finisher worth more than twice
+             * what is left is its own kind of waste, and then the fitting one
+             * goes after all. */
             const pool = vehicles.filter((v) => carried(v) && !picked.has(v.id));
-            while (have < wanted && pool.length) {
-                const remaining = wanted - have;
-                const fits = pool.filter((v) => carried(v) <= remaining);
-                const next = fits.length
-                    ? fits.sort(byBiggest)[0]
-                    : pool.slice().sort(bySmallest)[0];
+            while (effective(base, bonus) < wanted && pool.length) {
+                const remaining = wanted - effective(base, bonus);
+                const scored = pool.map((v) => ({ v, gain: gain(v) }))
+                    .filter((g) => g.gain > 0);
+                if (!scored.length) break;
+                const fits = scored.filter((g) => g.gain <= remaining)
+                    .sort((a, b) => b.gain - a.gain || mmOrder(a.v, b.v))[0];
+                const finishes = scored.filter((g) => g.gain >= remaining)
+                    .sort((a, b) => a.gain - b.gain || mmOrder(a.v, b.v))[0];
+                let choice;
+                if (fits && fits.gain >= remaining / 2) choice = fits;
+                else if (finishes && finishes.gain <= remaining * 2) choice = finishes;
+                else choice = fits || finishes
+                    || scored.sort((a, b) => b.gain - a.gain || mmOrder(a.v, b.v))[0];
+                const next = choice.v;
                 pool.splice(pool.indexOf(next), 1);
                 picked.set(next.id, next);
-                have += carried(next);
+                base += carried(next);
+                bonus += bonusOf(next);
             }
             lines.push({
                 key, label: rule.label, icon: rule.icon, wanted,
-                found: onScene, unit: rule.unit, carries: key, onScene,
+                found: effective(onScene, sceneBonus), unit: rule.unit, carries: key,
+                onScene: effective(onScene, sceneBonus),
+                sceneBase: onScene, sceneBonus,
             });
         }
 
@@ -4507,6 +4556,10 @@ function mmRecount(panel, plan) {
         has: (flag) => box.getAttribute(flag) === '1',
         water: Number(box.getAttribute('wasser_amount')) || 0,
         foam: Number(box.getAttribute('foam_amount_display')) || 0,
+        /* The tanker's own percentage, off the game's own field — the same one
+         * `calculateWaterBar` totals into `water_total_modifier`. */
+        waterBonus: Number(box.getAttribute('water_modifier_raw'))
+            || Number(box.getAttribute('water_modifier')) || 0,
         /* The box says which type it is; what that type seats was measured off
          * the game's own Crew column at some mission or other. */
         crew: crew[box.getAttribute('vehicle_type_id')] || 0,
@@ -4517,12 +4570,26 @@ function mmRecount(panel, plan) {
     for (const line of plan.lines) {
         if (line.unmatched) continue;
         judged = true;
-        const byTick = line.unit
-            ? ticked.reduce((n2, v) => n2 + (line.carries === 'personnel' ? v.crew
-                : (line.carries === 'water_needed' ? v.water : v.foam)), 0)
-            : ticked.filter((v) => mmMeets(v, line.rule)).length;
+        /* WATER IS COUNTED THE WAY THE PLAN PICKED IT, or the row would call a
+         * send short that the game is about to accept: the loads add up and the
+         * tankers' percentages raise the lot, scene and ticked together. Foam
+         * and seats carry no such field, so they stay plain sums. */
+        let byTick;
+        if (line.carries === 'water_needed') {
+            const base = (line.sceneBase || 0)
+                + ticked.reduce((n2, v) => n2 + v.water, 0);
+            const bonus = (line.sceneBonus || 0)
+                + ticked.reduce((n2, v) => n2 + (v.water ? v.waterBonus : 0), 0);
+            line.found = Math.round(base * (1 + bonus / 100));
+            byTick = line.found - line.onScene;
+        } else {
+            byTick = line.unit
+                ? ticked.reduce((n2, v) => n2 + (line.carries === 'personnel' ? v.crew
+                    : v.foam), 0)
+                : ticked.filter((v) => mmMeets(v, line.rule)).length;
+            line.found = line.onScene + byTick;
+        }
         line.ticked = byTick;
-        line.found = line.onScene + byTick;
         if (line.found < line.wanted) allMet = false;
 
         const show = (attr, value) => {

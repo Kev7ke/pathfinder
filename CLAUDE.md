@@ -836,6 +836,34 @@ Big tanks still go first while they fit, so eleven engines are only reached when
 nothing bigger is left — which is exactly when they are the right answer. Ties
 broken by travel time.
 
+**A tanker multiplies what is there, and the game says by how much.**
+`water_modifier_raw` sits on the tanker's own checkbox — 25 on a Water Tanker
+and on a Pumper Tanker, absent on a Quint — and the game's own
+`calculateWaterBar` sums those across the ticked boxes into
+`water_total_modifier` beside the plain total. Adding the loads up flat ignored
+it, which is how a fire wanting 20,000 gallons was sent 60,000. So the loads are
+totalled and the percentages raise the lot, the way the game's own code does it,
+and what a vehicle is worth is the **marginal** gain at that moment: its load
+raised by every percentage already committed, plus its own percentage raising
+everything already there. That is also why **tankers fill a fire first without
+being named** — a tanker carrying a big load *and* lifting everything already
+there outgrows any engine the moment anything is on scene. Foam carries no such
+field, so foam stays a plain sum.
+
+**The game's own water bar is not the measure.** It counts what is actually
+available, not what the call is short of, so nothing here is calibrated against
+it.
+
+**A vehicle that fits is not therefore worth sending.** Once the tankers are on,
+what is left is small and every engine in the fleet fits it — five went where
+one more tanker would have done, which is the nine-appliance send that was
+complained about. A vehicle covering **less than half of what is left** is not
+filling the gap, so where one vehicle can finish the job instead, that one goes.
+Not at any price: a finisher worth more than twice what is left is its own kind
+of waste, and then the fitting one goes after all. And "the smallest that
+finishes" has to mean exactly that — taken as the smallest of the whole pool it
+dribbled fifty-gallon brush trucks in one at a time.
+
 **A tank already on its way counted for nothing.** The amount lines shipped with
 `onScene: 0` because the tally beside them counts vehicles by flag and a tank is
 not a flag — so a call with two Water Tankers and eight Pumper Tankers already

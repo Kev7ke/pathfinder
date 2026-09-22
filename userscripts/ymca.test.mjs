@@ -2133,6 +2133,56 @@ assert.deepEqual(took.sort((a, b) => b - a), [12000, 4000, 4000],
 await mission.click('#ymca-mm-panel [data-do="clear"]');
 await mission.waitForTimeout(300);
 
+// ---- a tanker multiplies what is there, and the game says by how much ----
+// `water_modifier_raw` is the game's own field, summed by its own calculateWaterBar. Ignoring it
+// is why a fire wanting 20,000 was sent 60,000; and once the tankers are on, every engine in the
+// fleet fits the little that is left, which is the tail of appliances that came with it.
+await mission.evaluate(() => {
+  document.getElementById('vehicle_show_table_body_all').innerHTML = '';
+  // Three Water Tankers and four Pumper Tankers, each lifting the total by a quarter, and a
+  // yard full of engines that carry a little and lift nothing.
+  const fleet = [[401, 3000, 25, '41'], [402, 3000, 25, '41'], [403, 3000, 25, '41'],
+    [404, 2500, 25, '42'], [405, 2500, 25, '42'], [406, 2500, 25, '42'], [407, 2500, 25, '42'],
+    [411, 500, 0, '33'], [412, 500, 0, '33'], [413, 500, 0, '33'], [414, 500, 0, '33'],
+    [415, 500, 0, '33'], [416, 500, 0, '33'], [417, 500, 0, '33'], [418, 500, 0, '33']];
+  for (const [id, water, mod, type] of fleet) {
+    const tr = document.createElement('tr');
+    tr.className = 'vehicle_select_table_tr';
+    tr.setAttribute('vehicle_id', String(id));
+    tr.setAttribute('data-distance', '5');
+    tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox" value="${id}"
+      id="vehicle_checkbox_${id}" name="vehicle_ids[]" vehicle_type_id="${type}" fms="2"
+      fire="1" wasser_amount="${water}"
+      ${mod ? `water_modifier="${mod}" water_modifier_raw="${mod}"` : ''}></td>
+      <td id="vehicle_sort_${id}" timevalue="${300 + id}">5 min.</td>`;
+    document.getElementById('vehicle_show_table_body_all').append(tr);
+  }
+  window.__catalogue = [{
+    id: '312', name: 'Tank farm fire', average_credits: 9000,
+    requirements: { water_needed: 20000 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  localStorage.removeItem('ymca-missionmagician-tanks');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '312');
+});
+await mission.waitForTimeout(1200);
+await mission.click('#ymca-mm-panel [data-do="select"]');
+await mission.waitForTimeout(400);
+const bonusTook = await mission.evaluate(() => [...document.querySelectorAll('.vehicle_checkbox')]
+  .filter((b) => b.checked).map((b) => Number(b.getAttribute('wasser_amount'))));
+console.log('water with bonus  :', JSON.stringify(bonusTook.slice().sort((a, b) => b - a)));
+assert.deepEqual(bonusTook.slice().sort((a, b) => b - a), [3000, 3000, 3000, 2500],
+  'three Water Tankers and one Pumper Tanker carry 11,500 gallons and lift them by a whole '
+  + 'hundred per cent, so 20,000 is covered without a single engine being sent');
+// And the row says so: the panel counts the ticking the way the game's own bar would.
+const bonusRow = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())).find((r) => /Water/.test(r[4])));
+console.log('water row         :', JSON.stringify(bonusRow));
+assert.ok(bonusRow && Number(String(bonusRow[3]).replace(/[^0-9]/g, '')) >= 20000,
+  'the covered figure is what the game would pour, bonus and all');
+await mission.click('#ymca-mm-panel [data-do="clear"]');
+await mission.waitForTimeout(300);
+
 // And a tank already on its way counts. The type is learnt off the checkbox above, so the row
 // at the mission needs only its type id — which is all such a row ever carries.
 await mission.evaluate(() => {
