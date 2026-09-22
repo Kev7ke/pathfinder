@@ -130,16 +130,6 @@ function sfMount(ctx) {
     return true;
 }
 
-YMCA.inject('stationfascination', (ctx) => {
-    /* The station list is on the map, and a mission frame's address bar says
-     * `/` as well — so the frame is what is ruled out, not the path. */
-    if (window.top !== window.self) return true;
-    /* The rule goes on straight away even when the list has not arrived: a
-     * choice made last session should not flash the whole list first. */
-    sfApply(ctx);
-    return sfMount(ctx);
-});
-
 YMCA.register({
     id: 'stationfascination',
     title: 'StationFascination',
@@ -171,4 +161,14 @@ YMCA.register({
           + 'and it appears above the stations.'}</p>
       </div>`;
     },
+});
+
+YMCA.inject('stationfascination', (ctx) => {
+    /* The station list is on the map, and a mission frame's address bar says
+     * `/` as well — so the frame is what is ruled out, not the path. */
+    if (window.top !== window.self) return true;
+    /* The rule goes on straight away even when the list has not arrived: a
+     * choice made last session should not flash the whole list first. */
+    sfApply(ctx);
+    return sfMount(ctx);
 });

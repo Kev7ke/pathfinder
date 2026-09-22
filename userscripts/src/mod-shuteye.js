@@ -208,17 +208,6 @@ function sePaintButton(ctx) {
     ShutEye`;
 }
 
-YMCA.inject('shuteye', (ctx) => {
-    /* Only where there are mission panels to quieten. A mission window is not
-     * the list, and a stylesheet in there would hide nothing and confuse the
-     * next person reading the page. */
-    if (window.top !== window.self) return true;
-    seApply(ctx);
-    /* The rule is written straight away; the button waits for the row that
-     * holds the game's own filters, which arrives with the mission list. */
-    return seMountButton(ctx);
-});
-
 YMCA.register({
     id: 'shuteye',
     title: 'ShutEye',
@@ -291,4 +280,15 @@ YMCA.register({
             ctx.status(`${box.checked ? 'Showing' : 'Hiding'} ${box.dataset.part}.`);
         });
     },
+});
+
+YMCA.inject('shuteye', (ctx) => {
+    /* Only where there are mission panels to quieten. A mission window is not
+     * the list, and a stylesheet in there would hide nothing and confuse the
+     * next person reading the page. */
+    if (window.top !== window.self) return true;
+    seApply(ctx);
+    /* The rule is written straight away; the button waits for the row that
+     * holds the game's own filters, which arrives with the mission list. */
+    return seMountButton(ctx);
 });

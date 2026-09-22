@@ -243,6 +243,10 @@ function hfPanel(el, ctx) {
       <label style="display:block;margin-top:6px;font-weight:400;cursor:pointer">
         <input type="checkbox" data-cfg="closeWhenDone"> Close the window when there is nothing
         left</label>
+      <label style="display:block;margin-top:10px">Never further than
+        <input type="number" data-max min="0" step="1" style="width:74px;margin:0 6px"
+          value="${hfCfg(ctx).max > 0 ? Number(hfCfg(ctx).max) : ''}" placeholder="any">
+        <span class="ymca-dim">of whatever the distance column counts in</span></label>
       <label style="display:block;margin-top:10px">Wait before closing
         <input type="range" data-wait min="0" max="2000" step="50"
           value="${Number.isFinite(Number(hfCfg(ctx).closeAfter))
@@ -318,6 +322,12 @@ function hfPanel(el, ctx) {
         ? `sortable by ${ctx.esc(last.sortableColumns.join(', '))}`
         : 'no column read as a number'}.`
         : 'No transport page seen yet. Open a vehicle that is transporting.';
+
+    const ceiling = el.querySelector('[data-max]');
+    ceiling.addEventListener('input', () => {
+        ctx.store.write('cfg', { ...hfCfg(ctx), max: Number(ceiling.value) || 0, seeded: 1 });
+        ctx.status(ceiling.value ? `At most ${ceiling.value}.` : 'No ceiling.');
+    });
 
     const wait = el.querySelector('[data-wait]');
     const shows = el.querySelector('[data-wait-shows]');
@@ -444,35 +454,51 @@ const hfRowsOf = (table) => [...table.querySelectorAll('tr')]
  * sorts just as well, and a game update that adds one needs no change here.
  */
 /**
- * Which column is the distance, by the name the table gives it.
+ * Which column is the distance, and what the columns are called.
  *
- * A number cannot say whether it is kilometres or a price, so the heading is
- * asked — the one place the page does say. The vocabulary is small and read
- * off real tables, English and German both, because this game leaks German
- * (`gefangener`, `gw_gefahrgut`). A heading that matches nothing is not a
- * failure: the list keeps the game's own order and the panel says so, and the
- * capture carries the headings so the next spelling can be added rather than
- * guessed at.
+ * THE HEADING WAS THE WRONG PLACE TO ASK. A real page came back with six
+ * headings over seven cells — `Buildings, Distance, Free beds, Department, ,`
+ * against a row of name, distance, beds, **tax**, department, the button and an
+ * empty one — so heading four sits over the tax column and anything matching by
+ * position is one out from there on. The cells say it themselves instead: a
+ * distance carries its unit, `0.75 km`, and no other column in that table does.
+ * Read the value, not the label over it.
+ *
+ * THE COLUMNS ARE WORKED OUT ONCE, NOT PER TABLE. `#own-hospitals` and
+ * `#alliance-hospitals` are two tables of the same shape, and asking each of
+ * them put "Distance" in the dropdown twice — one entry that worked and one
+ * that looked broken. One list, applied to both.
  */
-const HF_DISTANCE_WORDS = /distan|entfernung|abstand|\bkm\b|\bmiles?\b|\bmi\b/i;
+const HF_DISTANCE_VALUE = /\d[\d.,]*\s*(km|mi|miles?|meilen)\b/i;
 
-function hfColumns(table) {
-    const rows = hfRowsOf(table);
+/** How far a transport may go before the list stops offering it. */
+const HF_DEFAULT_MAX = 50;
+
+const hfAllRows = () => hfTables().flatMap(hfRowsOf);
+
+function hfColumns() {
+    const rows = hfAllRows();
     if (!rows.length) return [];
-    const heads = [...table.querySelectorAll('thead th, thead td')];
+    const heads = [...(hfTables()[0]?.querySelectorAll('thead th, thead td') || [])];
     const width = Math.max(...rows.map((r) => r.cells.length));
     const out = [];
+    const used = new Set();
     for (let i = 0; i < width; i += 1) {
-        const values = rows.map((r) => (r.cells[i]?.textContent || '').trim());
+        const values = rows.map((r) => (r.cells[i]?.textContent || '').replace(/\s+/g, ' ').trim());
         const numbers = values.filter((v) => hfNum(v) !== null).length;
         if (numbers < Math.max(2, Math.ceil(rows.length * 0.6))) continue;
         // All one value is a column nobody would sort by.
         if (new Set(values).size < 2) continue;
-        const label = (heads[i]?.textContent || '').replace(/\s+/g, ' ').trim();
+        const heading = (heads[i]?.textContent || '').replace(/\s+/g, ' ').trim();
+        let label = heading || `Column ${i + 1}`;
+        // Two tables of the same shape must not name the same column twice.
+        if (used.has(label)) label = `${label} (${i + 1})`;
+        used.add(label);
         out.push({
             index: i,
-            label: label || `Column ${i + 1}`,
-            distance: HF_DISTANCE_WORDS.test(label),
+            label,
+            // The cell says it, the heading over it may not be the right one.
+            distance: values.filter((v) => HF_DISTANCE_VALUE.test(v)).length > values.length / 2,
         });
     }
     return out;
@@ -501,6 +527,11 @@ function hfSectionRows(id) {
 
 /** Sort, then hide what the player did not ask to see. */
 function hfApply(ctx, cfg) {
+    const columns = hfColumns();
+    /* Nearest first is the ground state, not a choice somebody has to make
+     * every time: with nothing picked the distance column still orders the
+     * list, and picking another column is what departs from it. */
+    const nearest = columns.find((c) => c.distance) || null;
     const own = hfSectionRows('own-hospitals');
     const alliance = hfSectionRows('alliance-hospitals');
     let shown = 0;
@@ -509,7 +540,7 @@ function hfApply(ctx, cfg) {
         const rows = hfRowsOf(table);
         if (!rows.length) continue;
 
-        const column = hfColumns(table).find((c) => c.label === cfg.sortBy);
+        const column = columns.find((c) => c.label === cfg.sortBy) || nearest;
         if (column) {
             const key = (tr) => hfNum(tr.cells[column.index]?.textContent);
             const sorted = [...rows].sort((a, b) => {
@@ -562,29 +593,27 @@ function hfOnPickPage(ctx) {
     if (!link) return false;
 
     const next = document.querySelector(HF_NEXT);
-    const columns = hfTables().flatMap(hfColumns);
+    const columns = hfColumns();
 
-    /* NEAREST FIRST, AND FIFTY OF WHATEVER THAT COLUMN COUNTS IN.
+    /* NEAREST FIRST, AND A CEILING, WITHOUT ANYBODY ASKING FOR EITHER.
      *
      * The game's own order puts your own hospitals above nearer ones, which is
-     * not an order anybody driving there would choose. So the first time a
-     * transport page is opened the sort is set to the distance column and a
-     * ceiling of fifty goes with it — sending an ambulance across the map is a
-     * mistake you only notice afterwards, and a default that cannot make it is
-     * worth more than one that can be changed.
+     * not an order anybody driving there would choose. Nearest first is the
+     * ground state now — `hfApply` falls back to the distance column whenever
+     * nothing else is picked — so it cannot be lost by a redraw writing an
+     * empty sort back, which is exactly how the first version of this lost it.
      *
-     * Only ever the first time: `sortBy` being undefined is what "nobody has
-     * chosen yet" looks like, and an empty string is a choice. */
+     * The ceiling is seeded once and marked, rather than inferred from a field
+     * being unset: `max` is written back as 0 on every redraw, so "nobody has
+     * chosen" stopped being visible after the first one. */
     const cfg = hfCfg(ctx);
-    if (cfg.sortBy === undefined) {
-        const nearest = columns.find((c) => c.distance);
-        cfg.sortBy = nearest ? nearest.label : '';
-        if (nearest && cfg.max === undefined) cfg.max = 50;
+    if (!cfg.seeded) {
+        cfg.seeded = 1;
+        if (!(cfg.max > 0)) cfg.max = HF_DEFAULT_MAX;
         ctx.store.write('cfg', cfg);
-        ctx.log.info('first transport page', nearest
-            ? `sorted by ${nearest.label}, at most ${cfg.max}`
-            : 'no column in this table names itself a distance');
+        ctx.log.info('seeded the defaults', `at most ${cfg.max}, nearest first`);
     }
+
     const haveSections = !!(hfSectionRows('own-hospitals') || hfSectionRows('alliance-hospitals'));
     const total = document.querySelectorAll(HF_PICK_LINK).length;
 
@@ -655,11 +684,17 @@ function hfOnPickPage(ctx) {
          * follows the sort rather than being fixed when the bar was drawn —
          * a box that stays greyed out after you pick a column is a box that
          * looks broken. */
+        /* The ceiling belongs to whichever column is actually ordering the
+         * list — the one picked, or the distance column that orders it when
+         * nothing is. Tying it to the dropdown alone left it greyed out for
+         * ever, because nearest-first is a fallback rather than a choice. */
+        const effective = columns.find((c) => c.label === now.sortBy)
+            || columns.find((c) => c.distance);
         const max = bar.querySelector('#hf-max');
         if (max) {
-            max.disabled = !now.sortBy;
-            max.title = now.sortBy ? '' : 'pick a column to sort by first';
-            max.nextElementSibling.textContent = now.sortBy || '\u2014';
+            max.disabled = !effective;
+            max.title = effective ? '' : 'no column in this table reads as a number';
+            max.nextElementSibling.textContent = effective ? effective.label : '\u2014';
         }
         const shown = hfApply(ctx, now);
         bar.querySelector('#hf-count').textContent = shown < total
@@ -829,23 +864,6 @@ function hfMountButton(ctx) {
     return true;
 }
 
-YMCA.inject('highfive', (ctx) => {
-    /* The page a pick lands on is the first thing asked about, because it is
-     * the one that proves a pick happened. */
-    if (hfAfterPick(ctx)) return true;
-    hfFollowJump(ctx);
-    /* Falsy, not true: a page that is not a vehicle is not a job done. The
-     * player can switch HighFive on while looking at the map and open a
-     * transport a moment later, and marking it finished here would mean the
-     * bar never appeared until the next reload. */
-    if (/^\/vehicles\/\d+/.test(location.pathname)) return hfOnPickPage(ctx);
-    /* Everywhere else the switch beside the radio is placed, but this is never
-     * finished here: a page that is not a transport page is not a job done, and
-     * the map can still become one without a fresh document. */
-    hfMountButton(ctx);
-    return false;
-});
-
 YMCA.register({
     id: 'highfive',
     title: 'HighFive',
@@ -870,4 +888,21 @@ YMCA.register({
 
     async mount(el, ctx) { hfPanel(el, ctx); },
     settings(el, ctx) { hfPanel(el, ctx); },
+});
+
+YMCA.inject('highfive', (ctx) => {
+    /* The page a pick lands on is the first thing asked about, because it is
+     * the one that proves a pick happened. */
+    if (hfAfterPick(ctx)) return true;
+    hfFollowJump(ctx);
+    /* Falsy, not true: a page that is not a vehicle is not a job done. The
+     * player can switch HighFive on while looking at the map and open a
+     * transport a moment later, and marking it finished here would mean the
+     * bar never appeared until the next reload. */
+    if (/^\/vehicles\/\d+/.test(location.pathname)) return hfOnPickPage(ctx);
+    /* Everywhere else the switch beside the radio is placed, but this is never
+     * finished here: a page that is not a transport page is not a job done, and
+     * the map can still become one without a fresh document. */
+    hfMountButton(ctx);
+    return false;
 });

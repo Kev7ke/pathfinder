@@ -377,6 +377,9 @@ const ICONS = {
         + '<path d="M24 9v10M19 14h10"/>',
     trackops: '<path d="M5 29 H30"/><rect x="7" y="18" width="5" height="11"/>'
         + '<rect x="15" y="11" width="5" height="18"/><rect x="23" y="5" width="5" height="24"/>',
+    highfiveauto: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'
+        + '<path d="M19 16v-7a2 2 0 0 1 4 0v12a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7v-6a2 2 0 0 1 4 0"/>'
+        + '<path d="M26 4l2 3 3-1-1 3 3 2-3 1 1 3-3-1-2 3"/>',
     eagleeye: '<path d="M2 17s5.5-8 15-8 15 8 15 8-5.5 8-15 8-15-8-15-8Z"/>'
         + '<circle cx="17" cy="17" r="4.5"/>',
     shuteye: '<path d="M3 13c3 4.5 8 7.5 14 7.5S28 17.5 31 13"/><path d="M8 19l-2.5 4"/>'
@@ -532,6 +535,14 @@ function openWindow(moduleId) {
 const injections = new Map();
 
 function runInjection(moduleId, fn) {
+    /* A module that has not registered yet is not a module that is switched
+     * off — and `isOn` cannot tell the two apart. Four files called
+     * `YMCA.inject` above their own `YMCA.register` and every one of them read
+     * as off on the page they were injected into. */
+    if (!YMCA.modules.some((m) => m.id === moduleId)) {
+        logger.error(moduleId, 'injected before it was registered', 'register first, then inject');
+    }
+
     const held = injections.get(moduleId);
     if (held?.done) return;              // it has already done its job
     held?.observer?.disconnect();        // never two observers for one module

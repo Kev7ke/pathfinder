@@ -1388,7 +1388,8 @@ await pg.waitForSelector('.ymca-tile.el');
 const elements = await pg.$$eval('.ymca-tile.el', (b) => b.map((x) => x.dataset.el));
 console.log('elements          :', JSON.stringify(elements));
 await pg.screenshot({ path: '/tmp/ymca-elements.png' });
-assert.deepEqual(elements, ['renamer', 'missionmagician', 'trackops', 'highfive', 'eagleeye'],
+assert.deepEqual(elements,
+  ['renamer', 'missionmagician', 'trackops', 'highfive', 'highfiveauto', 'eagleeye'],
   'every switchable module that is not in a group should have an element tile');
 assert.equal(await pg.locator('.ymca-tile.el[data-el="shuteye"]').count(), 0,
   'a module in a group is listed inside the group, not beside it');
@@ -1397,6 +1398,9 @@ for (const id of ['renamer', 'missionmagician', 'trackops', 'highfive', 'eagleey
   assert.equal(await pg.locator(`.ymca-switch[data-sw="${id}"] input`).isChecked(), true,
     `${id} should be on until somebody says otherwise`);
 }
+// Everything else here shows or moves. This one sends, so it waits to be asked for.
+assert.equal(await pg.locator('.ymca-switch[data-sw="highfiveauto"] input').isChecked(), false,
+  'a module that writes is off until somebody switches it on');
 
 // A switch takes the tool out of the launcher, not just out of this page.
 await pg.click('.ymca-switch[data-sw="trackops"]');
@@ -1743,21 +1747,49 @@ await pg.evaluate(() => {
   page.innerHTML = `
     <a class="btn btn-success" id="next-vehicle-fms-5" href="/vehicles/15079875"
       >Go to the next vehicle with a transport request</a>
-    <div id="own-hospitals"><table>
-      <thead><tr><th>Hospital</th><th>Free beds</th><th>Distance</th><th></th></tr></thead>
+    <div><table id="own-hospitals">
+      <!-- Six headings over seven cells, the way the real page has them: the tax column has
+           no heading of its own, so anything matching a column by the label above it is one
+           out from there on. -->
+      <thead><tr><th>Buildings</th><th>Free beds</th><th>Distance</th><th>Department</th>
+        <th></th><th></th></tr></thead>
       <tbody>
-      <tr><td>Mercy General</td><td><span id="div_free_beds_41">6</span></td><td>12.40 km</td>
-        <td><a class="btn btn-success" href="/vehicles/15079874/patient/41">Transport</a></td></tr>
-      <tr><td>St Anne</td><td><span id="div_free_beds_42">2</span></td><td>2.79 km</td>
-        <td><a class="btn btn-success" href="/vehicles/15079874/patient/42">Transport</a></td></tr>
-      <tr><td>County</td><td><span id="div_free_beds_43">9</span></td><td>7.10 km</td>
-        <td><a class="btn btn-success" href="/vehicles/15079874/patient/43">Transport</a></td></tr>
-      <tr><td>Riverside</td><td><span id="div_free_beds_44">4</span></td><td>19.00 km</td>
-        <td><a class="btn btn-success" href="/vehicles/15079874/patient/44">Transport</a></td></tr>
-      <tr><td>Lakeview</td><td><span id="div_free_beds_45">1</span></td><td>21.50 km</td>
-        <td><a class="btn btn-success" href="/vehicles/15079874/patient/45">Transport</a></td></tr>
-      <tr><td>Hillcrest</td><td><span id="div_free_beds_46">3</span></td><td>30.00 km</td>
-        <td><a class="btn btn-success" href="/vehicles/15079874/patient/46">Transport</a></td></tr>
+      <tr><td>Mercy General<div class="visible-xs small" id="div_free_beds_41">12.40 km</div></td>
+        <td class="hidden-xs"><span id="beds_41">6 / 30</span></td>
+        <td class="hidden-xs">12.40 km</td><td class="hidden-xs">0 %</td>
+        <td class="hidden-xs"><span class="label">Yes</span></td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/41"
+          >Transport Patient</a></td><td class="hidden-xs"></td></tr>
+      <tr><td>St Anne<div class="visible-xs small" id="div_free_beds_42">2.79 km</div></td>
+        <td class="hidden-xs"><span id="beds_42">2 / 30</span></td>
+        <td class="hidden-xs">2.79 km</td><td class="hidden-xs">10 %</td>
+        <td class="hidden-xs"><span class="label">No</span></td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/42"
+          >Transport Patient</a></td><td class="hidden-xs"></td></tr>
+      <tr><td>County<div class="visible-xs small" id="div_free_beds_43">7.10 km</div></td>
+        <td class="hidden-xs"><span id="beds_43">9 / 30</span></td>
+        <td class="hidden-xs">7.10 km</td><td class="hidden-xs">5 %</td>
+        <td class="hidden-xs"><span class="label">Yes</span></td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/43"
+          >Transport Patient</a></td><td class="hidden-xs"></td></tr>
+      <tr><td>Riverside<div class="visible-xs small" id="div_free_beds_44">19.00 km</div></td>
+        <td class="hidden-xs"><span id="beds_44">4 / 30</span></td>
+        <td class="hidden-xs">19.00 km</td><td class="hidden-xs">0 %</td>
+        <td class="hidden-xs"><span class="label">Yes</span></td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/44"
+          >Transport Patient</a></td><td class="hidden-xs"></td></tr>
+      <tr><td>Lakeview<div class="visible-xs small" id="div_free_beds_45">21.50 km</div></td>
+        <td class="hidden-xs"><span id="beds_45">1 / 30</span></td>
+        <td class="hidden-xs">21.50 km</td><td class="hidden-xs">0 %</td>
+        <td class="hidden-xs"><span class="label">No</span></td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/45"
+          >Transport Patient</a></td><td class="hidden-xs"></td></tr>
+      <tr><td>Hillcrest<div class="visible-xs small" id="div_free_beds_46">30.00 km</div></td>
+        <td class="hidden-xs"><span id="beds_46">3 / 30</span></td>
+        <td class="hidden-xs">30.00 km</td><td class="hidden-xs">0 %</td>
+        <td class="hidden-xs"><span class="label">Yes</span></td>
+        <td><a class="btn btn-success" href="/vehicles/15079874/patient/46"
+          >Transport Patient</a></td><td class="hidden-xs"></td></tr>
     </tbody></table></div>
     <a id="leave_without_transport_no_compensation"
       href="/vehicles/15079874/patient/-1">Leave without transport</a>`;
@@ -1774,18 +1806,23 @@ console.log('highfive bar      : next is /vehicles/15079875');
 // The columns are read off the table's own headers, because not one row carries a class.
 const sortable = await pg.$$eval('#hf-sort option', (o) => o.map((x) => x.value).filter(Boolean));
 console.log('sortable columns  :', JSON.stringify(sortable));
-assert.deepEqual(sortable, ['Free beds', 'Distance'],
-  'a column counts as sortable when its own cells read as numbers — the name column does not');
+console.log('sortable columns  :', JSON.stringify(sortable));
+assert.ok(sortable.includes('Distance'), 'the distance column is offered');
+assert.equal(sortable.filter((c) => c === 'Distance').length, 1,
+  'and offered once, however many tables of the same shape the page holds');
 
 const order = () => pg.$$eval('#own-hospitals tbody tr', (rows) => rows
-  .filter((r) => r.style.display !== 'none').map((r) => r.cells[0].textContent.trim()));
+  .filter((r) => r.style.display !== 'none')
+  .map((r) => r.cells[0].firstChild.textContent.trim()));
 
 // The game's own order puts your own hospitals above nearer ones, so the first transport page
 // ever opened sets the sort to the column that names itself a distance, with a ceiling of 50.
 const started = await pg.evaluate(() => JSON.parse(localStorage.getItem('ymca-highfive-cfg')));
 console.log('first time        :', JSON.stringify({ sortBy: started.sortBy, max: started.max }));
-assert.equal(started.sortBy, 'Distance', 'the heading is what says which column is the distance');
-assert.equal(started.max, 50, 'and fifty of whatever it counts in, so nothing goes on a tour');
+assert.ok(!started.sortBy,
+  'nearest first is the ground state, not a choice written into the settings — which is how the '
+  + 'first version lost it, to a redraw writing an empty sort back over it');
+assert.equal(started.max, 50, 'a ceiling is seeded once, so nothing goes on a world tour');
 assert.deepEqual(await order(),
   ['St Anne', 'County', 'Mercy General', 'Riverside', 'Lakeview', 'Hillcrest'],
   'nearest first, without anybody choosing it — and all six are inside fifty');
@@ -1847,6 +1884,76 @@ await pg.evaluate(() => {
 assert.equal(await pg.evaluate(() => sessionStorage.getItem('ymca-highfive-jump')), null,
   'with advancing off, a pick arms nothing');
 console.log('highfive off      : a pick arms nothing');
+
+// ---- HighFive Auto presses the send button too, by the rules ----
+// Treatment first, then the nearest of those, then a free one over a paying one — and never
+// past the range. Mercy General (12.40, Yes, 0%) and County (7.10, Yes, 5%) both treat;
+// St Anne is nearer at 2.79 but cannot. So: County is the nearest that treats, it charges,
+// and Mercy General is the free one in the same group — that is the swap.
+{
+  const auto = await b.newPage({ viewport: { width: 1100, height: 900 } });
+  const autoErrs = [];
+  auto.on('pageerror', (e) => autoErrs.push(e.message));
+  await auto.goto('http://localhost:8777/README.md');
+  const row = (name, id, free, km, tax, dept) => `
+    <tr><td>${name}<div class="visible-xs small" id="div_free_beds_${id}">${km} km</div></td>
+      <td class="hidden-xs">${free} / 30</td><td class="hidden-xs">${km} km</td>
+      <td class="hidden-xs">${tax} %</td>
+      <td class="hidden-xs"><span class="label">${dept}</span></td>
+      <td><a class="btn btn-success" href="/vehicles/15079874/patient/${id}"
+        >Transport Patient</a></td>
+      <td class="hidden-xs"></td></tr>`;
+  await auto.setContent(`<html><body><table id="own-hospitals">
+    <thead><tr><th>Buildings</th><th>Free beds</th><th>Distance</th><th>Department</th>
+      <th></th><th></th></tr></thead>
+    <tbody>
+      ${row('Mercy General', 41, 6, '12.40', 0, 'Yes')}
+      ${row('St Anne', 42, 2, '2.79', 10, 'No')}
+      ${row('County', 43, 9, '7.10', 5, 'Yes')}
+      ${row('Faraway', 44, 9, '80.00', 0, 'Yes')}
+      ${row('Full up', 45, 0, '1.00', 0, 'Yes')}
+    </tbody></table></body></html>`);
+  await auto.evaluate(() => {
+    history.replaceState({}, '', '/vehicles/15079874');
+    localStorage.setItem('ymca-elements', JSON.stringify({ highfiveauto: true }));
+    localStorage.setItem('ymca-highfiveauto-cfg', JSON.stringify({ auto: true, hold: 150 }));
+  });
+  await auto.addScriptTag({ content: script });
+  await auto.waitForSelector('#ymca-hfa-bar');
+  const said = (await auto.textContent('#ymca-hfa-bar')).replace(/\s+/g, ' ').trim();
+  console.log('auto chose        :', said.slice(0, 110));
+  assert.match(said, /Mercy General/,
+    'County is the nearest that can treat, but it charges and Mercy General is free');
+  await auto.waitForURL(/patient\/41$/, { timeout: 8000 });
+  console.log('auto sent         :', new URL(auto.url()).pathname);
+  assert.equal(autoErrs.length, 0);
+  await auto.close();
+}
+
+// Nothing inside the range with a bed free: it stands down rather than picking the least bad.
+{
+  const none = await b.newPage({ viewport: { width: 1100, height: 900 } });
+  await none.goto('http://localhost:8777/README.md');
+  await none.setContent(`<html><body><table id="own-hospitals"><tbody>
+    <tr><td>Faraway<div id="div_free_beds_44"></div></td><td class="hidden-xs">9 / 30</td>
+      <td class="hidden-xs">80.00 km</td><td class="hidden-xs">0 %</td>
+      <td class="hidden-xs"><span class="label">Yes</span></td>
+      <td><a href="/vehicles/15079874/patient/44">Transport Patient</a></td></tr>
+    </tbody></table></body></html>`);
+  await none.evaluate(() => {
+    history.replaceState({}, '', '/vehicles/15079874');
+    localStorage.setItem('ymca-elements', JSON.stringify({ highfiveauto: true }));
+    localStorage.setItem('ymca-highfiveauto-cfg', JSON.stringify({ auto: true, hold: 100 }));
+  });
+  await none.addScriptTag({ content: script });
+  await none.waitForSelector('#ymca-hfa-bar');
+  await none.waitForTimeout(600);
+  const stood = (await none.textContent('#ymca-hfa-bar')).replace(/\s+/g, ' ').trim();
+  console.log('auto stood down   :', stood.slice(0, 80));
+  assert.match(stood, /stood down/i, 'nothing within range means it says so and stops');
+  assert.match(none.url(), /\/vehicles\/15079874$/, 'and it sent nothing at all');
+  await none.close();
+}
 
 // ---- the page a pick lands on is the proof, and it carries the button already ----
 // Remembering where "next" pointed and reading it back after the navigation had four ways to

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.39
+// @version      0.0.40
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.39',
+    version: '0.0.40',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1059,6 +1059,9 @@ const ICONS = {
         + '<path d="M24 9v10M19 14h10"/>',
     trackops: '<path d="M5 29 H30"/><rect x="7" y="18" width="5" height="11"/>'
         + '<rect x="15" y="11" width="5" height="18"/><rect x="23" y="5" width="5" height="24"/>',
+    highfiveauto: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'
+        + '<path d="M19 16v-7a2 2 0 0 1 4 0v12a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7v-6a2 2 0 0 1 4 0"/>'
+        + '<path d="M26 4l2 3 3-1-1 3 3 2-3 1 1 3-3-1-2 3"/>',
     eagleeye: '<path d="M2 17s5.5-8 15-8 15 8 15 8-5.5 8-15 8-15-8-15-8Z"/>'
         + '<circle cx="17" cy="17" r="4.5"/>',
     shuteye: '<path d="M3 13c3 4.5 8 7.5 14 7.5S28 17.5 31 13"/><path d="M8 19l-2.5 4"/>'
@@ -1214,6 +1217,14 @@ function openWindow(moduleId) {
 const injections = new Map();
 
 function runInjection(moduleId, fn) {
+    /* A module that has not registered yet is not a module that is switched
+     * off — and `isOn` cannot tell the two apart. Four files called
+     * `YMCA.inject` above their own `YMCA.register` and every one of them read
+     * as off on the page they were injected into. */
+    if (!YMCA.modules.some((m) => m.id === moduleId)) {
+        logger.error(moduleId, 'injected before it was registered', 'register first, then inject');
+    }
+
     const held = injections.get(moduleId);
     if (held?.done) return;              // it has already done its job
     held?.observer?.disconnect();        // never two observers for one module
@@ -5933,6 +5944,10 @@ function hfPanel(el, ctx) {
       <label style="display:block;margin-top:6px;font-weight:400;cursor:pointer">
         <input type="checkbox" data-cfg="closeWhenDone"> Close the window when there is nothing
         left</label>
+      <label style="display:block;margin-top:10px">Never further than
+        <input type="number" data-max min="0" step="1" style="width:74px;margin:0 6px"
+          value="${hfCfg(ctx).max > 0 ? Number(hfCfg(ctx).max) : ''}" placeholder="any">
+        <span class="ymca-dim">of whatever the distance column counts in</span></label>
       <label style="display:block;margin-top:10px">Wait before closing
         <input type="range" data-wait min="0" max="2000" step="50"
           value="${Number.isFinite(Number(hfCfg(ctx).closeAfter))
@@ -6008,6 +6023,12 @@ function hfPanel(el, ctx) {
         ? `sortable by ${ctx.esc(last.sortableColumns.join(', '))}`
         : 'no column read as a number'}.`
         : 'No transport page seen yet. Open a vehicle that is transporting.';
+
+    const ceiling = el.querySelector('[data-max]');
+    ceiling.addEventListener('input', () => {
+        ctx.store.write('cfg', { ...hfCfg(ctx), max: Number(ceiling.value) || 0, seeded: 1 });
+        ctx.status(ceiling.value ? `At most ${ceiling.value}.` : 'No ceiling.');
+    });
 
     const wait = el.querySelector('[data-wait]');
     const shows = el.querySelector('[data-wait-shows]');
@@ -6134,35 +6155,51 @@ const hfRowsOf = (table) => [...table.querySelectorAll('tr')]
  * sorts just as well, and a game update that adds one needs no change here.
  */
 /**
- * Which column is the distance, by the name the table gives it.
+ * Which column is the distance, and what the columns are called.
  *
- * A number cannot say whether it is kilometres or a price, so the heading is
- * asked — the one place the page does say. The vocabulary is small and read
- * off real tables, English and German both, because this game leaks German
- * (`gefangener`, `gw_gefahrgut`). A heading that matches nothing is not a
- * failure: the list keeps the game's own order and the panel says so, and the
- * capture carries the headings so the next spelling can be added rather than
- * guessed at.
+ * THE HEADING WAS THE WRONG PLACE TO ASK. A real page came back with six
+ * headings over seven cells — `Buildings, Distance, Free beds, Department, ,`
+ * against a row of name, distance, beds, **tax**, department, the button and an
+ * empty one — so heading four sits over the tax column and anything matching by
+ * position is one out from there on. The cells say it themselves instead: a
+ * distance carries its unit, `0.75 km`, and no other column in that table does.
+ * Read the value, not the label over it.
+ *
+ * THE COLUMNS ARE WORKED OUT ONCE, NOT PER TABLE. `#own-hospitals` and
+ * `#alliance-hospitals` are two tables of the same shape, and asking each of
+ * them put "Distance" in the dropdown twice — one entry that worked and one
+ * that looked broken. One list, applied to both.
  */
-const HF_DISTANCE_WORDS = /distan|entfernung|abstand|\bkm\b|\bmiles?\b|\bmi\b/i;
+const HF_DISTANCE_VALUE = /\d[\d.,]*\s*(km|mi|miles?|meilen)\b/i;
 
-function hfColumns(table) {
-    const rows = hfRowsOf(table);
+/** How far a transport may go before the list stops offering it. */
+const HF_DEFAULT_MAX = 50;
+
+const hfAllRows = () => hfTables().flatMap(hfRowsOf);
+
+function hfColumns() {
+    const rows = hfAllRows();
     if (!rows.length) return [];
-    const heads = [...table.querySelectorAll('thead th, thead td')];
+    const heads = [...(hfTables()[0]?.querySelectorAll('thead th, thead td') || [])];
     const width = Math.max(...rows.map((r) => r.cells.length));
     const out = [];
+    const used = new Set();
     for (let i = 0; i < width; i += 1) {
-        const values = rows.map((r) => (r.cells[i]?.textContent || '').trim());
+        const values = rows.map((r) => (r.cells[i]?.textContent || '').replace(/\s+/g, ' ').trim());
         const numbers = values.filter((v) => hfNum(v) !== null).length;
         if (numbers < Math.max(2, Math.ceil(rows.length * 0.6))) continue;
         // All one value is a column nobody would sort by.
         if (new Set(values).size < 2) continue;
-        const label = (heads[i]?.textContent || '').replace(/\s+/g, ' ').trim();
+        const heading = (heads[i]?.textContent || '').replace(/\s+/g, ' ').trim();
+        let label = heading || `Column ${i + 1}`;
+        // Two tables of the same shape must not name the same column twice.
+        if (used.has(label)) label = `${label} (${i + 1})`;
+        used.add(label);
         out.push({
             index: i,
-            label: label || `Column ${i + 1}`,
-            distance: HF_DISTANCE_WORDS.test(label),
+            label,
+            // The cell says it, the heading over it may not be the right one.
+            distance: values.filter((v) => HF_DISTANCE_VALUE.test(v)).length > values.length / 2,
         });
     }
     return out;
@@ -6191,6 +6228,11 @@ function hfSectionRows(id) {
 
 /** Sort, then hide what the player did not ask to see. */
 function hfApply(ctx, cfg) {
+    const columns = hfColumns();
+    /* Nearest first is the ground state, not a choice somebody has to make
+     * every time: with nothing picked the distance column still orders the
+     * list, and picking another column is what departs from it. */
+    const nearest = columns.find((c) => c.distance) || null;
     const own = hfSectionRows('own-hospitals');
     const alliance = hfSectionRows('alliance-hospitals');
     let shown = 0;
@@ -6199,7 +6241,7 @@ function hfApply(ctx, cfg) {
         const rows = hfRowsOf(table);
         if (!rows.length) continue;
 
-        const column = hfColumns(table).find((c) => c.label === cfg.sortBy);
+        const column = columns.find((c) => c.label === cfg.sortBy) || nearest;
         if (column) {
             const key = (tr) => hfNum(tr.cells[column.index]?.textContent);
             const sorted = [...rows].sort((a, b) => {
@@ -6252,29 +6294,27 @@ function hfOnPickPage(ctx) {
     if (!link) return false;
 
     const next = document.querySelector(HF_NEXT);
-    const columns = hfTables().flatMap(hfColumns);
+    const columns = hfColumns();
 
-    /* NEAREST FIRST, AND FIFTY OF WHATEVER THAT COLUMN COUNTS IN.
+    /* NEAREST FIRST, AND A CEILING, WITHOUT ANYBODY ASKING FOR EITHER.
      *
      * The game's own order puts your own hospitals above nearer ones, which is
-     * not an order anybody driving there would choose. So the first time a
-     * transport page is opened the sort is set to the distance column and a
-     * ceiling of fifty goes with it — sending an ambulance across the map is a
-     * mistake you only notice afterwards, and a default that cannot make it is
-     * worth more than one that can be changed.
+     * not an order anybody driving there would choose. Nearest first is the
+     * ground state now — `hfApply` falls back to the distance column whenever
+     * nothing else is picked — so it cannot be lost by a redraw writing an
+     * empty sort back, which is exactly how the first version of this lost it.
      *
-     * Only ever the first time: `sortBy` being undefined is what "nobody has
-     * chosen yet" looks like, and an empty string is a choice. */
+     * The ceiling is seeded once and marked, rather than inferred from a field
+     * being unset: `max` is written back as 0 on every redraw, so "nobody has
+     * chosen" stopped being visible after the first one. */
     const cfg = hfCfg(ctx);
-    if (cfg.sortBy === undefined) {
-        const nearest = columns.find((c) => c.distance);
-        cfg.sortBy = nearest ? nearest.label : '';
-        if (nearest && cfg.max === undefined) cfg.max = 50;
+    if (!cfg.seeded) {
+        cfg.seeded = 1;
+        if (!(cfg.max > 0)) cfg.max = HF_DEFAULT_MAX;
         ctx.store.write('cfg', cfg);
-        ctx.log.info('first transport page', nearest
-            ? `sorted by ${nearest.label}, at most ${cfg.max}`
-            : 'no column in this table names itself a distance');
+        ctx.log.info('seeded the defaults', `at most ${cfg.max}, nearest first`);
     }
+
     const haveSections = !!(hfSectionRows('own-hospitals') || hfSectionRows('alliance-hospitals'));
     const total = document.querySelectorAll(HF_PICK_LINK).length;
 
@@ -6345,11 +6385,17 @@ function hfOnPickPage(ctx) {
          * follows the sort rather than being fixed when the bar was drawn —
          * a box that stays greyed out after you pick a column is a box that
          * looks broken. */
+        /* The ceiling belongs to whichever column is actually ordering the
+         * list — the one picked, or the distance column that orders it when
+         * nothing is. Tying it to the dropdown alone left it greyed out for
+         * ever, because nearest-first is a fallback rather than a choice. */
+        const effective = columns.find((c) => c.label === now.sortBy)
+            || columns.find((c) => c.distance);
         const max = bar.querySelector('#hf-max');
         if (max) {
-            max.disabled = !now.sortBy;
-            max.title = now.sortBy ? '' : 'pick a column to sort by first';
-            max.nextElementSibling.textContent = now.sortBy || '\u2014';
+            max.disabled = !effective;
+            max.title = effective ? '' : 'no column in this table reads as a number';
+            max.nextElementSibling.textContent = effective ? effective.label : '\u2014';
         }
         const shown = hfApply(ctx, now);
         bar.querySelector('#hf-count').textContent = shown < total
@@ -6519,23 +6565,6 @@ function hfMountButton(ctx) {
     return true;
 }
 
-YMCA.inject('highfive', (ctx) => {
-    /* The page a pick lands on is the first thing asked about, because it is
-     * the one that proves a pick happened. */
-    if (hfAfterPick(ctx)) return true;
-    hfFollowJump(ctx);
-    /* Falsy, not true: a page that is not a vehicle is not a job done. The
-     * player can switch HighFive on while looking at the map and open a
-     * transport a moment later, and marking it finished here would mean the
-     * bar never appeared until the next reload. */
-    if (/^\/vehicles\/\d+/.test(location.pathname)) return hfOnPickPage(ctx);
-    /* Everywhere else the switch beside the radio is placed, but this is never
-     * finished here: a page that is not a transport page is not a job done, and
-     * the map can still become one without a fresh document. */
-    hfMountButton(ctx);
-    return false;
-});
-
 YMCA.register({
     id: 'highfive',
     title: 'HighFive',
@@ -6560,6 +6589,310 @@ YMCA.register({
 
     async mount(el, ctx) { hfPanel(el, ctx); },
     settings(el, ctx) { hfPanel(el, ctx); },
+});
+
+YMCA.inject('highfive', (ctx) => {
+    /* The page a pick lands on is the first thing asked about, because it is
+     * the one that proves a pick happened. */
+    if (hfAfterPick(ctx)) return true;
+    hfFollowJump(ctx);
+    /* Falsy, not true: a page that is not a vehicle is not a job done. The
+     * player can switch HighFive on while looking at the map and open a
+     * transport a moment later, and marking it finished here would mean the
+     * bar never appeared until the next reload. */
+    if (/^\/vehicles\/\d+/.test(location.pathname)) return hfOnPickPage(ctx);
+    /* Everywhere else the switch beside the radio is placed, but this is never
+     * finished here: a page that is not a transport page is not a job done, and
+     * the map can still become one without a fresh document. */
+    hfMountButton(ctx);
+    return false;
+});
+
+/* --------------------------------------------------------------------------
+ * HighFiveAuto — press the send button too.
+ *
+ * HighFive already presses the one the game puts there itself: "go to the next
+ * vehicle with a transport request". This presses the other one — the
+ * destination — so a queue of radio calls works through itself instead of
+ * being clicked one hospital at a time.
+ *
+ * IT IS NOT A WATCHER. Nothing polls the game and nothing opens a window: it
+ * only ever acts on a transport page the player is already looking at. Armed,
+ * each page picks its destination and goes; the page that lands carries the
+ * next vehicle's link and HighFive follows it. When nothing is left, the window
+ * closes. Armed from the radio row, the whole queue runs in the lightbox that
+ * is already open.
+ *
+ * THIS WRITES, AND A HOSPITAL CANNOT BE UNASSIGNED. That is the rule this repo
+ * does not break lightly, and it is broken here on purpose and on request —
+ * the second time, after RecruitRoom, and for the same reason: the clicking it
+ * replaces was worse. What stands in for the backup it cannot have:
+ *
+ *   - it is off until switched on, and it has its own switch in ElementFriend
+ *     as well as the one in the radio row, which is red when it is off;
+ *   - every page shows the destination it chose and why, and holds for a beat
+ *     with a Stop beside it, so a wrong pick is stoppable rather than regretted;
+ *   - it never sends beyond the range set for it, and where nothing qualifies
+ *     it stands down and leaves the page to the player rather than picking the
+ *     least bad thing.
+ *
+ * WHAT A ROW SAYS, AND WHO SAID SO. The capture gave the shape — two tables,
+ * `#own-hospitals` and `#alliance-hospitals`, six headings over seven cells, so
+ * matching a column by the label above it is one out from the fourth one on.
+ * Which cell is which came from the player pasting a row:
+ *
+ *   name | 0.75 km | 29 / 30 | 0 % | <span class="label">No</span> | Transport | (empty)
+ *
+ * So each cell is read for what it looks like rather than for where it sits: a
+ * distance carries its unit, free beds are `n / n`, tax ends in `%`, and the
+ * department is a label that says Yes or No. A row that answers none of them is
+ * left out rather than guessed at.
+ * ------------------------------------------------------------------------ */
+
+const HFA_BUTTON_ID = 'ymca-hfa-btn';
+const HFA_BAR_ID = 'ymca-hfa-bar';
+
+function hfaCfg(ctx) {
+    return ctx.store.read('cfg', {});
+}
+const hfaMaxKm = (cfg) => (cfg.maxKm > 0 ? Number(cfg.maxKm) : 25);
+const hfaHold = (cfg) => (Number.isFinite(Number(cfg.hold)) ? Number(cfg.hold) : 800);
+
+/** One destination, read off its own cells. */
+function hfaRead(tr) {
+    const link = tr.querySelector(HF_PICK_LINK);
+    if (!link) return null;
+    const cells = [...tr.cells].map((c) => (c.textContent || '').replace(/\s+/g, ' ').trim());
+    /* Cell 0 repeats everything for a narrow screen, so it is never asked for
+     * a figure — only for the name, which is its first piece of text. */
+    const rest = cells.slice(1);
+    const distance = rest.find((t) => HF_DISTANCE_VALUE.test(t));
+    const beds = rest.map((t) => /^(\d+)\s*\/\s*(\d+)$/.exec(t)).find(Boolean);
+    const tax = rest.map((t) => /^(\d[\d.,]*)\s*%$/.exec(t)).find(Boolean);
+    const label = tr.querySelector('.label');
+    const said = (label?.textContent || '').trim();
+    return {
+        row: tr,
+        href: link.getAttribute('href'),
+        name: (tr.cells[0]?.firstChild?.textContent || cells[0] || '').trim().slice(0, 60),
+        km: distance ? hfNum(distance) : null,
+        free: beds ? Number(beds[1]) : null,
+        tax: tax ? hfNum(tax[1]) : null,
+        // Yes, no, or the page did not say — and "did not say" is not "no".
+        department: /^(yes|ja)$/i.test(said) ? true : /^(no|nein)$/i.test(said) ? false : null,
+    };
+}
+
+/**
+ * Which one to send to.
+ *
+ * Treatment first: a patient who can be treated where he lands is the whole
+ * point, so a hospital with the department wins over a nearer one without. Only
+ * where none of them has it does it become a plain distance case.
+ *
+ * Then the nearest of those. Then, and only then, the swap: if the nearest
+ * charges and there is a free one in the same group, take the free one. That is
+ * a saving rather than a detour, because everything here is already inside the
+ * range set for it.
+ *
+ * A hospital with no free bed is not a destination, and a row whose distance
+ * cannot be read is left out rather than assumed to be near.
+ */
+function hfaChoose(rows, cfg) {
+    const limit = hfaMaxKm(cfg);
+    const usable = rows.filter((r) => r.href && r.km !== null && r.km <= limit
+        && (r.free === null || r.free > 0));
+    if (!usable.length) return null;
+
+    const treating = usable.filter((r) => r.department === true);
+    const pool = treating.length ? treating : usable;
+    const byDistance = pool.slice().sort((a, b) => a.km - b.km);
+    const nearest = byDistance[0];
+    if (!(nearest.tax > 0)) return { pick: nearest, why: 'nearest', pool: pool.length, treating: treating.length };
+
+    const free = byDistance.find((r) => r.tax === 0);
+    return free
+        ? { pick: free, why: 'nearest free', pool: pool.length, treating: treating.length }
+        : { pick: nearest, why: 'nearest', pool: pool.length, treating: treating.length };
+}
+
+/* ------------------------------------------------------------- the sending */
+
+let hfaArmed = false;
+
+function hfaSay(ctx, html, bad) {
+    let bar = document.getElementById(HFA_BAR_ID);
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = HFA_BAR_ID;
+        bar.style.margin = '6px 0';
+        const anchor = document.getElementById('hf-bar')
+            || document.querySelector(HF_PICK_LINK)?.closest('table');
+        if (anchor && anchor.parentElement) anchor.before(bar);
+        else document.body.prepend(bar);
+    }
+    bar.className = `alert ${bad ? 'alert-warning' : 'alert-success'}`;
+    bar.innerHTML = html;
+    return bar;
+}
+
+/** On a transport page with Auto on: choose, show it, hold, then go. */
+function hfaRun(ctx) {
+    if (hfaArmed) return true;
+    if (hfaCfg(ctx).auto !== true) return false;
+    const rows = hfAllRows().map(hfaRead).filter(Boolean);
+    if (!rows.length) return false;
+
+    const cfg = hfaCfg(ctx);
+    const choice = hfaChoose(rows, cfg);
+    if (!choice) {
+        hfaSay(ctx, `<b>HighFive Auto stood down.</b> Nothing within
+      ${ctx.esc(String(hfaMaxKm(cfg)))} with a free bed. Pick one yourself.`, true);
+        ctx.log.warn('nothing within range', `${rows.length} destinations`);
+        return true;
+    }
+
+    const { pick, why, treating } = choice;
+    hfaArmed = true;
+    const hold = hfaHold(cfg);
+    const bar = hfaSay(ctx, `<b>HighFive Auto</b> &rarr; ${ctx.esc(pick.name)}
+    &middot; ${ctx.esc(String(pick.km))} away${pick.tax !== null
+        ? ` &middot; ${ctx.esc(String(pick.tax))}% tax` : ''}${pick.free !== null
+        ? ` &middot; ${ctx.esc(String(pick.free))} free` : ''}
+    &middot; ${treating ? 'can treat' : 'no department, so distance only'} (${ctx.esc(why)})
+    <a href="#" id="hfa-stop" class="btn btn-xs btn-danger" style="margin-left:10px">Stop</a>`);
+
+    let cancelled = false;
+    bar.querySelector('#hfa-stop').addEventListener('click', (e) => {
+        e.preventDefault();
+        cancelled = true;
+        hfaArmed = false;
+        ctx.store.write('cfg', { ...hfaCfg(ctx), auto: false });
+        hfaPaintButton(ctx);
+        hfaSay(ctx, '<b>Stopped.</b> Auto is off; pick this one yourself.', true);
+        ctx.log.info('stopped by the player');
+    });
+
+    setTimeout(() => {
+        if (cancelled || hfaCfg(ctx).auto !== true) return;
+        ctx.log.info('sending', `${pick.km} away, ${why}`);
+        location.href = pick.href;
+    }, hold);
+    return true;
+}
+
+/* -------------------------------------------------------------- the switch */
+
+function hfaPaintButton(ctx) {
+    const btn = document.getElementById(HFA_BUTTON_ID);
+    if (!btn) return;
+    const on = hfaCfg(ctx).auto === true;
+    btn.className = `btn btn-xs pull-right ${on ? 'btn-success' : 'btn-danger'}`;
+    btn.textContent = `Auto: ${on ? 'On' : 'Off'}`;
+}
+
+function hfaMountButton(ctx) {
+    if (document.getElementById(HFA_BUTTON_ID)) return true;
+    const beside = document.getElementById('ymca-hf-btn')
+        || document.getElementById('alliance_radio_on')
+        || document.getElementById('alliance_radio_off');
+    if (!beside || !beside.parentElement) return false;
+
+    const btn = document.createElement('a');
+    btn.id = HFA_BUTTON_ID;
+    btn.href = '#';
+    btn.setAttribute('role', 'button');
+    btn.title = 'Pick the destination as well, by treatment then distance — it cannot be undone';
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const next = hfaCfg(ctx).auto !== true;
+        if (next && !confirm('HighFive Auto picks the hospital or cell for every transport you '
+            + 'open and sends it.\n\nIt goes for one that can treat the patient, then the '
+            + `nearest, then a free one over a paying one, and never further than `
+            + `${hfaMaxKm(hfaCfg(ctx))}.\n\nA transport cannot be taken back. Turn it on?`)) return;
+        ctx.store.write('cfg', { ...hfaCfg(ctx), auto: next });
+        hfaPaintButton(ctx);
+        ctx.log.info(`auto ${next ? 'on' : 'off'}`);
+    });
+    beside.parentElement.append(btn);
+    hfaPaintButton(ctx);
+    return true;
+}
+
+YMCA.register({
+    id: 'highfiveauto',
+    title: 'HighFive Auto',
+    tagline: 'Press the send button too',
+    description: 'Picks the hospital or cell for every transport you open and sends it, so a '
+        + 'queue of radio calls works through itself. It writes, and a transport cannot be '
+        + 'taken back.',
+
+    mainTile: false,
+    optional: true,
+    /* Off. Everything else here shows or moves; this one sends. */
+    defaultOn: false,
+
+    onSwitch(on, ctx) {
+        if (!on) document.getElementById(HFA_BUTTON_ID)?.remove();
+        else hfaMountButton(ctx);
+    },
+
+    settings(el, ctx) {
+        const cfg = hfaCfg(ctx);
+        el.innerHTML = `
+      <div class="ymca-note bad"><b>This one sends.</b> Every other part of YMCA shows you
+        something or moves you somewhere; this presses the button that assigns a hospital, and
+        that cannot be taken back. It is off until you switch it on, the button in the radio row
+        is red while it is, and every page shows what it chose with a Stop beside it.</div>
+
+      <div class="ymca-card">
+        <b>How it chooses</b>
+        <ol class="ymca-dim" style="margin:8px 0 0;padding-left:20px">
+          <li>Only what is inside the range below, and only where a bed is free.</li>
+          <li>A facility that can treat the patient beats a nearer one that cannot. Where none
+            of them can, it is a plain distance case.</li>
+          <li>The nearest of those.</li>
+          <li>If that one charges and a free one is in the same group, the free one &mdash; a
+            saving rather than a detour, because both are already inside the range.</li>
+        </ol>
+      </div>
+
+      <div class="ymca-card">
+        <b>Settings</b>
+        <label style="display:block;margin-top:8px">Never further than
+          <input type="number" data-maxkm min="1" step="1" style="width:74px;margin:0 6px"
+            value="${ctx.esc(String(hfaMaxKm(cfg)))}"> of whatever the distance column counts
+          in</label>
+        <label style="display:block;margin-top:10px">Hold before sending
+          <input type="range" data-hold min="0" max="3000" step="100"
+            value="${ctx.esc(String(hfaHold(cfg)))}"
+            style="vertical-align:middle;width:200px;margin:0 8px">
+          <b data-hold-shows></b></label>
+        <p class="ymca-dim" style="margin:6px 0 0;font-size:12px">The hold is how long Stop is
+          reachable. Nought is as fast as the game allows and leaves nothing to press.</p>
+      </div>`;
+
+        const km = el.querySelector('[data-maxkm]');
+        km.addEventListener('input', () => {
+            ctx.store.write('cfg', { ...hfaCfg(ctx), maxKm: Number(km.value) || 0 });
+            ctx.status(`Never further than ${km.value || 25}.`);
+        });
+        const hold = el.querySelector('[data-hold]');
+        const shows = el.querySelector('[data-hold-shows]');
+        const say = () => { shows.textContent = `${hold.value} ms`; };
+        say();
+        hold.addEventListener('input', say);
+        hold.addEventListener('change', () => {
+            ctx.store.write('cfg', { ...hfaCfg(ctx), hold: Number(hold.value) });
+            ctx.status(`Holding ${hold.value} ms.`);
+        });
+    },
+});
+
+YMCA.inject('highfiveauto', (ctx) => {
+    if (/^\/vehicles\/\d+/.test(location.pathname)) return hfaRun(ctx);
+    hfaMountButton(ctx);
+    return false;
 });
 
 /* --------------------------------------------------------------------------
@@ -6839,17 +7172,6 @@ function sePaintButton(ctx) {
     ShutEye`;
 }
 
-YMCA.inject('shuteye', (ctx) => {
-    /* Only where there are mission panels to quieten. A mission window is not
-     * the list, and a stylesheet in there would hide nothing and confuse the
-     * next person reading the page. */
-    if (window.top !== window.self) return true;
-    seApply(ctx);
-    /* The rule is written straight away; the button waits for the row that
-     * holds the game's own filters, which arrives with the mission list. */
-    return seMountButton(ctx);
-});
-
 YMCA.register({
     id: 'shuteye',
     title: 'ShutEye',
@@ -6922,6 +7244,17 @@ YMCA.register({
             ctx.status(`${box.checked ? 'Showing' : 'Hiding'} ${box.dataset.part}.`);
         });
     },
+});
+
+YMCA.inject('shuteye', (ctx) => {
+    /* Only where there are mission panels to quieten. A mission window is not
+     * the list, and a stylesheet in there would hide nothing and confuse the
+     * next person reading the page. */
+    if (window.top !== window.self) return true;
+    seApply(ctx);
+    /* The rule is written straight away; the button waits for the row that
+     * holds the game's own filters, which arrives with the mission list. */
+    return seMountButton(ctx);
 });
 
 /* --------------------------------------------------------------------------
@@ -7056,16 +7389,6 @@ function sfMount(ctx) {
     return true;
 }
 
-YMCA.inject('stationfascination', (ctx) => {
-    /* The station list is on the map, and a mission frame's address bar says
-     * `/` as well — so the frame is what is ruled out, not the path. */
-    if (window.top !== window.self) return true;
-    /* The rule goes on straight away even when the list has not arrived: a
-     * choice made last session should not flash the whole list first. */
-    sfApply(ctx);
-    return sfMount(ctx);
-});
-
 YMCA.register({
     id: 'stationfascination',
     title: 'StationFascination',
@@ -7097,6 +7420,16 @@ YMCA.register({
           + 'and it appears above the stations.'}</p>
       </div>`;
     },
+});
+
+YMCA.inject('stationfascination', (ctx) => {
+    /* The station list is on the map, and a mission frame's address bar says
+     * `/` as well — so the frame is what is ruled out, not the path. */
+    if (window.top !== window.self) return true;
+    /* The rule goes on straight away even when the list has not arrived: a
+     * choice made last session should not flash the whole list first. */
+    sfApply(ctx);
+    return sfMount(ctx);
 });
 
 /* --------------------------------------------------------------------------

@@ -57,6 +57,7 @@ userscripts/
     mod-trackops.js
     mod-elementfriend.js
     mod-highfive.js
+    mod-highfiveauto.js
     mod-eagleeye.js
     mod-shuteye.js
     mod-stationfascination.js
@@ -228,11 +229,33 @@ notice afterwards, and a default that cannot make it is worth more than one that
 can be changed. Only ever the first time — `sortBy` being undefined is what
 "nobody has chosen yet" looks like, and an empty string is a choice.
 
-**A number cannot say whether it is kilometres or a price, so the heading is
-asked.** The distance vocabulary is small, read off real tables, and English and
-German both, because this game leaks German. A heading that matches nothing is
-not a failure: the list keeps the game's own order, the panel says so, and the
-capture carries the headings so the next spelling is added rather than guessed.
+**The heading was the wrong place to ask.** A real page came back with **six
+headings over seven cells** — `Buildings, Distance, Free beds, Department, ,`
+against a row of name, distance, beds, **tax**, department, the button and an
+empty one — so the fourth heading sits over the tax column and anything matching
+by position is one out from there on. **The cells say it themselves**: a distance
+carries its unit (`0.75 km`) and no other column does. Read the value, not the
+label over it.
+
+**The columns are worked out once, not per table.** `#own-hospitals` and
+`#alliance-hospitals` are two tables of the same shape, and asking each of them
+put "Distance" in the dropdown twice — one entry that worked and one that looked
+broken.
+
+**Nearest first is the ground state, not a stored choice.** Writing the distance
+column into the settings looked like the same thing and was not: the bar writes
+its controls back on every redraw, so an empty sort overwrote it within a second
+of the first render. The fallback lives in the sorting instead, and only the
+ceiling is seeded — once, behind a marker, because `max` is written back as 0
+every redraw too and "nobody has chosen" stops being visible after the first one.
+
+**A row says what it is, cell by cell.** The capture gave the shape; **the
+player pasted the row that said which cell is which**. A distance carries its
+unit, free beds are `n / n`, tax ends in `%`, the department is a `.label` that
+says Yes or No, and the first cell repeats all of it for a narrow screen, so it
+is asked only for the name. Each cell is read for what it looks like rather than
+for where it sits, and a row that answers none of them is left out rather than
+guessed at.
 
 **The range is a ceiling on the column being sorted by**, not a distance this
 knows the units of. Sort by distance and "at most 20" is twenty of whatever that
@@ -830,6 +853,12 @@ window is built before a mission frame has finished loading, so it read an empty
 page until it was reopened. `YMCA.inject(moduleId, fn)` hands a module a `ctx`
 without a mount, with a throw logged rather than left to break the game's page.
 
+**Register before you inject.** `YMCA.isOn` answers false for a module it cannot
+find, and it cannot tell "switched off" from "not registered yet" — so four
+files calling `YMCA.inject` above their own `YMCA.register` read as switched off
+on the very page they were injected into, silently. The shell logs an error if
+it happens again.
+
 **`fn` returns truthy once it has done its job**, and until then it is tried
 again as the page grows. Waiting for `DOMContentLoaded` was the mistake: a
 mission window pulls in the game's bundle and whatever else the player has
@@ -957,6 +986,22 @@ the log without a module having to remember to log it.
   back, so MissionMagician ticks the game's own checkboxes and stops; the player
   presses Dispatch. The preview is the whole product, and that is not a
   limitation to be lifted later.
+- **HighFive Auto is the second exception, and it was asked for.** It presses
+  the destination button as well as the next-vehicle one, so a queue of radio
+  calls works through itself instead of being clicked one hospital at a time.
+  A transport cannot be taken back, so what stands in for the backup is: it is
+  **off until switched on** and has its own switch in ElementFriend as well as
+  the red-when-off button in the radio row; **every page shows the destination
+  it chose and why**, and holds for a beat with a Stop beside it; and it
+  **never sends beyond the range set for it** — where nothing qualifies it
+  stands down and leaves the page to the player rather than picking the least
+  bad thing. It is not a watcher: nothing polls, nothing opens a window, and it
+  only ever acts on a page the player is already looking at.
+  **Treatment, then distance, then the free one.** A facility that can treat the
+  patient beats a nearer one that cannot; where none can it is a plain distance
+  case; and if the nearest of the group charges while a free one is in it, the
+  free one goes — a saving rather than a detour, because both are already inside
+  the range.
 - **RecruitRoom is the one exception, and it was asked for.** Opening a tab per
   station was worse than the clicking it replaced, so it recruits at every ticked
   station itself. Credits spent on people do not come back, so what stands in for
