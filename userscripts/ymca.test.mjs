@@ -1928,6 +1928,41 @@ assert.equal(await mission.evaluate(() => window.__dispatched), 0,
   'and does not press Dispatch and Next past it');
 await mission.evaluate(() => document.getElementById('ymca-test-transport')?.remove());
 
+// ---- and the way back from it ----
+// Following a transport is a one-way door: HighFive Auto works the queue to its end, and its
+// end is Escape. The map is then left sitting there with nothing to open. So the way back is
+// written down before the door is gone through, and the map presses the game's own Dispatch on
+// the first mission in its list once the window is gone.
+await mission.evaluate(() => {
+  window.__reopened = 0;
+  const list = document.createElement('div');
+  list.id = 'mission_list';
+  const open = document.createElement('a');
+  open.id = 'alarm_button_506479578';
+  open.className = 'btn btn-default btn-xs lightbox-open mission-alarm-button';
+  open.href = '/missions/506479578';
+  open.textContent = 'Dispatch';
+  open.addEventListener('click', (e) => { e.preventDefault(); window.__reopened += 1; });
+  list.append(open);
+  document.body.append(list);
+  // The note the mission window leaves behind, and no frame left open over the map.
+  sessionStorage.setItem('ymca-mma-resume', String(Date.now()));
+  // On a real map the injection runs at load and the watch goes up with it; here the page has
+  // been alive for a while, so it is re-run the way flicking the switch re-runs it.
+  window.YMCA.switchElement('missionmagicianauto', false);
+  window.YMCA.switchElement('missionmagicianauto', true);
+});
+await mission.evaluate(() =>
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr')));
+await mission.waitForTimeout(1600);
+console.log('came back         :', await mission.evaluate(() => window.__reopened),
+  'mission reopened from the map');
+assert.equal(await mission.evaluate(() => window.__reopened), 1,
+  'the first mission in the game\'s own list is opened again');
+assert.equal(await mission.evaluate(() => sessionStorage.getItem('ymca-mma-resume')), null,
+  'and the note is torn up, so it happens once rather than every redraw');
+await mission.evaluate(() => document.getElementById('mission_list')?.remove());
+
 // Switched off in ElementFriend, the switch is not even in the panel.
 await mission.evaluate(() => {
   window.YMCA.switchElement('missionmagicianauto', false);

@@ -112,6 +112,7 @@ function mmaAfterTick(panel, ctx) {
             say('<b>Nothing left to send, and a transport is waiting.</b> Going to that '
                 + 'vehicle \u2014 HighFive Auto takes it from there.');
             own.log.info('following a transport request', transport.getAttribute('href'));
+            mmaResumeLater(own);
             setTimeout(() => { if (mmaArmed()) transport.click(); }, mmaHold(mmaCfg(own)));
             return;
         }
@@ -293,6 +294,7 @@ function mmaMoveOn(own, say, mission) {
         say('<b>A transport is waiting.</b> Going to that vehicle \u2014 HighFive Auto takes '
             + 'it from there.');
         own.log.info('following a transport request', transport.getAttribute('href'));
+        mmaResumeLater(own);
         setTimeout(() => { if (mmaArmed()) transport.click(); }, 400);
         return;
     }
@@ -450,6 +452,71 @@ YMCA.register({
     },
 });
 
+
+/* ------------------------------------------- coming back from a transport */
+
+/**
+ * FOLLOWING A TRANSPORT IS A ONE-WAY DOOR, and that is what was wrong with it.
+ *
+ * The link leads to the vehicle, HighFive Auto works the queue through to its
+ * end, and its end is Escape — the window closes and the map is left sitting
+ * there. MissionMagician Auto never gets another mission to open, because
+ * nothing opens one.
+ *
+ * So the way back is written down before the door is gone through.
+ * `sessionStorage` is the only thing that survives a frame being replaced and
+ * then removed, and it is shared between the frame and the map, so the note
+ * written inside the mission window is read by the map a minute later.
+ *
+ * WHAT IT PRESSES IS THE GAME'S OWN DISPATCH. The map's mission list is a
+ * column of `a#alarm_button_<id>.mission-alarm-button.lightbox-open`, the same
+ * link a player clicks to open a mission, so the first one starts the
+ * run-through again from the top.
+ */
+const MMA_RESUME_KEY = 'ymca-mma-resume';
+const MMA_RESUME_WINDOW = 5 * 60e3;
+
+function mmaResumeLater(own) {
+    try {
+        sessionStorage.setItem(MMA_RESUME_KEY, String(Date.now()));
+        own.log.info('noted the way back', 'the map reopens the first mission when the window goes');
+    } catch (e) { /* private window: it simply will not resume */ }
+}
+
+function mmaResumeWanted() {
+    let at = 0;
+    try { at = Number(sessionStorage.getItem(MMA_RESUME_KEY)) || 0; } catch (e) { return false; }
+    if (!at) return false;
+    if (Date.now() - at > MMA_RESUME_WINDOW) { mmaResumeForget(); return false; }
+    return true;
+}
+
+function mmaResumeForget() {
+    try { sessionStorage.removeItem(MMA_RESUME_KEY); } catch (e) { /* nothing to clear */ }
+}
+
+/** Is a mission window still open over the map? Its frame is what says so, and
+ * a frame with no height is one the game has already taken down. */
+function mmaWindowOpen() {
+    return [...document.querySelectorAll('iframe')]
+        .some((f) => f.getBoundingClientRect().height > 40);
+}
+
+/**
+ * On the map, with the way back noted and the window gone: open the first
+ * mission in the game's own list and let the run-through start again.
+ */
+function mmaResumeIfDue(ctx) {
+    if (!mmaArmed() || !mmaResumeWanted()) return;
+    if (mmaWindowOpen()) return;
+    const first = document.querySelector('#mission_list a[id^="alarm_button_"]')
+        || document.querySelector('a[id^="alarm_button_"]');
+    if (!first) return;
+    mmaResumeForget();
+    ctx.log.info('back from a transport, reopening the list', first.id);
+    setTimeout(() => { if (mmaArmed()) first.click(); }, 600);
+}
+
 /* ---------------------------------------------- the switch, where the list is */
 
 const MMA_BUTTON_ID = 'ymca-mma-btn';
@@ -500,7 +567,32 @@ function mmaPaintButton() {
 
 /* Never finished: the map can grow that row without a fresh document, and the
  * button has to appear when it does. */
+/**
+ * A standing watch on the map, because the shell's own one expires.
+ *
+ * `YMCA.inject` retries on every mutation and then **stops watching after
+ * thirty seconds** — which is right for a page that never grew what a module
+ * was waiting for, and wrong here: a transport queue takes minutes, and the
+ * mutation this is waiting for is the mission window being taken down at the
+ * end of it. So the watch is MissionMagician Auto's own, attached once, and it
+ * is still the map's own mutations rather than a poll — nothing asks the game
+ * anything, it is told when its own page changes.
+ */
+let mmaWatching = false;
+function mmaWatchForTheWayBack(ctx) {
+    if (mmaWatching || !document.body) return;
+    mmaWatching = true;
+    let queued = false;
+    new MutationObserver(() => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => { queued = false; mmaResumeIfDue(ctx); });
+    }).observe(document.documentElement, { childList: true, subtree: true });
+}
+
 YMCA.inject('missionmagicianauto', (ctx) => {
     mmaMountButton(ctx);
+    mmaResumeIfDue(ctx);
+    mmaWatchForTheWayBack(ctx);
     return false;
 });

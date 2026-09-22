@@ -1182,6 +1182,22 @@ the log without a module having to remember to log it.
   somebody else's job. Where boxes are ticked the send goes first: the
   transport is still waiting when the queue comes back round, and a vehicle
   held back is one that is not on its way.
+  **Following a transport is a one-way door, and that was what was wrong with
+  it.** The link leads to the vehicle, HighFive Auto works the queue through to
+  its end, and its end is Escape — the window closes and the map is left
+  sitting there with nothing to open. So **the way back is written down before
+  the door is gone through**: `sessionStorage` survives the frame being
+  replaced and then removed, and it is shared between the frame and the map, so
+  the note written inside the mission window is read by the map a minute later.
+  What it presses is the game's own `a#alarm_button_<id>.mission-alarm-button`,
+  the first in the map's mission list — the same link a player clicks — so the
+  run-through starts again from the top.
+  **The shell's injection watch expires after thirty seconds**, which is right
+  for a page that never grew what a module was waiting for and wrong for
+  anything waiting on something minutes away. A transport queue takes minutes,
+  so Auto keeps **its own** MutationObserver on the map. It is still the map's
+  own mutations rather than a poll: nothing asks the game anything, it is told
+  when its own page changes.
   **A refusal outranks the arithmetic.** The game can turn a send down for want
   of trained crew with every row green — nothing on any page counts people —
   and it hands the window back with every box unticked, so the panel would tick
