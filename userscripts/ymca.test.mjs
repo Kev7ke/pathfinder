@@ -1349,6 +1349,26 @@ await mission.waitForTimeout(1200);
 const byId = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
   trs.map((tr) => [tr.cells[0].textContent.trim(),
     tr.cells[4].textContent.replace(/\s+/g, ' ').trim()]));
+// The report carries the plan itself, not only its aftermath: three rounds of "why did it send
+// nine engines" arrived showing every line covered and `ticked: 0`, which is what a plan looks
+// like once it has been acted on. What was picked and what it carries is the answer.
+await mission.evaluate(() => {
+  window.__copied = '';
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } },
+  });
+});
+await mission.click('#ymca-mm-panel [data-do="report"]');
+await mission.waitForTimeout(500);
+const planned = await mission.evaluate(() => JSON.parse(window.__copied || '{}').picked);
+console.log('report carries    :', JSON.stringify(planned));
+assert.ok(planned && planned.count >= 1, 'the report says how many vehicles the plan picked');
+assert.ok(planned.byType && Object.keys(planned.byType).length,
+  'and which types they are, which is what "nine engines" has to be answered with');
+assert.ok(Array.isArray(planned.answering),
+  'and which requirement each one is there for');
+
 console.log('by type id        :', JSON.stringify(byId));
 assert.ok(byId.some((r) => /Ambulances/.test(r[1]) && /not in the game's own list/.test(r[1])),
   'an empty requirement list on 1167 still wants the ambulance that closes it');

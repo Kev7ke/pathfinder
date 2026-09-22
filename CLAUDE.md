@@ -1368,6 +1368,13 @@ not written down has to be asked for again.
   else, so three rounds of it could be handed over and add nothing. It carries
   `capabilitiesByType`, `typeNames` and `notInDataset` now, because that is the
   button in the mission window and therefore the one that gets pressed.
+  **It carries the plan too, not only its aftermath.** Three rounds of "why did
+  it send nine engines" came back showing every line already covered and
+  `ticked: 0` — which is what a plan looks like once it has been acted on, and
+  answers nothing. `picked` says how many vehicles, of which types, the water
+  and foam they carry between them, and which requirement each one is there
+  for. A report that cannot answer the question it was pressed for is a round
+  trip spent for nothing.
 - A **requirement key** in `missionmagician.unmatchedRequirements` gets an entry
   in `MM_REQUIREMENTS`, or stays listed as unmatched on purpose with a reason.
 - **Mission types** the catalogue does not carry mean `data/missions.json` is

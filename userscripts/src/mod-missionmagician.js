@@ -2571,6 +2571,27 @@ async function mmCopyState(ctx, plan, panel) {
             key: l.key, wanted: l.wanted, there: l.onScene, ticked: l.ticked, unmatched: !!l.unmatched,
         })),
         patients: mmPatientProbe(),
+        /* WHAT THE PANEL ACTUALLY PICKED, and what it adds up to.
+         *
+         * Three rounds of "why did it send nine engines" arrived as reports
+         * showing every line already covered and `ticked: 0` — the aftermath of
+         * a plan, never the plan. A report that cannot answer the question it
+         * was pressed for is a round trip spent for nothing. So the picked set
+         * rides in it: how many of each type, the water and foam they carry
+         * between them, and which requirement each one is answering. Type ids
+         * and counts, the game's own constants, and no vehicle of the player's
+         * named. */
+        picked: plan?.pick ? {
+            count: plan.pick.length,
+            byType: plan.pick.reduce((n, v) => {
+                n[v.typeId || 'unknown'] = (n[v.typeId || 'unknown'] || 0) + 1;
+                return n;
+            }, {}),
+            water: plan.pick.reduce((n, v) => n + (v.water || 0), 0),
+            foam: plan.pick.reduce((n, v) => n + (v.foam || 0), 0),
+            answering: plan.pick.map((v) => (plan.lines || [])
+                .filter((l) => l.rule && mmMeets(v, l.rule)).map((l) => l.key)),
+        } : null,
         /* Whether the game refused this send for want of crew, and what the
          * danger alerts on the page are called. The wording is not carried —
          * the match is made against the trainings this mission itself names,

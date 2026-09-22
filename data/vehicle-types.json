@@ -1,7 +1,7 @@
 {
   "note": "MissionChief vehicle types, by the id the game uses in vehicle_type_id. Names come from the game's own buy pages, which name every type it sells whether or not the player can afford one. Capabilities are the plain attributes the game puts on a vehicle's checkbox in a mission window, so a type only carries them once one has been seen in a selection table; a type with a name and no capabilities is named but not yet judged, and MissionMagician leaves such a vehicle alone rather than assuming it covers nothing. Nothing here is guessed.",
   "source": "names: the game's own vehicle buy pages, via Diagnostics -> Vehicle types; capabilities: mission-window selection tables, via Diagnostics -> Copy the report",
-  "updated": "2026-09-21",
+  "updated": "2026-09-22",
   "types": {
     "0": {
       "name": "Type 1 fire engine",
@@ -96,7 +96,7 @@
         "elw1_or_elw_drone",
         "elw2_or_elw2_drone"
       ],
-      "source": "flags read off this type\u2019s checkbox in a mission window, report 0.0.32"
+      "source": "flags read off this type’s checkbox in a mission window, report 0.0.32"
     },
     "13": {
       "name": "Quint",
@@ -125,7 +125,11 @@
       "name": "Large ARFF Crash Tender",
       "longName": "Large Aircraft Rescue and Firefighting Crash Tender",
       "category": "Airport",
-      "requiredExtension": "Airport Extension"
+      "requiredExtension": "Airport Extension",
+      "capabilities": [
+        "arff"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "18": {
       "name": "Rescue Engine",
@@ -188,17 +192,41 @@
     "30": {
       "name": "Type 3 engine",
       "category": "Wildland fire engines",
-      "requiredExtension": "Forestry Expansion"
+      "requiredExtension": "Forestry Expansion",
+      "capabilities": [
+        "fire",
+        "lf_only",
+        "brush_vehicle",
+        "brush_truck",
+        "brush_truck_1",
+        "water_damage_pump",
+        "crew_carrier_or_fire_engine",
+        "road_rescue_or_fire_engine"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "31": {
       "name": "Type 5 engine",
       "category": "Wildland fire engines",
-      "requiredExtension": "Forestry Expansion"
+      "requiredExtension": "Forestry Expansion",
+      "capabilities": [
+        "brush_vehicle",
+        "brush_truck",
+        "brush_truck_2",
+        "water_damage_pump"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "32": {
       "name": "Type 7 engine",
       "category": "Wildland fire engines",
-      "requiredExtension": "Forestry Expansion"
+      "requiredExtension": "Forestry Expansion",
+      "capabilities": [
+        "brush_vehicle",
+        "brush_truck",
+        "brush_truck_3"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "33": {
       "name": "Pumper Tanker",
@@ -221,17 +249,36 @@
     "38": {
       "name": "Type 4 engine",
       "category": "Wildland fire engines",
-      "requiredExtension": "Forestry Expansion"
+      "requiredExtension": "Forestry Expansion",
+      "capabilities": [
+        "brush_vehicle",
+        "brush_truck",
+        "brush_truck_4",
+        "water_damage_pump"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "39": {
       "name": "Type 6 engine",
       "category": "Wildland fire engines",
-      "requiredExtension": "Forestry Expansion"
+      "requiredExtension": "Forestry Expansion",
+      "capabilities": [
+        "brush_vehicle",
+        "brush_truck",
+        "brush_truck_5"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "40": {
       "name": "Dozer Trailer",
       "category": "Wildland fire engines",
-      "requiredExtension": "Forestry Expansion"
+      "requiredExtension": "Forestry Expansion",
+      "capabilities": [
+        "tractive_random",
+        "trailer",
+        "dozer_trailer"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "41": {
       "name": "Crew cab semi",
@@ -306,22 +353,47 @@
     "62": {
       "name": "Fire Investigator Unit",
       "category": "Fire Investigation",
-      "requiredExtension": "Fire Investigation Extension"
+      "requiredExtension": "Fire Investigation Extension",
+      "capabilities": [
+        "fustw",
+        "fustw_or_police_motorcycle",
+        "fire_investigation",
+        "police_car_or_service_group_leader"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "63": {
       "name": "Fire Prevention Unit",
       "category": "Fire Investigation",
-      "requiredExtension": "Fire Investigation Extension"
+      "requiredExtension": "Fire Investigation Extension",
+      "capabilities": [
+        "fire_investigation"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "64": {
       "name": "Foam Tender",
       "category": "Foam",
-      "requiredExtension": "Foam Extension"
+      "requiredExtension": "Foam Extension",
+      "capabilities": [
+        "gwl2wasser",
+        "gwl2wasser_all",
+        "foam"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "65": {
       "name": "Foam Trailer",
       "category": "Foam",
-      "requiredExtension": "Foam Extension"
+      "requiredExtension": "Foam Extension",
+      "capabilities": [
+        "tractive_random",
+        "gwl2wasser",
+        "gwl2wasser_all",
+        "trailer",
+        "foam"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "66": {
       "name": "Lifeguard Truck",
@@ -346,7 +418,11 @@
     "74": {
       "name": "Wildland MCC",
       "longName": "Wildland Mobile Command Center",
-      "category": "Wildland fire engines"
+      "category": "Wildland fire engines",
+      "capabilities": [
+        "elw3"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "77": {
       "name": "Tanker Semi Truck Trailer",
@@ -360,13 +436,25 @@
       "name": "Small ARFF Crash Tender",
       "longName": "Small Aircraft Rescue and Firefighting Crash Tender",
       "category": "Airport",
-      "requiredExtension": "Airport Extension"
+      "requiredExtension": "Airport Extension",
+      "capabilities": [
+        "rw",
+        "ab_ruest_rw",
+        "arff"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "80": {
       "name": "Medium ARFF Crash Tender",
       "longName": "Medium Aircraft Rescue and Firefighting Crash Tender",
       "category": "Airport",
-      "requiredExtension": "Airport Extension"
+      "requiredExtension": "Airport Extension",
+      "capabilities": [
+        "rw",
+        "ab_ruest_rw",
+        "arff"
+      ],
+      "source": "a player's own mission-window selection tables, reported through Diagnostics"
     },
     "81": {
       "name": "Small K9 Carrier",
