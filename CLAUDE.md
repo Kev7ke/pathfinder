@@ -320,6 +320,16 @@ document does not reload, so the blocks go there and stack up as the queue works
 through itself, each one linking the vehicle and the facility by the ids the
 destination link carried.
 
+**And the fade is an animation, not a timer, for the same reason the block is
+there at all.** A `setTimeout` set from the vehicle window dies with the frame
+on the very next send, so the block it was going to clear sits in the corner for
+good. Scheduling it on the top window does not help either — the function still
+belongs to the frame's realm and goes with it. An animation belongs to the
+document it runs in, so it keeps going across every reload the queue makes;
+`forwards` leaves the block invisible where it finished and the next one to
+arrive sweeps up what has faded. Seven seconds each, so they leave in the order
+they arrived without anything keeping a queue.
+
 **The police branch is read the same way, without having been seen.** Nothing is
 written for `/gefangener/` specially and nothing needs to be, as long as it
 states its figures the way the hospital list does: free cells as `n / n` and a
@@ -448,6 +458,18 @@ nothing else already asks for is taken, and only one a rule can be found for —
 a label this cannot turn into a requirement is left alone rather than invented,
 and the row says **as this window states** so it is never mistaken for a
 catalogue line.
+
+**And where no page of the game states it at all, it is written down here and
+says so on the row.** The skateboard accident cannot be finished until an
+ambulance goes: `requirements` is empty of it, no patient spawns, the treatment
+bar stays at nothing and `#missing_text` is silent too, so every reading ends
+green on a call the game will not close. That is a fault on their side, and the
+one requirement in this repo that came from neither the catalogue nor the page.
+It is **keyed on the game's own name, not on a type id** — the id has never been
+seen from this side and a made-up one would put an ambulance on whatever mission
+happened to hold it. It is added only where nothing has already asked for it, so
+the day the game lists it the entry becomes a no-op, and the row reads **not in
+the game's own list** with the reason under the cursor.
 
 **`possible_patient` does not dispatch anything.** It is the most a mission
 *can* produce — 8 on a tunnel fire — and ticking eight ambulances because eight
@@ -1038,6 +1060,25 @@ the log without a module having to remember to log it.
   `mmaAfterTick` is called with MissionMagician's `ctx`, and `ctx.store` is
   namespaced to whoever owns it — so reading its own hold through it read a
   setting that was never written, and waited the default in silence.
+  **The last mission in the queue is the one that loops, and nothing in a
+  variable can catch it.** `Dispatch and Next` reloads the frame, so everything
+  this module holds — "I have already ticked this one" included — is gone by the
+  time the next page draws. Where there is no next mission the game hands back
+  the same one, and a module with no memory ticks it, finds it green and sends
+  it again. What survives a reload is `sessionStorage`, so the mission that was
+  just dispatched is written down before the click and read back after: the same
+  mission coming round again is the end of the queue, and the window closes with
+  Escape rather than being dispatched a second time.
+  **A refusal outranks the arithmetic.** The game can turn a send down for want
+  of trained crew with every row green — nothing on any page counts people —
+  and it hands the window back with every box unticked, so the panel would tick
+  the same set and send exactly what was refused. A danger alert that is not
+  `.alert-missing-vehicles` and that **names one of the trainings this mission
+  itself asks for** is the game saying it out loud, and that is the only case
+  read: an alert naming nothing this mission wants is left alone rather than
+  guessed at. The table stops calling itself finished for that mission, said in
+  a sentence beside the crew line, and the game's own Dispatch button is
+  untouched for the player who has since moved crew about.
 - **HighFive Auto is the second exception, and it was asked for.** It presses
   the destination button as well as the next-vehicle one, so a queue of radio
   calls works through itself instead of being clicked one hospital at a time.

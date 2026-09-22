@@ -119,6 +119,9 @@ function mmaAfterTick(panel, ctx) {
     setTimeout(() => {
         if (cancelled || !mmaArmed()) return;
         own.log.info('dispatching', 'every line covered');
+        /* Written down before the click, because the click is what reloads the
+         * frame and takes every variable with it. */
+        mmaRemember(mmaMissionId());
         button.click();
     }, hold);
 }
@@ -134,6 +137,45 @@ function mmaAfterTick(panel, ctx) {
  * time, because that is all there ever is.
  */
 const mmaRun = { shortOn: null, tries: 0, tickedOn: null };
+
+/**
+ * WHICH MISSION WAS JUST DISPATCHED, ACROSS THE RELOAD.
+ *
+ * `Dispatch and Next` reloads the frame, so everything this module holds in a
+ * variable is gone by the time the next page draws — including "I have already
+ * ticked this one". On the last mission there is no next one to load, the game
+ * hands back the same mission, and a module with no memory ticks it, finds it
+ * green and dispatches it again. And again.
+ *
+ * So the one thing that has to survive the reload is written down: the mission
+ * it dispatched, and when. Landing on that same mission afterwards is the game
+ * saying there was nowhere else to go, and that is where the window closes.
+ */
+const MMA_LAST_KEY = 'ymca-mma-dispatched';
+const MMA_LOOP_WINDOW = 45e3;
+
+function mmaRemember(mission) {
+    try {
+        sessionStorage.setItem(MMA_LAST_KEY, JSON.stringify({ mission, at: Date.now() }));
+    } catch (e) { /* private window: the loop guard simply does not hold */ }
+}
+
+function mmaJustDispatched() {
+    let held = null;
+    try {
+        held = JSON.parse(sessionStorage.getItem(MMA_LAST_KEY));
+    } catch (e) {
+        return null;
+    }
+    if (!held || Date.now() - held.at > MMA_LOOP_WINDOW) return null;
+    return held.mission;
+}
+
+function mmaForget() {
+    try {
+        sessionStorage.removeItem(MMA_LAST_KEY);
+    } catch (e) { /* nothing to forget */ }
+}
 
 const mmaMissionId = () => (/\/missions\/(\d+)/.exec(
     document.getElementById('mission-form')?.getAttribute('action') || location.pathname,
@@ -190,10 +232,17 @@ function mmaMoveOn(own, say, mission) {
         setTimeout(() => { if (mmaArmed()) next.click(); }, 400);
         return;
     }
-    const cfg = mmaCfg(own);
-    const wait = Number.isFinite(Number(cfg.closeAfter)) ? Number(cfg.closeAfter) : 600;
+    const wait = mmaCloseWait(mmaCfg(own));
     say(`<b>Nothing else to go to.</b> Closing in ${wait} ms.`, true);
     own.log.info('no next mission, closing', next ? 'it points at this one' : 'no button');
+    mmaCloseWindow(own, wait);
+}
+
+const mmaCloseWait = (cfg) => (Number.isFinite(Number(cfg.closeAfter))
+    ? Number(cfg.closeAfter) : 600);
+
+/** Escape, on this document and on the map's, the way the player would press it. */
+function mmaCloseWindow(own, wait) {
     setTimeout(() => {
         if (!mmaArmed()) return;
         const press = (doc) => {
@@ -208,6 +257,7 @@ function mmaMoveOn(own, say, mission) {
             if (window.top !== window.self) press(window.top.document);
         } catch (e) { /* a frame from somewhere else is not ours to close */ }
         press(document);
+        own.log.info('closed the window');
     }, wait);
 }
 
@@ -221,7 +271,20 @@ function mmaMoveOn(own, say, mission) {
 function mmaAfterDraw(panel, ctx) {
     if (!mmaAvailable() || !mmaArmed()) return;
     const mission = mmaMissionId();
-    if (!mission || mmaRun.tickedOn === mission) return;
+    if (!mission) return;
+
+    /* The same mission again, right after dispatching it: Dispatch and Next had
+     * nowhere to go, so this was the last one. Ticking it again would dispatch
+     * it again, which is exactly what it did. */
+    if (mmaJustDispatched() === mission) {
+        mmaForget();
+        const own = YMCA.contextFor('missionmagicianauto');
+        own.log.info('the same mission came back, so that was the last one');
+        mmaCloseWindow(own, mmaCloseWait(mmaCfg(own)));
+        return;
+    }
+    mmaForget();
+    if (mmaRun.tickedOn === mission) return;
     if (!panel.querySelector('.mm-table')) return;
     mmaRun.tickedOn = mission;
     mmaRun.shortOn = null;

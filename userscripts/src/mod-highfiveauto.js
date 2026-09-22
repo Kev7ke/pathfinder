@@ -122,7 +122,24 @@ function hfaChoose(rows, cfg) {
 /* ------------------------------------------------------------ the feedback */
 
 const HFA_TOASTS_ID = 'ymca-hfa-toasts';
-const HFA_TOAST_LIVES = 45e3;
+const HFA_STYLE_ID = 'ymca-hfa-style';
+const HFA_TOAST_LIVES = 7e3;
+const HFA_TOAST_FADE = 700;
+
+/**
+ * The fade is an animation, not a timer, and that is not a style choice.
+ *
+ * A block is drawn into the map's own document because the vehicle window it
+ * was chosen in is about to reload — and a timer set from in there dies with
+ * that frame, so the block it was going to clear stays on screen for good.
+ * Scheduling it on the top window does not help either: the function itself
+ * belongs to the frame's realm and goes with it.
+ *
+ * An animation belongs to the document it is running in, so it keeps going
+ * across every reload the queue makes. `forwards` leaves the block invisible
+ * where it finished, and the next one to arrive sweeps up what has faded —
+ * whichever frame happens to be alive by then.
+ */
 
 /**
  * Where a transport went, in the corner, still there on the next page.
@@ -137,6 +154,12 @@ const HFA_TOAST_LIVES = 45e3;
  * destination link carried. `lightbox-open` is the game's own class for opening
  * one of its pages over the map, so these open the way the game's own links do,
  * and stay plain links if that handler is not bound.
+ *
+ * EACH BLOCK CARRIES ITS OWN FADE, which is what makes them leave in the order
+ * they arrived without anything having to keep a queue: one started seven
+ * seconds ago goes seven seconds before the one started now. It fades rather
+ * than vanishing, because a corner that empties a block at a time is one the
+ * eye follows; a block that is simply gone reads as something that was missed.
  */
 function hfaTopDocument() {
     try {
@@ -146,8 +169,18 @@ function hfaTopDocument() {
     }
 }
 
+function hfaFadeStyle(doc) {
+    if (doc.getElementById(HFA_STYLE_ID)) return;
+    const hold = Math.round((HFA_TOAST_LIVES / (HFA_TOAST_LIVES + HFA_TOAST_FADE)) * 100);
+    const style = doc.createElement('style');
+    style.id = HFA_STYLE_ID;
+    style.textContent = `@keyframes ymca-hfa-fade{0%,${hold}%{opacity:1}100%{opacity:0}}`;
+    (doc.head || doc.documentElement).append(style);
+}
+
 function hfaToast(ctx, vehicle, pick) {
     const doc = hfaTopDocument();
+    hfaFadeStyle(doc);
     let box = doc.getElementById(HFA_TOASTS_ID);
     if (!box) {
         box = doc.createElement('div');
@@ -161,14 +194,20 @@ function hfaToast(ctx, vehicle, pick) {
      * wearing rather than carrying a colour of its own. */
     line.className = 'alert alert-success';
     line.style.cssText = 'margin:0;padding:5px 9px;font-size:12px;line-height:1.35;'
-        + 'box-shadow:0 1px 4px rgba(0,0,0,.35)';
+        + 'box-shadow:0 1px 4px rgba(0,0,0,.35);'
+        + `animation:ymca-hfa-fade ${HFA_TOAST_LIVES + HFA_TOAST_FADE}ms linear forwards`;
     line.innerHTML = `<a class="lightbox-open" href="/vehicles/${encodeURIComponent(vehicle.id)}"
     >${esc(vehicle.name)}</a> &rarr; <a class="lightbox-open"
     href="/buildings/${encodeURIComponent(pick.facilityId)}">${esc(pick.name)}</a>
     <span style="opacity:.75">&middot; ${esc(String(pick.km))}</span>`;
+    /* Whatever has already faded goes now: it is invisible, but it is still a
+     * box in the column, so a corner that never swept up would push the live
+     * blocks off the screen. */
+    for (const old of [...box.children]) {
+        if (doc.defaultView?.getComputedStyle(old).opacity === '0') old.remove();
+    }
     box.append(line);
     while (box.children.length > 8) box.firstElementChild.remove();
-    setTimeout(() => line.remove(), HFA_TOAST_LIVES);
     ctx.log.info('sent', `${vehicle.name} to ${pick.name}`);
 }
 

@@ -1255,6 +1255,87 @@ const head = await mission.textContent('#ymca-mm-panel .panel-heading');
 console.log('heading           :', head.replace(/\s+/g, ' ').trim());
 assert.ok(/~100 credits/.test(head), 'average_credits is the game\'s own number, so it is shown');
 
+// ---- the game refusing the send for want of crew ----
+// Nothing on any page counts people, and that has not changed. But a refusal is the game saying
+// out loud what it otherwise keeps to itself, so it is read where it is unambiguous: this
+// mission names a training, and the alert names that training back. The table stops calling
+// itself finished, which is what keeps Auto from sending exactly what was just turned down.
+// `.alert-missing-vehicles` is the game's own line for the other shortfall and must be ignored.
+await mission.evaluate(() => {
+  const missing = document.createElement('div');
+  missing.className = 'alert alert-danger alert-missing-vehicles';
+  missing.dataset.fixture = '1';
+  missing.textContent = 'Not enough vehicles of the type HazMat';
+  document.body.prepend(missing);
+  document.querySelector('.vehicle_checkbox').dispatchEvent(new Event('change', { bubbles: true }));
+});
+await mission.waitForTimeout(300);
+assert.equal(await mission.$eval('#ymca-mm-panel .mm-table', (t) => t.classList.contains('mm-ok')),
+  true, 'the missing-vehicles alert is the other shortfall and must not be read as this one');
+await mission.evaluate(() => {
+  const flash = document.createElement('div');
+  flash.className = 'alert alert-danger';
+  flash.dataset.fixture = '1';
+  flash.textContent = 'You do not have enough personnel with the HazMat education!';
+  document.body.prepend(flash);
+  document.querySelector('.vehicle_checkbox').dispatchEvent(new Event('change', { bubbles: true }));
+});
+await mission.waitForTimeout(300);
+const refused = await mission.evaluate(() => ({
+  ok: document.querySelector('#ymca-mm-panel .mm-table').classList.contains('mm-ok'),
+  short: document.querySelector('#ymca-mm-panel .mm-table').classList.contains('mm-short'),
+  said: document.querySelector('#ymca-mm-panel [data-crew-refusal]').textContent
+    .replace(/\s+/g, ' ').trim(),
+}));
+console.log('refused           :', JSON.stringify(refused));
+assert.equal(refused.ok, false, 'a refused send is not a finished table, whatever the rows say');
+assert.equal(refused.short, true, 'and it reads as short, which is what Auto holds back on');
+assert.ok(/HazMat crew/.test(refused.said),
+  'it says which training the game named, in the game\'s own word');
+// It is remembered, because a refused dispatch hands the window back with every box unticked:
+// tick the same set again and the panel would find it green and send exactly what was refused.
+await mission.evaluate(() => {
+  document.querySelectorAll('.alert-danger[data-fixture]').forEach((a) => a.remove());
+  document.querySelector('.vehicle_checkbox').dispatchEvent(new Event('change', { bubbles: true }));
+});
+await mission.waitForTimeout(300);
+assert.equal(await mission.$eval('#ymca-mm-panel .mm-table', (t) => t.classList.contains('mm-ok')),
+  false, 'the alert going with the next page load must not make the table green again');
+console.log('refusal held      : the alert is gone, the table is still not green');
+await mission.evaluate(() => sessionStorage.removeItem('ymca-mm-crew-refused'));
+
+// ---- a requirement the game asks for and states nowhere ----
+// The skateboard accident cannot be finished without an ambulance and no page says so: no
+// patient, an empty treatment bar, nothing in `requirements` and nothing in `#missing_text`.
+// It is keyed on the game's own name — the type id has never been seen from this side.
+await mission.evaluate(() => {
+  window.__catalogue = [{
+    id: '1131', name: 'Skateboard accident', average_credits: 100,
+    requirements: { firetrucks: 1 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1131');
+  const mt = document.getElementById('missing_text'); if (mt) mt.textContent = '';
+  document.getElementById('vehicle_show_table_body_all').innerHTML = `
+    <tr class="vehicle_select_table_tr" vehicle_id="70" data-distance="1"><td>
+    <input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_70" value="70"
+    name="vehicle_ids[]" vehicle_type_id="33" fire="1" fms="2"></td>
+    <td id="vehicle_sort_70" timevalue="10">x</td></tr>
+    <tr class="vehicle_select_table_tr" vehicle_id="71" data-distance="2"><td>
+    <input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_71" value="71"
+    name="vehicle_ids[]" vehicle_type_id="5" any_rtw="1" fms="2"></td>
+    <td id="vehicle_sort_71" timevalue="20">x</td></tr>`;
+});
+await mission.waitForTimeout(1200);
+const skateOnly = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [tr.cells[0].textContent.trim(), tr.cells[4].textContent.replace(/\s+/g, ' ').trim()]));
+console.log('nothing says so   :', JSON.stringify(skateOnly));
+const skateOnlyAmb = skateOnly.find((r) => /Ambulances/.test(r[1]));
+assert.ok(skateOnlyAmb, 'the call wants an ambulance even though nothing in the game asks for one');
+assert.equal(skateOnlyAmb[0], '1', 'one, and only where nothing has already asked for it');
+assert.ok(/not in the game's own list/.test(skateOnlyAmb[1]),
+  'a line nobody\'s page stated must never read like one that was');
+
 // ---- water comes from the tank, not from whatever is nearest ----
 // Filling the bar in arrival order sends whatever is close, and what is close is engines: asked
 // for 20,000 gallons the panel picked eleven when four were wanted, because each moved it a
@@ -2077,6 +2158,18 @@ console.log('highfive off      : a pick arms nothing');
     () => /patient\/41$/.test(document.getElementById('f').contentWindow.location.pathname),
     null, { timeout: 8000 });
   console.log('auto sent         : the frame went to the destination, the block stayed put');
+
+  // And then it goes. A corner that fills up and never empties stops being feedback; each
+  // block carries its own clock, so they leave in the order they arrived, and each one fades
+  // rather than vanishing — a block that is simply gone reads as something that was missed.
+  // An animation, not a timer: the frame that drew this has just reloaded, and a timer set
+  // from in there would have gone with it — which is how a block came to sit there for good.
+  assert.match(await auto.$eval('#ymca-hfa-toasts > div', (d) => d.style.animation),
+    /ymca-hfa-fade/, 'it fades out rather than disappearing, and does it in the top document');
+  await auto.waitForFunction(
+    () => getComputedStyle(document.querySelector('#ymca-hfa-toasts > div')).opacity === '0',
+    null, { timeout: 12000 });
+  console.log('block faded       : gone a few seconds later, across the frame that drew it');
   assert.equal(autoErrs.length, 0);
   await auto.close();
 }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.41
+// @version      0.0.42
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.41',
+    version: '0.0.42',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2169,6 +2169,40 @@ const MM_REQUIREMENTS = {
     patients: { flag: 'any_rtw', label: 'Ambulances', icon: 'cross', source: 'one per patient' },
 };
 
+/* ------------------------------ where the game's own list is wrong on purpose */
+
+/**
+ * A requirement the game asks for and states nowhere.
+ *
+ * The skateboard accident is the one that turned this up: it cannot be finished
+ * until an ambulance goes, and no page says so. `requirements` is empty of it,
+ * no patient spawns, the treatment bar stays at nothing and `#missing_text` is
+ * silent too — so every reading this panel has ends up green on a call the game
+ * will not close. The mission was added to the game the same week; this is a
+ * fault on their side, written down here rather than worked around quietly.
+ *
+ * KEYED ON THE GAME'S OWN NAME, NOT ON A TYPE ID. The id has never been seen
+ * from this side, and a made-up one would put an ambulance on whatever mission
+ * happened to hold it. The name is read live off the catalogue or the window,
+ * which is the same place every other reading here comes from.
+ *
+ * IT SAYS SO ON THE ROW. `addedHere` puts the source under the cursor, so a
+ * line nobody's page stated is never mistaken for one that was — and the day
+ * the game lists it itself, the key is already there and this adds nothing.
+ */
+const MM_ADDED_REQUIREMENTS = [{
+    match: /skateboard/i,
+    key: 'ambulances',
+    wanted: 1,
+    source: 'the mission cannot be finished without one and no page of the game says so',
+}];
+
+/** Which of those apply to a mission of this name. */
+function mmAddedFor(name) {
+    if (!name) return [];
+    return MM_ADDED_REQUIREMENTS.filter((r) => r.match.test(name));
+}
+
 /**
  * How many ambulances the patients want.
  *
@@ -2322,6 +2356,9 @@ function mmRuleFor(key, vocab) {
 
 /** Keys this plan took from the window rather than from the catalogue. */
 const mmFromWindow = new Set();
+/* A requirement this repo added because no page of the game states it, and the
+ * sentence that says why — shown on the row so it is never taken for a reading. */
+const mmAddedHere = new Map();
 
 /** Requirements that are an amount to reach, not a count of vehicles. */
 const MM_AMOUNTS = {
@@ -3022,6 +3059,14 @@ async function mmPlan(page, ctx, cfg) {
         }
     }
 
+    /* The window names the mission itself — `missionH<id>` in its own header —
+     * which is the only name there is for a mission the catalogue has not got
+     * and whose help page would not load. */
+    if (!name) {
+        name = document.querySelector('[id^="missionH"]')?.textContent
+            .replace(/\s+/g, ' ').trim() || null;
+    }
+
     const free = page.rows.map(mmVehicle).filter(Boolean);
     /* A follow-up vehicle is already committed somewhere else, so it goes behind
      * every free one however fast it is — taking it costs another mission. */
@@ -3031,6 +3076,7 @@ async function mmPlan(page, ctx, cfg) {
     const vehicles = free.concat(busy);
     const untimed = vehicles.filter((v) => v.seconds === null).length;
     mmFromWindow.clear();
+    mmAddedHere.clear();
     const scene = mmOnScene(mmLearnTypes(vehicles), cfg.countDriving !== false);
     const tanks = mmLearnTanks(vehicles);
     /* What is already at the mission or on its way is carrying water too. */
@@ -3082,6 +3128,17 @@ async function mmPlan(page, ctx, cfg) {
             mmFromWindow.add(found.key);
         }
 
+        /* And the one thing no page of the game states at all. It is added only
+         * where nothing has already asked for it, so a game that starts listing
+         * it — or a patient that finally spawns — makes this a no-op rather than
+         * a second ambulance. */
+        for (const add of mmAddedFor(name)) {
+            if (wants.some(([k]) => k === add.key)) continue;
+            if (add.key === 'ambulances' && wants.some(([k]) => k === 'patients')) continue;
+            wants.push([add.key, add.wanted, false]);
+            mmAddedHere.set(add.key, add.source);
+        }
+
         const needs = [];
         for (const [key, wanted, isShortfall] of wants) {
             let rule = MM_REQUIREMENTS[key];
@@ -3118,6 +3175,7 @@ async function mmPlan(page, ctx, cfg) {
                 rule: n.rule, onScene: n.onScene, found: n.onScene,
                 derived: n.rule.derived || null,
                 fromWindow: mmFromWindow.has(n.key),
+                addedHere: mmAddedHere.get(n.key) || null,
             });
         }
 
@@ -3247,8 +3305,76 @@ function mmCrewTraining(record) {
     return Object.entries(want).map(([key, n], i) => ({
         // The keys line up one for one; fall back to the game's own key.
         label: names[i] && english[names[i]] === n ? names[i] : mmPretty(key),
+        key,
         count: n,
     }));
+}
+
+/* ------------------------------------------------ the game refusing a send */
+
+/**
+ * The game saying, out loud, that too few trained crew were sent.
+ *
+ * NOTHING ON ANY PAGE COUNTS PEOPLE, and that has not changed — this is not a
+ * count. It is a refusal, and a refusal is the one moment the game states the
+ * thing it otherwise keeps to itself. So it is read where it is unambiguous
+ * and nowhere else: the mission asks for a training in `personnel_educations`,
+ * and a danger alert on the page names that very training in the game's own
+ * words. An alert naming nothing this mission asks for is left alone rather
+ * than guessed at, which is what "only in the personnel case" means.
+ *
+ * `.alert-missing-vehicles` is the game's own line for the other shortfall, so
+ * it is skipped by its class rather than by its wording.
+ *
+ * WHY IT IS REMEMBERED. A refused dispatch hands back the mission window with
+ * the alert on it and every box unticked, so the panel would tick the same set,
+ * find it green and send exactly what was just refused — the loop this exists
+ * to stop. Once the game has refused a mission for want of crew, this panel
+ * does not call that mission green again. The game's own Dispatch button is
+ * untouched, so the player who has since moved crew about presses it and goes.
+ */
+const MM_REFUSED_KEY = 'ymca-mm-crew-refused';
+
+const mmMissionId = () => (/\/missions\/(\d+)/.exec(
+    document.getElementById('mission-form')?.getAttribute('action') || location.pathname,
+) || [])[1] || '';
+
+/** Squash a training name to letters, so `gw_gefahrgut`, `GW Gefahrgut` and
+ * `HazMat` all compare as one word however the page spells them. */
+const mmWord = (s2) => String(s2 || '').toLowerCase().replace(/[^a-z]+/g, '');
+
+function mmRefusalRead() {
+    try {
+        return JSON.parse(sessionStorage.getItem(MM_REFUSED_KEY)) || null;
+    } catch (e) { return null; }
+}
+
+function mmRefusalWrite(refusal) {
+    try {
+        sessionStorage.setItem(MM_REFUSED_KEY, JSON.stringify(refusal));
+    } catch (e) { /* private window: it still holds for this draw */ }
+}
+
+function mmCrewRefusal(trainings) {
+    if (!trainings || !trainings.length) return null;
+    const mission = mmMissionId();
+
+    for (const alert of document.querySelectorAll('.alert-danger')) {
+        if (alert.classList.contains('alert-missing-vehicles')) continue;
+        const said = mmWord(alert.textContent);
+        if (!said) continue;
+        const hit = trainings.find((t) => [t.label, t.key, String(t.key).replace(/^gw_/, '')]
+            .map(mmWord).filter((w) => w.length >= 4).some((w) => said.includes(w)));
+        if (hit) {
+            const refusal = { mission, label: hit.label, fresh: true };
+            mmRefusalWrite(refusal);
+            return refusal;
+        }
+    }
+
+    const held = mmRefusalRead();
+    if (held && held.mission === mission) return { ...held, fresh: false };
+    return null;
 }
 
 /* COUNTING THE CREW WAS TRIED AND WITHDRAWN.
@@ -3753,6 +3879,10 @@ function captureMissionWindow() {
                 text: (b.value || b.textContent || '').trim().slice(0, 30),
             })),
         patients: mmPatientProbe(),
+        /* What the game's own refusals on this page are called. The wording is
+         * never taken — a class list is structure, and it is what says which
+         * alert is the missing-vehicles one and which is something else. */
+        dangerAlerts: [...document.querySelectorAll('.alert-danger')].map((a) => a.className),
         requirementBlocks: [...document.querySelectorAll('#missing_text, .missing_text, #mission_general_info')]
             .map((e) => ({
                 id: e.id, class: classOf(e),
@@ -4233,6 +4363,22 @@ function mmRecount(panel, plan) {
     const seatLine = panel.querySelector('[data-crew-seats]');
     if (seatLine) seatLine.innerHTML = mmSeatSentence();
 
+    /* A refusal outranks the arithmetic. Every line can be covered and the send
+     * still be turned down for want of trained crew, which is the one case
+     * where the game knows something this table cannot work out — so the table
+     * takes the game's answer and stops calling itself finished. */
+    const refused = mmCrewRefusal(plan.crewTraining);
+    if (refused) { allMet = false; judged = true; }
+    const refusalLine = panel.querySelector('[data-crew-refusal]');
+    if (refusalLine) {
+        refusalLine.innerHTML = refused
+            ? `<b class="text-danger">The game turned this send down for want of
+               ${esc(refused.label)} crew</b>, so nothing here is called covered.
+               Move crew onto a vehicle that is going and press the game's own
+               Dispatch yourself.`
+            : '';
+    }
+
     /* The table is the surface with the answer on it, so it carries the answer:
      * red while anything is short, green once nothing is. */
     const table = panel.querySelector('.mm-table');
@@ -4294,6 +4440,17 @@ async function mmCopyState(ctx, plan, panel) {
             key: l.key, wanted: l.wanted, there: l.onScene, ticked: l.ticked, unmatched: !!l.unmatched,
         })),
         patients: mmPatientProbe(),
+        /* Whether the game refused this send for want of crew, and what the
+         * danger alerts on the page are called. The wording is not carried —
+         * the match is made against the trainings this mission itself names,
+         * so a refusal that names none of them shows up here as an alert that
+         * was seen and not read, which is the reading that needs looking at. */
+        crewRefusal: plan?.crewTraining?.length ? {
+            trainings: plan.crewTraining.map((t) => t.key),
+            matched: mmCrewRefusal(plan.crewTraining)?.label || null,
+            dangerAlerts: [...document.querySelectorAll('.alert-danger')]
+                .map((a) => a.className),
+        } : null,
         /* What is already at the mission, broken down. "You missed one that was
          * on route" cannot be answered by a `there` count alone: the rows the
          * panel saw, how many it could read a type off, and which types those
@@ -4388,6 +4545,10 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         ? `<small> &middot; ${plan.patients.count} patient${
             plan.patients.count > 1 ? 's' : ''}, as this window states</small>` : ''}${
     l.fromWindow ? '<small> &middot; as this window states</small>' : ''}${
+    /* Nothing stated this one; it is here because the call cannot be finished
+     * without it. The reason rides on the row rather than in the code alone. */
+    l.addedHere ? `<small title="${ctx.esc(l.addedHere)}"> &middot; not in the game's own
+        list</small>` : ''}${
     /* Nothing here maps this one; the flag was read off the checkboxes in this
      * very table. It counts the same, and it says which it is. */
     l.derived ? `<small title="matched on the game's own ${ctx.esc(l.derived)} flag,
@@ -4420,7 +4581,8 @@ function mmGamePanelHtml(plan, cfg, ctx) {
       ${plan.crewTraining?.length ? `<p class="text-muted" style="margin:0 0 8px">
         ${plan.crewTraining.map((t) => `Crew: <b>${t.count}</b> with
           ${ctx.esc(t.label)} training`).join('; ')} &mdash; they ride on whatever is sent.
-        <span data-crew-seats>${mmSeatSentence()}</span></p>` : ''}
+        <span data-crew-seats>${mmSeatSentence()}</span>
+        <span data-crew-refusal></span></p>` : ''}
 
       ${plan.patients && !plan.patients.measured ? `<p class="text-muted" style="margin:0 0 8px">
         The catalogue says this mission can produce up to <b>${plan.patients.count}</b> patients.
@@ -4603,6 +4765,9 @@ function mmaAfterTick(panel, ctx) {
     setTimeout(() => {
         if (cancelled || !mmaArmed()) return;
         own.log.info('dispatching', 'every line covered');
+        /* Written down before the click, because the click is what reloads the
+         * frame and takes every variable with it. */
+        mmaRemember(mmaMissionId());
         button.click();
     }, hold);
 }
@@ -4618,6 +4783,45 @@ function mmaAfterTick(panel, ctx) {
  * time, because that is all there ever is.
  */
 const mmaRun = { shortOn: null, tries: 0, tickedOn: null };
+
+/**
+ * WHICH MISSION WAS JUST DISPATCHED, ACROSS THE RELOAD.
+ *
+ * `Dispatch and Next` reloads the frame, so everything this module holds in a
+ * variable is gone by the time the next page draws — including "I have already
+ * ticked this one". On the last mission there is no next one to load, the game
+ * hands back the same mission, and a module with no memory ticks it, finds it
+ * green and dispatches it again. And again.
+ *
+ * So the one thing that has to survive the reload is written down: the mission
+ * it dispatched, and when. Landing on that same mission afterwards is the game
+ * saying there was nowhere else to go, and that is where the window closes.
+ */
+const MMA_LAST_KEY = 'ymca-mma-dispatched';
+const MMA_LOOP_WINDOW = 45e3;
+
+function mmaRemember(mission) {
+    try {
+        sessionStorage.setItem(MMA_LAST_KEY, JSON.stringify({ mission, at: Date.now() }));
+    } catch (e) { /* private window: the loop guard simply does not hold */ }
+}
+
+function mmaJustDispatched() {
+    let held = null;
+    try {
+        held = JSON.parse(sessionStorage.getItem(MMA_LAST_KEY));
+    } catch (e) {
+        return null;
+    }
+    if (!held || Date.now() - held.at > MMA_LOOP_WINDOW) return null;
+    return held.mission;
+}
+
+function mmaForget() {
+    try {
+        sessionStorage.removeItem(MMA_LAST_KEY);
+    } catch (e) { /* nothing to forget */ }
+}
 
 const mmaMissionId = () => (/\/missions\/(\d+)/.exec(
     document.getElementById('mission-form')?.getAttribute('action') || location.pathname,
@@ -4674,10 +4878,17 @@ function mmaMoveOn(own, say, mission) {
         setTimeout(() => { if (mmaArmed()) next.click(); }, 400);
         return;
     }
-    const cfg = mmaCfg(own);
-    const wait = Number.isFinite(Number(cfg.closeAfter)) ? Number(cfg.closeAfter) : 600;
+    const wait = mmaCloseWait(mmaCfg(own));
     say(`<b>Nothing else to go to.</b> Closing in ${wait} ms.`, true);
     own.log.info('no next mission, closing', next ? 'it points at this one' : 'no button');
+    mmaCloseWindow(own, wait);
+}
+
+const mmaCloseWait = (cfg) => (Number.isFinite(Number(cfg.closeAfter))
+    ? Number(cfg.closeAfter) : 600);
+
+/** Escape, on this document and on the map's, the way the player would press it. */
+function mmaCloseWindow(own, wait) {
     setTimeout(() => {
         if (!mmaArmed()) return;
         const press = (doc) => {
@@ -4692,6 +4903,7 @@ function mmaMoveOn(own, say, mission) {
             if (window.top !== window.self) press(window.top.document);
         } catch (e) { /* a frame from somewhere else is not ours to close */ }
         press(document);
+        own.log.info('closed the window');
     }, wait);
 }
 
@@ -4705,7 +4917,20 @@ function mmaMoveOn(own, say, mission) {
 function mmaAfterDraw(panel, ctx) {
     if (!mmaAvailable() || !mmaArmed()) return;
     const mission = mmaMissionId();
-    if (!mission || mmaRun.tickedOn === mission) return;
+    if (!mission) return;
+
+    /* The same mission again, right after dispatching it: Dispatch and Next had
+     * nowhere to go, so this was the last one. Ticking it again would dispatch
+     * it again, which is exactly what it did. */
+    if (mmaJustDispatched() === mission) {
+        mmaForget();
+        const own = YMCA.contextFor('missionmagicianauto');
+        own.log.info('the same mission came back, so that was the last one');
+        mmaCloseWindow(own, mmaCloseWait(mmaCfg(own)));
+        return;
+    }
+    mmaForget();
+    if (mmaRun.tickedOn === mission) return;
     if (!panel.querySelector('.mm-table')) return;
     mmaRun.tickedOn = mission;
     mmaRun.shortOn = null;
@@ -7147,7 +7372,24 @@ function hfaChoose(rows, cfg) {
 /* ------------------------------------------------------------ the feedback */
 
 const HFA_TOASTS_ID = 'ymca-hfa-toasts';
-const HFA_TOAST_LIVES = 45e3;
+const HFA_STYLE_ID = 'ymca-hfa-style';
+const HFA_TOAST_LIVES = 7e3;
+const HFA_TOAST_FADE = 700;
+
+/**
+ * The fade is an animation, not a timer, and that is not a style choice.
+ *
+ * A block is drawn into the map's own document because the vehicle window it
+ * was chosen in is about to reload — and a timer set from in there dies with
+ * that frame, so the block it was going to clear stays on screen for good.
+ * Scheduling it on the top window does not help either: the function itself
+ * belongs to the frame's realm and goes with it.
+ *
+ * An animation belongs to the document it is running in, so it keeps going
+ * across every reload the queue makes. `forwards` leaves the block invisible
+ * where it finished, and the next one to arrive sweeps up what has faded —
+ * whichever frame happens to be alive by then.
+ */
 
 /**
  * Where a transport went, in the corner, still there on the next page.
@@ -7162,6 +7404,12 @@ const HFA_TOAST_LIVES = 45e3;
  * destination link carried. `lightbox-open` is the game's own class for opening
  * one of its pages over the map, so these open the way the game's own links do,
  * and stay plain links if that handler is not bound.
+ *
+ * EACH BLOCK CARRIES ITS OWN FADE, which is what makes them leave in the order
+ * they arrived without anything having to keep a queue: one started seven
+ * seconds ago goes seven seconds before the one started now. It fades rather
+ * than vanishing, because a corner that empties a block at a time is one the
+ * eye follows; a block that is simply gone reads as something that was missed.
  */
 function hfaTopDocument() {
     try {
@@ -7171,8 +7419,18 @@ function hfaTopDocument() {
     }
 }
 
+function hfaFadeStyle(doc) {
+    if (doc.getElementById(HFA_STYLE_ID)) return;
+    const hold = Math.round((HFA_TOAST_LIVES / (HFA_TOAST_LIVES + HFA_TOAST_FADE)) * 100);
+    const style = doc.createElement('style');
+    style.id = HFA_STYLE_ID;
+    style.textContent = `@keyframes ymca-hfa-fade{0%,${hold}%{opacity:1}100%{opacity:0}}`;
+    (doc.head || doc.documentElement).append(style);
+}
+
 function hfaToast(ctx, vehicle, pick) {
     const doc = hfaTopDocument();
+    hfaFadeStyle(doc);
     let box = doc.getElementById(HFA_TOASTS_ID);
     if (!box) {
         box = doc.createElement('div');
@@ -7186,14 +7444,20 @@ function hfaToast(ctx, vehicle, pick) {
      * wearing rather than carrying a colour of its own. */
     line.className = 'alert alert-success';
     line.style.cssText = 'margin:0;padding:5px 9px;font-size:12px;line-height:1.35;'
-        + 'box-shadow:0 1px 4px rgba(0,0,0,.35)';
+        + 'box-shadow:0 1px 4px rgba(0,0,0,.35);'
+        + `animation:ymca-hfa-fade ${HFA_TOAST_LIVES + HFA_TOAST_FADE}ms linear forwards`;
     line.innerHTML = `<a class="lightbox-open" href="/vehicles/${encodeURIComponent(vehicle.id)}"
     >${esc(vehicle.name)}</a> &rarr; <a class="lightbox-open"
     href="/buildings/${encodeURIComponent(pick.facilityId)}">${esc(pick.name)}</a>
     <span style="opacity:.75">&middot; ${esc(String(pick.km))}</span>`;
+    /* Whatever has already faded goes now: it is invisible, but it is still a
+     * box in the column, so a corner that never swept up would push the live
+     * blocks off the screen. */
+    for (const old of [...box.children]) {
+        if (doc.defaultView?.getComputedStyle(old).opacity === '0') old.remove();
+    }
     box.append(line);
     while (box.children.length > 8) box.firstElementChild.remove();
-    setTimeout(() => line.remove(), HFA_TOAST_LIVES);
     ctx.log.info('sent', `${vehicle.name} to ${pick.name}`);
 }
 
