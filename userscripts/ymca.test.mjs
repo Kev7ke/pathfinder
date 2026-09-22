@@ -1353,6 +1353,67 @@ console.log('by type id        :', JSON.stringify(byId));
 assert.ok(byId.some((r) => /Ambulances/.test(r[1]) && /not in the game's own list/.test(r[1])),
   'an empty requirement list on 1167 still wants the ambulance that closes it');
 
+// ---- the crew, now that the game states it ----
+// Counting `Max. Crew` off the buy page was withdrawn, and rightly: that is a cap somebody set.
+// This is different. The driving table carries a Crew column stated per vehicle, on a row whose
+// link carries the type id — the two facts meeting in one place — and the window states the
+// shortfall itself as `Missing Personnel: 14 Firefighters`. So it is measured, not asked for.
+await mission.evaluate(() => {
+  document.getElementById('mission_vehicle_at_mission')?.remove();
+  document.getElementById('mission_vehicle_driving')?.remove();
+  const driving = document.createElement('table');
+  driving.id = 'mission_vehicle_driving';
+  driving.innerHTML = `<thead><tr><th></th><th>Vehicle</th><th>Station</th>
+      <th><img src="/images/icons8-swipe_right_dark.svg" title="ETA"></th>
+      <th><img src="/images/icons8-groups_dark.svg" title="Crew"></th>
+      <th>Owner</th><th></th></tr></thead>
+    <tbody><tr id="vehicle_row_15079875"><td>3</td>
+      <td><a href="/vehicles/15079875" vehicle_type_id="5">ALS1</a></td>
+      <td>AS01</td><td sortvalue="269">00:03:41</td><td sortvalue="3">3</td>
+      <td>ollyp321</td><td></td></tr></tbody>`;
+  document.body.append(driving);
+  const short = document.createElement('div');
+  short.id = 'ymca-test-personnel';
+  short.setAttribute('data-requirement-type', 'personnel');
+  short.innerHTML = '<b>Missing Personnel:</b> 8 Firefighters';
+  document.body.append(short);
+  window.__catalogue = [{ id: '1200', name: 'Crew test', requirements: {} }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1200');
+  // Four ambulances in range, three seats each by the column above.
+  document.getElementById('vehicle_show_table_body_all').innerHTML = [401, 402, 403, 404]
+    .map((id) => `<tr class="vehicle_select_table_tr" vehicle_id="${id}" data-distance="${id % 10}">
+      <td><input type="checkbox" class="vehicle_checkbox" value="${id}"
+        id="vehicle_checkbox_${id}" name="vehicle_ids[]" vehicle_type_id="5" any_rtw="1" fms="2"></td>
+      <td id="vehicle_sort_${id}" timevalue="${id}">x</td></tr>`).join('');
+});
+await mission.waitForTimeout(1300);
+const learnt = await mission.evaluate(() =>
+  JSON.parse(localStorage.getItem('ymca-missionmagician-crew-seen') || '{}'));
+console.log('crew learnt       :', JSON.stringify(learnt));
+assert.equal(learnt['5'], 3, 'the Crew column is read off the row that also names the type');
+const crewRow = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim()))
+    .find((r) => /Crew/.test(r[4])));
+console.log('crew row          :', JSON.stringify(crewRow));
+assert.ok(crewRow, 'the personnel shortfall is a line of its own');
+assert.match(crewRow[0], /^8/, 'and it is the number the game stated, not one worked out here');
+// Eight seats at three each is three vehicles — the shortfall is already net of who is there,
+// so nothing is subtracted a second time.
+const tick = await mission.textContent('#ymca-mm-panel [data-do="select"]');
+console.log('crew tick         :', tick.trim().split('<')[0]);
+assert.match(tick, /Tick 3 vehicles/, 'it keeps sending until the seats cover the shortfall');
+await mission.click('#ymca-mm-panel [data-do="select"]');
+await mission.waitForTimeout(400);
+const covered = await mission.$eval('#ymca-mm-panel [data-covered="personnel"]',
+  (el) => el.textContent.trim());
+console.log('crew covered      :', covered);
+assert.match(covered, /^9/, 'ticking counts the seats the game measured, 3 apiece');
+await mission.evaluate(() => {
+  document.getElementById('ymca-test-personnel')?.remove();
+  document.getElementById('mission_vehicle_driving')?.remove();
+});
+
 // ---- water comes from the tank, not from whatever is nearest ----
 // Filling the bar in arrival order sends whatever is close, and what is close is engines: asked
 // for 20,000 gallons the panel picked eleven when four were wanted, because each moved it a
@@ -1834,6 +1895,39 @@ assert.equal(await mission.evaluate(() => window.__dispatched), 0,
   'a green table is not a finished mission while somebody still needs a destination');
 await mission.evaluate(() => document.getElementById('prison-select-777')?.remove());
 
+// ---- a transport waiting comes before the next mission ----
+// The game puts it in the window as a button of its own — a bare `/vehicles/<id>` href styled
+// as a button, where the vehicle names in the tables are plain links and the recall buttons
+// carry `/backalarm`. Going on would leave the patient sitting there, and the page it leads to
+// is the one HighFive Auto already works through to its end.
+await mission.evaluate(() => {
+  window.__dispatched = 0;
+  window.__wentToVehicle = 0;
+  const waiting = document.createElement('a');
+  waiting.id = 'ymca-test-transport';
+  waiting.className = 'btn btn-xs btn-success';
+  waiting.href = '/vehicles/15096931';
+  waiting.textContent = 'ALS Ambulance - Transport Requested';
+  waiting.addEventListener('click', (e) => { e.preventDefault(); window.__wentToVehicle += 1; });
+  document.body.append(waiting);
+  // Nothing in range, so the table is green with no box ticked: the mission has nothing left
+  // to send and a transport is waiting.
+  document.getElementById('vehicle_show_table_body_all').innerHTML = '';
+  window.__catalogue = [{ id: '1201', name: 'Nothing to send', requirements: {} }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1201');
+  document.getElementById('mission-form').setAttribute('action', '/missions/506003402/alarm');
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(2600);
+console.log('transport first   :', (await mission.textContent('#mma-note'))
+  .replace(/\s+/g, ' ').trim().slice(0, 62));
+assert.equal(await mission.evaluate(() => window.__wentToVehicle), 1,
+  'it goes to the vehicle that is asking to transport');
+assert.equal(await mission.evaluate(() => window.__dispatched), 0,
+  'and does not press Dispatch and Next past it');
+await mission.evaluate(() => document.getElementById('ymca-test-transport')?.remove());
+
 // Switched off in ElementFriend, the switch is not even in the panel.
 await mission.evaluate(() => {
   window.YMCA.switchElement('missionmagicianauto', false);
@@ -2226,6 +2320,13 @@ console.log('highfive off      : a pick arms nothing');
   const toast = (await auto.textContent('#ymca-hfa-toasts')).replace(/\s+/g, ' ').trim();
   console.log('feedback block    :', toast.slice(0, 60));
   assert.match(toast, /Mercy General/, 'it says where the transport went');
+  // YMCA's blue, and the game's own: `alert-info` follows whatever theme the page wears, and
+  // the rule down the side is the navbar's colour sampled rather than typed in.
+  const blue = await auto.$eval('#ymca-hfa-toasts > div', (d) => ({
+    cls: d.className, rule: d.style.borderLeft,
+  }));
+  console.log('block blue        :', JSON.stringify(blue));
+  assert.match(blue.cls, /alert-info/, 'the block is blue, in the game\'s own class');
 
   await auto.waitForFunction(
     () => /patient\/41$/.test(document.getElementById('f').contentWindow.location.pathname),

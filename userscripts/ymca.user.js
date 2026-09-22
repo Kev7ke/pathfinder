@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.44
+// @version      0.0.45
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.44',
+    version: '0.0.45',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2660,6 +2660,65 @@ function mmLearntTypes() {
     }
 }
 
+
+/* ------------------------------------- the crew, now that the game states it */
+
+/**
+ * COUNTING THE CREW WAS TRIED, WITHDRAWN — AND THE GAME HAS SINCE STATED IT.
+ *
+ * What was withdrawn was counting `Max. Crew` off the buy page: that is a cap
+ * somebody set, so seats are not people, and the conclusion written down here
+ * was that "nothing in a mission window says who is aboard". That is no longer
+ * true, and the correction matters more than the original reading:
+ *
+ *   - the at-mission and driving tables carry a **Crew** column, stated per
+ *     vehicle — `<td sortvalue="3">3</td>` against a row whose link carries
+ *     `vehicle_type_id="5"`, which is the two facts meeting in one row;
+ *   - the window states the shortfall itself, as
+ *     `<div data-requirement-type="personnel"><b>Missing Personnel:</b>
+ *     14 Firefighters</div>`.
+ *
+ * So crew is measured now, not asked for and not inferred: a type is learnt the
+ * first time one of its vehicles is seen at a mission, exactly as tanks are.
+ *
+ * WHICH CELL IS THE CREW IS ASKED OF THE HEADER, not counted to. The heading is
+ * an icon — `icons8-groups_dark.svg` — and the game's own asset name is the
+ * same in every language it is played in, where the tooltip beside it is not.
+ */
+const MM_CREW_SEEN_KEY = 'ymca-missionmagician-crew-seen';
+
+function mmCrewColumn(table) {
+    const cell = table?.querySelector('thead img[src*="group"]')?.closest('th, td');
+    return cell ? cell.cellIndex : -1;
+}
+
+function mmKnownCrew() {
+    try {
+        return JSON.parse(localStorage.getItem(MM_CREW_SEEN_KEY)) || {};
+    } catch (e) { return {}; }
+}
+
+function mmWriteCrew(crew) {
+    try { localStorage.setItem(MM_CREW_SEEN_KEY, JSON.stringify(crew)); } catch (e) { /* private */ }
+}
+
+/**
+ * How many more the game says it wants, and what it calls them.
+ *
+ * `Missing Personnel: 14 Firefighters` is a SHORTFALL, the way the missing
+ * vehicles line is: the game has already taken off whoever is at the mission
+ * and whoever is on the way. So nothing here is subtracted a second time.
+ */
+function mmPersonnelWanted() {
+    const el = document.querySelector('[data-requirement-type="personnel"]');
+    if (!el) return null;
+    const said = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    const m = /(\d+)/.exec(said);
+    if (!m) return null;
+    const after = said.slice(said.indexOf(m[0]) + m[0].length).trim();
+    return { wanted: Number(m[1]), label: after || 'crew' };
+}
+
 /**
  * Vehicles already at the mission or on their way to it.
  *
@@ -2697,11 +2756,29 @@ function mmOnScene(known, countDriving = true) {
     let unknown = 0;
     let unreadable = 0;
     let total = 0;
+    /* The crew column is per table, so it is asked once per table rather than
+     * once per row. A table that does not carry one simply teaches nothing. */
+    const crewColumn = new Map();
+    const crew = mmKnownCrew();
+    let learntCrew = false;
     const take = (rows) => {
         for (const row of rows) {
             total += 1;
             const typeId = row.querySelector('[vehicle_type_id]')?.getAttribute('vehicle_type_id');
             if (!typeId) { unreadable += 1; unknown += 1; continue; }
+            /* THE ROW IS WHERE THE TYPE AND THE CREW MEET. Nowhere else states
+             * both, which is why this is the only place a type's crew can be
+             * measured rather than guessed at. */
+            const table = row.closest('table');
+            if (table && !crewColumn.has(table)) crewColumn.set(table, mmCrewColumn(table));
+            const at = table ? crewColumn.get(table) : -1;
+            if (at >= 0) {
+                const said = Number((row.cells[at]?.textContent || '').trim());
+                if (Number.isFinite(said) && said > 0 && crew[typeId] !== said) {
+                    crew[typeId] = said;
+                    learntCrew = true;
+                }
+            }
             typeIds.push(Number(typeId));
             const flags = known[typeId];
             if (!flags) { unknown += 1; continue; }
@@ -2714,9 +2791,10 @@ function mmOnScene(known, countDriving = true) {
     const drivingCount = countDriving ? take(driving) : 0;
     /* Counted or not, how many are on the way is worth saying. */
     const drivingSeen = driving.length;
+    if (learntCrew) mmWriteCrew(crew);
     return {
         counts, vehicles, unknown, unreadable, total, typeIds,
-        atCount, drivingCount, drivingSeen, countDriving,
+        atCount, drivingCount, drivingSeen, countDriving, crew,
     };
 }
 
@@ -3098,6 +3176,7 @@ async function mmPlan(page, ctx, cfg) {
 
     const picked = new Map();
     const lines = [];
+    let plannedCrewUnknown = 0;
 
     if (requirements) {
         /* A requirement whose value is not a number is not a count of vehicles.
@@ -3241,11 +3320,58 @@ async function mmPlan(page, ctx, cfg) {
             });
         }
 
+        /* CREW IS A TOTAL FILLED BY ADDING VEHICLES, exactly as water is — the
+         * people arrive on whatever is sent, so the only way to cover a
+         * shortfall of fourteen is to keep sending until fourteen seats have
+         * gone. The figure per type is measured off the game's own Crew column
+         * the first time one is seen at a mission.
+         *
+         * IT IS A SHORTFALL. The game has already taken off whoever is at the
+         * mission and whoever is driving, so nothing is subtracted twice and
+         * `onScene` is zero on purpose.
+         *
+         * A type whose crew has never been seen carries nothing here rather
+         * than a guess, and the panel says how many of those it picked. */
+        const personnel = mmPersonnelWanted();
+        if (personnel) {
+            const crew = scene.crew || mmKnownCrew();
+            const carried = (v) => crew[v.typeId] || 0;
+            let have = [...picked.values()].reduce((n, v) => n + carried(v), 0);
+            const bySmallest = (a, b) => carried(a) - carried(b) || mmOrder(a, b);
+            const byBiggest = (a, b) => carried(b) - carried(a) || mmOrder(a, b);
+            const pool = vehicles.filter((v) => carried(v) && !picked.has(v.id));
+            while (have < personnel.wanted && pool.length) {
+                const left = personnel.wanted - have;
+                const fits = pool.filter((v) => carried(v) <= left);
+                const next = fits.length
+                    ? fits.sort(byBiggest)[0]
+                    : pool.slice().sort(bySmallest)[0];
+                pool.splice(pool.indexOf(next), 1);
+                picked.set(next.id, next);
+                have += carried(next);
+            }
+            lines.push({
+                key: 'personnel',
+                label: `Crew \u2014 ${personnel.label}`,
+                icon: 'star',
+                wanted: personnel.wanted,
+                found: 0,
+                unit: 'crew',
+                carries: 'personnel',
+                onScene: 0,
+                fromWindow: true,
+            });
+            /* How many of the picked vehicles have never had their crew stated,
+             * so a line that cannot fill says why rather than looking stuck. */
+            plannedCrewUnknown = [...picked.values()].filter((v) => v.typeId && !crew[v.typeId]).length;
+        }
+
         // Counts first, then the totals, so the table reads the way the game states it.
         lines.sort((a, b) => Number(!!a.unit) - Number(!!b.unit));
     }
 
     return {
+        crewUnknown: plannedCrewUnknown,
         name,
         requirements,
         /* Training the crew has to bring, in the game's own English: the
@@ -4336,10 +4462,14 @@ function mmWatchScroll(panel) {
 
 function mmRecount(panel, plan) {
     if (!plan || !plan.lines) return;
+    const crew = mmKnownCrew();
     const ticked = [...document.querySelectorAll('.vehicle_checkbox:checked')].map((box) => ({
         has: (flag) => box.getAttribute(flag) === '1',
         water: Number(box.getAttribute('wasser_amount')) || 0,
         foam: Number(box.getAttribute('foam_amount_display')) || 0,
+        /* The box says which type it is; what that type seats was measured off
+         * the game's own Crew column at some mission or other. */
+        crew: crew[box.getAttribute('vehicle_type_id')] || 0,
     }));
 
     let allMet = true;
@@ -4348,7 +4478,8 @@ function mmRecount(panel, plan) {
         if (line.unmatched) continue;
         judged = true;
         const byTick = line.unit
-            ? ticked.reduce((n2, v) => n2 + (line.carries === 'water_needed' ? v.water : v.foam), 0)
+            ? ticked.reduce((n2, v) => n2 + (line.carries === 'personnel' ? v.crew
+                : (line.carries === 'water_needed' ? v.water : v.foam)), 0)
             : ticked.filter((v) => mmMeets(v, line.rule)).length;
         line.ticked = byTick;
         line.found = line.onScene + byTick;
@@ -4604,6 +4735,12 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         whatever ${plan.scene.unknownTank > 1 ? 'they are' : 'it is'} carrying is not counted
         below.</p>` : ''}
 
+      ${plan.crewUnknown ? `<p class="text-muted" style="margin:0 0 8px">
+        ${plan.crewUnknown} of the vehicles picked ${plan.crewUnknown > 1 ? 'have' : 'has'} never
+        had ${plan.crewUnknown > 1 ? 'their crew' : 'its crew'} stated by the game, so
+        ${plan.crewUnknown > 1 ? 'they count' : 'it counts'} as nobody on the crew line until
+        one of that type turns up at a mission.</p>` : ''}
+
       ${plan.scene.total || plan.scene.drivingSeen ? `<p class="text-muted" style="margin:0 0 8px">
         ${[plan.scene.atCount ? `<b>${plan.scene.atCount}</b> at the mission` : '',
         plan.scene.drivingSeen ? `<b>${plan.scene.drivingSeen}</b> on the way${
@@ -4755,6 +4892,22 @@ function mmaAfterTick(panel, ctx) {
     }
     mmaRun.shortOn = null;
 
+    /* GREEN, AND NOTHING LEFT TO SEND, BUT A TRANSPORT IS WAITING. Pressing
+     * Dispatch and Next here would send nothing and leave the patient or the
+     * prisoner sitting at the mission. Where boxes ARE ticked the send goes
+     * first — the transport is still waiting when the queue comes back round,
+     * and a vehicle held back is one that is not on its way. */
+    if (!document.querySelector('.vehicle_checkbox:checked')) {
+        const transport = mmaTransportLink();
+        if (transport) {
+            say('<b>Nothing left to send, and a transport is waiting.</b> Going to that '
+                + 'vehicle \u2014 HighFive Auto takes it from there.');
+            own.log.info('following a transport request', transport.getAttribute('href'));
+            setTimeout(() => { if (mmaArmed()) transport.click(); }, mmaHold(mmaCfg(own)));
+            return;
+        }
+    }
+
     const button = mmaNextButton();
     if (!button) {
         say('<b>Not dispatched.</b> This window has no <i>Dispatch and Next</i> button, and '
@@ -4903,7 +5056,38 @@ function mmaNotGreen(panel, own, say) {
  * as no button at all. Where there is no way on, Escape closes the window the
  * same way it does when a transport queue runs out.
  */
+/**
+ * A vehicle at this mission that is asking to transport somebody.
+ *
+ * The game puts it in the mission window as a button of its own —
+ * `<a class="btn btn-xs btn-success" href="/vehicles/15096931">ALS Ambulance -
+ * Transport Requested</a>` — and it is the one link on the page whose href is a
+ * bare `/vehicles/<id>` **and** which is styled as a button. The vehicle names
+ * in the tables are plain links; the recall buttons carry `/backalarm`. So it
+ * is found by that pair rather than by its words, which are the game's and
+ * change with the language.
+ *
+ * WHY AUTO FOLLOWS IT. A mission with a transport waiting is not finished, and
+ * the page it leads to is a status-5 page — which is exactly what HighFive Auto
+ * was written for. Nothing is duplicated: this only presses the way in, and the
+ * queue on the other side is already somebody else's job.
+ */
+const mmaTransportLink = () => [...document.querySelectorAll('a.btn[href]')]
+    .find((a) => /^\/vehicles\/\d+$/.test(a.getAttribute('href') || ''));
+
 function mmaMoveOn(own, say, mission) {
+    /* A TRANSPORT WAITING COMES BEFORE THE NEXT MISSION. Going on would leave
+     * the patient or the prisoner sitting there, and the page this leads to is
+     * one HighFive Auto already works through to its end. */
+    const transport = mmaTransportLink();
+    if (transport) {
+        say('<b>A transport is waiting.</b> Going to that vehicle \u2014 HighFive Auto takes '
+            + 'it from there.');
+        own.log.info('following a transport request', transport.getAttribute('href'));
+        setTimeout(() => { if (mmaArmed()) transport.click(); }, 400);
+        return;
+    }
+
     const next = document.getElementById('mission_next_mission_btn');
     const goesTo = (/\/missions\/(\d+)/.exec(next?.getAttribute('href') || '') || [])[1] || '';
     if (next && goesTo && goesTo !== mission) {
@@ -7680,6 +7864,29 @@ function hfaTopDocument() {
     }
 }
 
+/**
+ * YMCA's blue, read off the game's own navbar.
+ *
+ * `rgb(0,73,151)` is what the interface probe measured, and it is the one
+ * colour this tool set is identified by — but it is written in the game's
+ * stylesheet, not here, so it is sampled rather than typed. A page with no
+ * navbar (a frame, for one) simply hands back nothing and the block goes
+ * without its rule.
+ */
+let hfaNavy = null;
+function hfaNavyBlue(doc) {
+    if (hfaNavy !== null) return hfaNavy;
+    hfaNavy = '';
+    try {
+        for (const d of new Set([doc, document])) {
+            const bar = d.querySelector('.navbar-fixed-top, .navbar-default, .navbar');
+            const paint = bar && (d.defaultView || window).getComputedStyle(bar).backgroundColor;
+            if (paint && !/rgba\(0, 0, 0, 0\)|transparent/.test(paint)) { hfaNavy = paint; break; }
+        }
+    } catch (e) { /* a frame from somewhere else is not ours to read */ }
+    return hfaNavy;
+}
+
 function hfaFadeStyle(doc) {
     if (doc.getElementById(HFA_STYLE_ID)) return;
     const hold = Math.round((HFA_TOAST_LIVES / (HFA_TOAST_LIVES + HFA_TOAST_FADE)) * 100);
@@ -7701,9 +7908,14 @@ function hfaToast(ctx, vehicle, pick) {
         doc.body.append(box);
     }
     const line = doc.createElement('div');
-    /* The game's own alert, so it follows the game into whatever theme it is
-     * wearing rather than carrying a colour of its own. */
-    line.className = 'alert alert-success';
+    /* BLUE, AND THE GAME'S OWN BLUE. `alert-info` is the one the game already
+     * carries, so it follows whatever theme the page is wearing; the rule down
+     * its side is YMCA's navbar blue, read off the game rather than typed in —
+     * the same trick ShutEye uses for the panel gradient. Where there is no
+     * navbar to read, the rule is simply not drawn. */
+    line.className = 'alert alert-info';
+    const navy = hfaNavyBlue(doc);
+    if (navy) line.style.borderLeft = `3px solid ${navy}`;
     line.style.cssText = 'margin:0;padding:5px 9px;font-size:12px;line-height:1.35;'
         + 'box-shadow:0 1px 4px rgba(0,0,0,.35);'
         + `animation:ymca-hfa-fade ${HFA_TOAST_LIVES + HFA_TOAST_FADE}ms linear forwards`;

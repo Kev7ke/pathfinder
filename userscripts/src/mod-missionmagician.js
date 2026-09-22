@@ -611,6 +611,65 @@ function mmLearntTypes() {
     }
 }
 
+
+/* ------------------------------------- the crew, now that the game states it */
+
+/**
+ * COUNTING THE CREW WAS TRIED, WITHDRAWN — AND THE GAME HAS SINCE STATED IT.
+ *
+ * What was withdrawn was counting `Max. Crew` off the buy page: that is a cap
+ * somebody set, so seats are not people, and the conclusion written down here
+ * was that "nothing in a mission window says who is aboard". That is no longer
+ * true, and the correction matters more than the original reading:
+ *
+ *   - the at-mission and driving tables carry a **Crew** column, stated per
+ *     vehicle — `<td sortvalue="3">3</td>` against a row whose link carries
+ *     `vehicle_type_id="5"`, which is the two facts meeting in one row;
+ *   - the window states the shortfall itself, as
+ *     `<div data-requirement-type="personnel"><b>Missing Personnel:</b>
+ *     14 Firefighters</div>`.
+ *
+ * So crew is measured now, not asked for and not inferred: a type is learnt the
+ * first time one of its vehicles is seen at a mission, exactly as tanks are.
+ *
+ * WHICH CELL IS THE CREW IS ASKED OF THE HEADER, not counted to. The heading is
+ * an icon — `icons8-groups_dark.svg` — and the game's own asset name is the
+ * same in every language it is played in, where the tooltip beside it is not.
+ */
+const MM_CREW_SEEN_KEY = 'ymca-missionmagician-crew-seen';
+
+function mmCrewColumn(table) {
+    const cell = table?.querySelector('thead img[src*="group"]')?.closest('th, td');
+    return cell ? cell.cellIndex : -1;
+}
+
+function mmKnownCrew() {
+    try {
+        return JSON.parse(localStorage.getItem(MM_CREW_SEEN_KEY)) || {};
+    } catch (e) { return {}; }
+}
+
+function mmWriteCrew(crew) {
+    try { localStorage.setItem(MM_CREW_SEEN_KEY, JSON.stringify(crew)); } catch (e) { /* private */ }
+}
+
+/**
+ * How many more the game says it wants, and what it calls them.
+ *
+ * `Missing Personnel: 14 Firefighters` is a SHORTFALL, the way the missing
+ * vehicles line is: the game has already taken off whoever is at the mission
+ * and whoever is on the way. So nothing here is subtracted a second time.
+ */
+function mmPersonnelWanted() {
+    const el = document.querySelector('[data-requirement-type="personnel"]');
+    if (!el) return null;
+    const said = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    const m = /(\d+)/.exec(said);
+    if (!m) return null;
+    const after = said.slice(said.indexOf(m[0]) + m[0].length).trim();
+    return { wanted: Number(m[1]), label: after || 'crew' };
+}
+
 /**
  * Vehicles already at the mission or on their way to it.
  *
@@ -648,11 +707,29 @@ function mmOnScene(known, countDriving = true) {
     let unknown = 0;
     let unreadable = 0;
     let total = 0;
+    /* The crew column is per table, so it is asked once per table rather than
+     * once per row. A table that does not carry one simply teaches nothing. */
+    const crewColumn = new Map();
+    const crew = mmKnownCrew();
+    let learntCrew = false;
     const take = (rows) => {
         for (const row of rows) {
             total += 1;
             const typeId = row.querySelector('[vehicle_type_id]')?.getAttribute('vehicle_type_id');
             if (!typeId) { unreadable += 1; unknown += 1; continue; }
+            /* THE ROW IS WHERE THE TYPE AND THE CREW MEET. Nowhere else states
+             * both, which is why this is the only place a type's crew can be
+             * measured rather than guessed at. */
+            const table = row.closest('table');
+            if (table && !crewColumn.has(table)) crewColumn.set(table, mmCrewColumn(table));
+            const at = table ? crewColumn.get(table) : -1;
+            if (at >= 0) {
+                const said = Number((row.cells[at]?.textContent || '').trim());
+                if (Number.isFinite(said) && said > 0 && crew[typeId] !== said) {
+                    crew[typeId] = said;
+                    learntCrew = true;
+                }
+            }
             typeIds.push(Number(typeId));
             const flags = known[typeId];
             if (!flags) { unknown += 1; continue; }
@@ -665,9 +742,10 @@ function mmOnScene(known, countDriving = true) {
     const drivingCount = countDriving ? take(driving) : 0;
     /* Counted or not, how many are on the way is worth saying. */
     const drivingSeen = driving.length;
+    if (learntCrew) mmWriteCrew(crew);
     return {
         counts, vehicles, unknown, unreadable, total, typeIds,
-        atCount, drivingCount, drivingSeen, countDriving,
+        atCount, drivingCount, drivingSeen, countDriving, crew,
     };
 }
 
@@ -1049,6 +1127,7 @@ async function mmPlan(page, ctx, cfg) {
 
     const picked = new Map();
     const lines = [];
+    let plannedCrewUnknown = 0;
 
     if (requirements) {
         /* A requirement whose value is not a number is not a count of vehicles.
@@ -1192,11 +1271,58 @@ async function mmPlan(page, ctx, cfg) {
             });
         }
 
+        /* CREW IS A TOTAL FILLED BY ADDING VEHICLES, exactly as water is — the
+         * people arrive on whatever is sent, so the only way to cover a
+         * shortfall of fourteen is to keep sending until fourteen seats have
+         * gone. The figure per type is measured off the game's own Crew column
+         * the first time one is seen at a mission.
+         *
+         * IT IS A SHORTFALL. The game has already taken off whoever is at the
+         * mission and whoever is driving, so nothing is subtracted twice and
+         * `onScene` is zero on purpose.
+         *
+         * A type whose crew has never been seen carries nothing here rather
+         * than a guess, and the panel says how many of those it picked. */
+        const personnel = mmPersonnelWanted();
+        if (personnel) {
+            const crew = scene.crew || mmKnownCrew();
+            const carried = (v) => crew[v.typeId] || 0;
+            let have = [...picked.values()].reduce((n, v) => n + carried(v), 0);
+            const bySmallest = (a, b) => carried(a) - carried(b) || mmOrder(a, b);
+            const byBiggest = (a, b) => carried(b) - carried(a) || mmOrder(a, b);
+            const pool = vehicles.filter((v) => carried(v) && !picked.has(v.id));
+            while (have < personnel.wanted && pool.length) {
+                const left = personnel.wanted - have;
+                const fits = pool.filter((v) => carried(v) <= left);
+                const next = fits.length
+                    ? fits.sort(byBiggest)[0]
+                    : pool.slice().sort(bySmallest)[0];
+                pool.splice(pool.indexOf(next), 1);
+                picked.set(next.id, next);
+                have += carried(next);
+            }
+            lines.push({
+                key: 'personnel',
+                label: `Crew \u2014 ${personnel.label}`,
+                icon: 'star',
+                wanted: personnel.wanted,
+                found: 0,
+                unit: 'crew',
+                carries: 'personnel',
+                onScene: 0,
+                fromWindow: true,
+            });
+            /* How many of the picked vehicles have never had their crew stated,
+             * so a line that cannot fill says why rather than looking stuck. */
+            plannedCrewUnknown = [...picked.values()].filter((v) => v.typeId && !crew[v.typeId]).length;
+        }
+
         // Counts first, then the totals, so the table reads the way the game states it.
         lines.sort((a, b) => Number(!!a.unit) - Number(!!b.unit));
     }
 
     return {
+        crewUnknown: plannedCrewUnknown,
         name,
         requirements,
         /* Training the crew has to bring, in the game's own English: the
@@ -2287,10 +2413,14 @@ function mmWatchScroll(panel) {
 
 function mmRecount(panel, plan) {
     if (!plan || !plan.lines) return;
+    const crew = mmKnownCrew();
     const ticked = [...document.querySelectorAll('.vehicle_checkbox:checked')].map((box) => ({
         has: (flag) => box.getAttribute(flag) === '1',
         water: Number(box.getAttribute('wasser_amount')) || 0,
         foam: Number(box.getAttribute('foam_amount_display')) || 0,
+        /* The box says which type it is; what that type seats was measured off
+         * the game's own Crew column at some mission or other. */
+        crew: crew[box.getAttribute('vehicle_type_id')] || 0,
     }));
 
     let allMet = true;
@@ -2299,7 +2429,8 @@ function mmRecount(panel, plan) {
         if (line.unmatched) continue;
         judged = true;
         const byTick = line.unit
-            ? ticked.reduce((n2, v) => n2 + (line.carries === 'water_needed' ? v.water : v.foam), 0)
+            ? ticked.reduce((n2, v) => n2 + (line.carries === 'personnel' ? v.crew
+                : (line.carries === 'water_needed' ? v.water : v.foam)), 0)
             : ticked.filter((v) => mmMeets(v, line.rule)).length;
         line.ticked = byTick;
         line.found = line.onScene + byTick;
@@ -2554,6 +2685,12 @@ function mmGamePanelHtml(plan, cfg, ctx) {
             ? 'carry tanks' : 'carries a tank'} this has not seen in a selection list yet, so
         whatever ${plan.scene.unknownTank > 1 ? 'they are' : 'it is'} carrying is not counted
         below.</p>` : ''}
+
+      ${plan.crewUnknown ? `<p class="text-muted" style="margin:0 0 8px">
+        ${plan.crewUnknown} of the vehicles picked ${plan.crewUnknown > 1 ? 'have' : 'has'} never
+        had ${plan.crewUnknown > 1 ? 'their crew' : 'its crew'} stated by the game, so
+        ${plan.crewUnknown > 1 ? 'they count' : 'it counts'} as nobody on the crew line until
+        one of that type turns up at a mission.</p>` : ''}
 
       ${plan.scene.total || plan.scene.drivingSeen ? `<p class="text-muted" style="margin:0 0 8px">
         ${[plan.scene.atCount ? `<b>${plan.scene.atCount}</b> at the mission` : '',

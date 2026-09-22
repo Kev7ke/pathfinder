@@ -320,6 +320,12 @@ document does not reload, so the blocks go there and stack up as the queue works
 through itself, each one linking the vehicle and the facility by the ids the
 destination link carried.
 
+**The blocks are blue, and it is the game's own blue.** `alert-info` is a class
+the game already carries, so it follows whatever theme the page is wearing; the
+rule down the side is YMCA's navbar blue **sampled off the game** rather than
+typed in, the same way ShutEye reads the panel gradient. A page with no navbar
+to read — a frame, for one — simply goes without the rule.
+
 **And the fade is an animation, not a timer, for the same reason the block is
 there at all.** A `setTimeout` set from the vehicle window dies with the frame
 on the very next send, so the block it was going to clear sits in the corner for
@@ -625,6 +631,33 @@ value. What the panel adds up is **seats ticked**, labelled as the player's own
 number wherever it shows. Whether the people aboard a HazMat hold the HazMat
 training is still not something any page says, so it is still not claimed — the
 training sentence stays the game's own.
+
+**…and then the game stated it, and both readings above were wrong.** What was
+withdrawn was counting `Max. Crew` off the buy page, and that stays withdrawn —
+it is a cap somebody set. What was written down beside it was "nothing in a
+mission window says who is aboard", and **that is not true**:
+
+- the at-mission and driving tables carry a **Crew** column, stated per
+  vehicle — `<td sortvalue="3">3</td>` on a row whose link carries
+  `vehicle_type_id="5"`. That row is the only place in the game where a type
+  and its crew meet, which is why it is the only place crew can be measured;
+- the window states the shortfall itself:
+  `<div data-requirement-type="personnel"><b>Missing Personnel:</b>
+  14 Firefighters</div>`.
+
+So crew is **measured** now. A type is learnt the first time one of its
+vehicles is seen at a mission, exactly as a tank is, and **which cell is the
+crew is asked of the header**: the heading is the game's own
+`icons8-groups_dark.svg`, and an asset name is the same in every language the
+game is played in where the tooltip beside it is not.
+
+**Crew is a total filled by adding vehicles**, the way water is: the people
+arrive on whatever is sent, so covering a shortfall of fourteen means sending
+until fourteen seats have gone — biggest that fits, then the smallest that
+finishes it, ties on the clock. **It is a shortfall**: the game has already
+taken off whoever is there and whoever is driving, so nothing is subtracted
+twice. A type whose crew has never been stated carries **nobody** rather than a
+guess, and the panel says how many of those it picked.
 
 **`average_credits` is the game's own figure**, in the catalogue the
 `#mission_help` link points at, so the panel can show what a call is worth
@@ -1136,6 +1169,19 @@ the log without a module having to remember to log it.
   writes to the player's account says which it is at a glance, and plain grey
   reads as "not a button" rather than "not armed". The same place ShutEye's
   button goes, for the same reason.
+  **A transport waiting comes before the next mission.** The game puts it in
+  the window as a button of its own — `<a class="btn btn-xs btn-success"
+  href="/vehicles/15096931">ALS Ambulance - Transport Requested</a>` — and it
+  is the one link on the page whose href is a **bare `/vehicles/<id>` and which
+  is styled as a button**: the vehicle names in the tables are plain links and
+  the recall buttons carry `/backalarm`. Found by that pair rather than by its
+  words, which are the game's and change with the language. Going on would
+  leave the patient or the prisoner sitting at the mission, and the page it
+  leads to is a status-5 page — which is what HighFive Auto was written for, so
+  **this only presses the way in** and the queue on the other side is already
+  somebody else's job. Where boxes are ticked the send goes first: the
+  transport is still waiting when the queue comes back round, and a vehicle
+  held back is one that is not on its way.
   **A refusal outranks the arithmetic.** The game can turn a send down for want
   of trained crew with every row green — nothing on any page counts people —
   and it hands the window back with every box unticked, so the panel would tick

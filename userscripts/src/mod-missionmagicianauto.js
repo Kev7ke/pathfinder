@@ -101,6 +101,22 @@ function mmaAfterTick(panel, ctx) {
     }
     mmaRun.shortOn = null;
 
+    /* GREEN, AND NOTHING LEFT TO SEND, BUT A TRANSPORT IS WAITING. Pressing
+     * Dispatch and Next here would send nothing and leave the patient or the
+     * prisoner sitting at the mission. Where boxes ARE ticked the send goes
+     * first — the transport is still waiting when the queue comes back round,
+     * and a vehicle held back is one that is not on its way. */
+    if (!document.querySelector('.vehicle_checkbox:checked')) {
+        const transport = mmaTransportLink();
+        if (transport) {
+            say('<b>Nothing left to send, and a transport is waiting.</b> Going to that '
+                + 'vehicle \u2014 HighFive Auto takes it from there.');
+            own.log.info('following a transport request', transport.getAttribute('href'));
+            setTimeout(() => { if (mmaArmed()) transport.click(); }, mmaHold(mmaCfg(own)));
+            return;
+        }
+    }
+
     const button = mmaNextButton();
     if (!button) {
         say('<b>Not dispatched.</b> This window has no <i>Dispatch and Next</i> button, and '
@@ -249,7 +265,38 @@ function mmaNotGreen(panel, own, say) {
  * as no button at all. Where there is no way on, Escape closes the window the
  * same way it does when a transport queue runs out.
  */
+/**
+ * A vehicle at this mission that is asking to transport somebody.
+ *
+ * The game puts it in the mission window as a button of its own —
+ * `<a class="btn btn-xs btn-success" href="/vehicles/15096931">ALS Ambulance -
+ * Transport Requested</a>` — and it is the one link on the page whose href is a
+ * bare `/vehicles/<id>` **and** which is styled as a button. The vehicle names
+ * in the tables are plain links; the recall buttons carry `/backalarm`. So it
+ * is found by that pair rather than by its words, which are the game's and
+ * change with the language.
+ *
+ * WHY AUTO FOLLOWS IT. A mission with a transport waiting is not finished, and
+ * the page it leads to is a status-5 page — which is exactly what HighFive Auto
+ * was written for. Nothing is duplicated: this only presses the way in, and the
+ * queue on the other side is already somebody else's job.
+ */
+const mmaTransportLink = () => [...document.querySelectorAll('a.btn[href]')]
+    .find((a) => /^\/vehicles\/\d+$/.test(a.getAttribute('href') || ''));
+
 function mmaMoveOn(own, say, mission) {
+    /* A TRANSPORT WAITING COMES BEFORE THE NEXT MISSION. Going on would leave
+     * the patient or the prisoner sitting there, and the page this leads to is
+     * one HighFive Auto already works through to its end. */
+    const transport = mmaTransportLink();
+    if (transport) {
+        say('<b>A transport is waiting.</b> Going to that vehicle \u2014 HighFive Auto takes '
+            + 'it from there.');
+        own.log.info('following a transport request', transport.getAttribute('href'));
+        setTimeout(() => { if (mmaArmed()) transport.click(); }, 400);
+        return;
+    }
+
     const next = document.getElementById('mission_next_mission_btn');
     const goesTo = (/\/missions\/(\d+)/.exec(next?.getAttribute('href') || '') || [])[1] || '';
     if (next && goesTo && goesTo !== mission) {

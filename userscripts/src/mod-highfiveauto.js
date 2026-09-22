@@ -192,6 +192,29 @@ function hfaTopDocument() {
     }
 }
 
+/**
+ * YMCA's blue, read off the game's own navbar.
+ *
+ * `rgb(0,73,151)` is what the interface probe measured, and it is the one
+ * colour this tool set is identified by — but it is written in the game's
+ * stylesheet, not here, so it is sampled rather than typed. A page with no
+ * navbar (a frame, for one) simply hands back nothing and the block goes
+ * without its rule.
+ */
+let hfaNavy = null;
+function hfaNavyBlue(doc) {
+    if (hfaNavy !== null) return hfaNavy;
+    hfaNavy = '';
+    try {
+        for (const d of new Set([doc, document])) {
+            const bar = d.querySelector('.navbar-fixed-top, .navbar-default, .navbar');
+            const paint = bar && (d.defaultView || window).getComputedStyle(bar).backgroundColor;
+            if (paint && !/rgba\(0, 0, 0, 0\)|transparent/.test(paint)) { hfaNavy = paint; break; }
+        }
+    } catch (e) { /* a frame from somewhere else is not ours to read */ }
+    return hfaNavy;
+}
+
 function hfaFadeStyle(doc) {
     if (doc.getElementById(HFA_STYLE_ID)) return;
     const hold = Math.round((HFA_TOAST_LIVES / (HFA_TOAST_LIVES + HFA_TOAST_FADE)) * 100);
@@ -213,9 +236,14 @@ function hfaToast(ctx, vehicle, pick) {
         doc.body.append(box);
     }
     const line = doc.createElement('div');
-    /* The game's own alert, so it follows the game into whatever theme it is
-     * wearing rather than carrying a colour of its own. */
-    line.className = 'alert alert-success';
+    /* BLUE, AND THE GAME'S OWN BLUE. `alert-info` is the one the game already
+     * carries, so it follows whatever theme the page is wearing; the rule down
+     * its side is YMCA's navbar blue, read off the game rather than typed in —
+     * the same trick ShutEye uses for the panel gradient. Where there is no
+     * navbar to read, the rule is simply not drawn. */
+    line.className = 'alert alert-info';
+    const navy = hfaNavyBlue(doc);
+    if (navy) line.style.borderLeft = `3px solid ${navy}`;
     line.style.cssText = 'margin:0;padding:5px 9px;font-size:12px;line-height:1.35;'
         + 'box-shadow:0 1px 4px rgba(0,0,0,.35);'
         + `animation:ymca-hfa-fade ${HFA_TOAST_LIVES + HFA_TOAST_FADE}ms linear forwards`;
