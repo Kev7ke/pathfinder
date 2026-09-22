@@ -58,28 +58,51 @@ function hfaCfg(ctx) {
 const hfaMaxKm = (cfg) => (cfg.maxKm > 0 ? Number(cfg.maxKm) : 25);
 const hfaHold = (cfg) => (Number.isFinite(Number(cfg.hold)) ? Number(cfg.hold) : 800);
 
-/** One destination, read off its own cells. */
-function hfaRead(tr) {
-    const link = tr.querySelector(HF_PICK_LINK);
+/**
+ * One destination, read off whatever it states its figures in.
+ *
+ * A hospital is a row and says it in cells. A prison is a single `<a>` among
+ * thirty-one others and says it in its own text:
+ *
+ *   NYPD | 7th Precinct(Available cells: 2, Distance: 0.69 km, owner's tax: 0%)
+ *
+ * `hfParts` hands both back as pieces, so one set of rules reads both: a figure
+ * carries its unit, free space is `n / n`, tax ends in `%`. The only thing the
+ * bracketed form adds is the word in front of the figure, and `hfValue` takes
+ * that off.
+ *
+ * FREE SPACE IS THE ONE PLAIN COUNT A DESTINATION STATES. The prison list says
+ * `Free cells: 1` where the hospital table says `29 / 30`, so where no piece
+ * reads as `n / n` the first piece that is a plain whole number — and is
+ * neither the distance nor the tax, both of which are read by shape first — is
+ * that count. Nothing here reads the word, so it is the same rule in any
+ * language the game is played in.
+ */
+function hfaRead(block) {
+    const link = block.matches?.(HF_PICK_LINK) ? block : block.querySelector(HF_PICK_LINK);
     if (!link) return null;
-    const cells = [...tr.cells].map((c) => (c.textContent || '').replace(/\s+/g, ' ').trim());
-    /* Cell 0 repeats everything for a narrow screen, so it is never asked for
-     * a figure — only for the name, which is its first piece of text. */
-    const rest = cells.slice(1);
-    const distance = rest.find((t) => HF_DISTANCE_VALUE.test(t));
-    const beds = rest.map((t) => /^(\d+)\s*\/\s*(\d+)$/.exec(t)).find(Boolean);
-    const tax = rest.map((t) => /^(\d[\d.,]*)\s*%$/.exec(t)).find(Boolean);
-    const label = tr.querySelector('.label');
+    const parts = hfParts(block);
+    /* On a row, cell 0 repeats everything for a narrow screen, so it is never
+     * asked for a figure — only for the name. A block that is not a row states
+     * its name in the same first piece and nothing twice. */
+    const rest = block.cells ? parts.slice(1) : parts;
+    const values = rest.map(hfValue);
+    const distance = values.find((t) => HF_DISTANCE_VALUE.test(t));
+    const beds = values.map((t) => /^(\d+)\s*\/\s*(\d+)$/.exec(t)).find(Boolean);
+    const tax = values.map((t) => /^(\d[\d.,]*)\s*%$/.exec(t)).find(Boolean);
+    const count = beds ? null : values.find((t) => /^\d+$/.test(t));
+    const label = block.querySelector?.('.label');
     const said = (label?.textContent || '').trim();
     const href = link.getAttribute('href') || '';
     return {
-        row: tr,
+        row: block,
         href,
         // The link carries both ids; the second one is the facility.
         facilityId: (/\/(?:patient|gefangener)\/(-?\d+)/.exec(href) || [])[1] || '',
-        name: (tr.cells[0]?.firstChild?.textContent || cells[0] || '').trim().slice(0, 60),
+        name: ((block.cells ? block.cells[0]?.firstChild?.textContent : null)
+            || parts[0] || '').trim().slice(0, 60),
         km: distance ? hfNum(distance) : null,
-        free: beds ? Number(beds[1]) : null,
+        free: beds ? Number(beds[1]) : (count ? Number(count) : null),
         tax: tax ? hfNum(tax[1]) : null,
         // Yes, no, or the page did not say — and "did not say" is not "no".
         department: /^(yes|ja)$/i.test(said) ? true : /^(no|nein)$/i.test(said) ? false : null,
@@ -266,8 +289,15 @@ function hfaRun(ctx) {
      * exactly this and it is defined for both, so it is set on the row and on
      * every cell of it — which also means it follows the theme instead of
      * carrying a colour of YMCA's own. */
-    pick.row.classList.add('success');
-    for (const cell of pick.row.cells) cell.classList.add('success');
+    /* A block that is not a row is one of the game's own green buttons already,
+     * so green on it says nothing. `active` is Bootstrap's own word for the one
+     * that is chosen, and it is defined for a button in both themes. */
+    if (pick.row.cells) {
+        pick.row.classList.add('success');
+        for (const cell of pick.row.cells) cell.classList.add('success');
+    } else {
+        pick.row.classList.add('active');
+    }
     pick.row.scrollIntoView({ block: 'nearest' });
     const hold = hfaHold(cfg);
     const bar = hfaSay(ctx, `<b>HighFive Auto</b> &rarr; ${ctx.esc(pick.name)}

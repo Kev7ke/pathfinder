@@ -377,3 +377,55 @@ YMCA.register({
         });
     },
 });
+
+/* ---------------------------------------------- the switch, where the list is */
+
+const MMA_BUTTON_ID = 'ymca-mma-btn';
+
+/**
+ * Armed or not, in the row the game keeps its own mission filters in.
+ *
+ * `#missions-panel-main` holds Emergency, Patient transports and the rest, and
+ * it is on screen whatever mission is open — which a switch inside the mission
+ * panel is not. It was in the panel and that was the wrong place twice over:
+ * it moved with the table, and it was two clicks away whenever the window it
+ * belonged to was shut. The game's own button classes, green for armed and
+ * plain for not, exactly as the filters beside it do.
+ */
+function mmaMountButton(ctx) {
+    if (!mmaAvailable()) return false;
+    if (document.getElementById(MMA_BUTTON_ID)) { mmaPaintButton(); return true; }
+    const row = document.getElementById('missions-panel-main');
+    if (!row) return false;
+
+    const btn = document.createElement('a');
+    btn.id = MMA_BUTTON_ID;
+    btn.setAttribute('role', 'button');
+    btn.href = '';
+    btn.title = 'MissionMagician Auto \u2014 tick and dispatch a mission whose table is green';
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        mmaSetArmed(!mmaArmed());
+        mmaPaintButton();
+        ctx.log.info(`armed ${mmaArmed() ? 'on' : 'off'} from the map`);
+    });
+    row.append(btn);
+    mmaPaintButton();
+    return true;
+}
+
+function mmaPaintButton() {
+    const btn = document.getElementById(MMA_BUTTON_ID);
+    if (!btn) return;
+    const on = mmaArmed();
+    btn.className = `btn btn-xs mission_selection ${on ? 'btn-success' : 'btn-default'}`;
+    btn.innerHTML = `<span class="glyphicon glyphicon-${on ? 'flash' : 'off'}"></span>
+    Auto${on ? '' : ' off'}`;
+}
+
+/* Never finished: the map can grow that row without a fresh document, and the
+ * button has to appear when it does. */
+YMCA.inject('missionmagicianauto', (ctx) => {
+    mmaMountButton(ctx);
+    return false;
+});

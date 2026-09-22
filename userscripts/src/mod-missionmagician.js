@@ -146,12 +146,23 @@ const MM_ADDED_REQUIREMENTS = [{
     key: 'ambulances',
     wanted: 1,
     source: 'the mission cannot be finished without one and no page of the game says so',
+}, {
+    /* THE SECOND ONE CAME WITH ITS ID, so it is keyed on the id. A type id is
+     * the game's own constant and names exactly one mission; a name is what is
+     * used only where no id has been seen. Mission 1167 came back with an empty
+     * `requirements`, no patient and nothing in the window either, and it is
+     * the same fault: an ambulance has to go before it will close. */
+    type: '1167',
+    key: 'ambulances',
+    wanted: 1,
+    source: 'reported empty of requirements while still wanting an ambulance',
 }];
 
-/** Which of those apply to a mission of this name. */
-function mmAddedFor(name) {
-    if (!name) return [];
-    return MM_ADDED_REQUIREMENTS.filter((r) => r.match.test(name));
+/** Which of those apply to this mission — by the game's own type id first. */
+function mmAddedFor(name, type) {
+    return MM_ADDED_REQUIREMENTS.filter((r) => (r.type
+        ? String(type || '') === r.type
+        : !!name && r.match.test(name)));
 }
 
 /**
@@ -1083,7 +1094,7 @@ async function mmPlan(page, ctx, cfg) {
          * where nothing has already asked for it, so a game that starts listing
          * it — or a patient that finally spawns — makes this a no-op rather than
          * a second ambulance. */
-        for (const add of mmAddedFor(name)) {
+        for (const add of mmAddedFor(name, page.missionType)) {
             if (wants.some(([k]) => k === add.key)) continue;
             if (add.key === 'ambulances' && wants.some(([k]) => k === 'patients')) continue;
             wants.push([add.key, add.wanted, false]);
@@ -2110,12 +2121,10 @@ function mmMountPanel(ctx) {
 
     panel.addEventListener('change', (e) => {
         const key = e.target.dataset.cfg;
-        /* Auto is its own module and its own store: this is only the switch. */
-        if (key === 'mmaOn') {
-            mmaSetArmed(e.target.checked);
-            ctx.log.info(`dispatch when green ${e.target.checked ? 'on' : 'off'}`);
-            return;
-        }
+        /* AUTO'S SWITCH IS NOT HERE. It lives in the game's own mission-filter
+         * row, where it is on screen whatever mission is open — a switch inside
+         * the panel was two clicks away whenever the window it belonged to was
+         * shut, and moved with the table under the cursor besides. */
         if (!['fastestFirst', 'ambulancePerPatient', 'followUp', 'countDriving'].includes(key)) return;
         const cfg = ctx.store.read('cfg', {});
         cfg[key] = e.target.checked;
@@ -2569,7 +2578,6 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         ${mmSwitch('fastestFirst', 'Fastest first', cfg.fastestFirst !== false)}
         ${mmSwitch('ambulancePerPatient', 'Ambulance per patient', cfg.ambulancePerPatient !== false)}
         ${mmSwitch('countDriving', 'Count what is on the way', cfg.countDriving !== false)}
-        ${mmaAvailable() ? mmSwitch('mmaOn', 'Dispatch when green', mmaArmed()) : ''}
         ${mmSwitch('followUp', `Follow-up${plan.followUp ? ` (${plan.followUp})` : ''}`,
         cfg.followUp === true, !plan.followUpOffered)}
       </div>

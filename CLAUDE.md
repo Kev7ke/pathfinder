@@ -330,12 +330,43 @@ document it runs in, so it keeps going across every reload the queue makes;
 arrive sweeps up what has faded. Seven seconds each, so they leave in the order
 they arrived without anything keeping a queue.
 
-**The police branch is read the same way, without having been seen.** Nothing is
-written for `/gefangener/` specially and nothing needs to be, as long as it
-states its figures the way the hospital list does: free cells as `n / n` and a
-distance with its unit are all the rule needs. A page with no tax column and no
-department label simply has neither read, which leaves it a plain distance
-case — the safe end to be wrong on.
+**The police branch is not a table, and that is what was wrong with it.** The
+guess was that a prison list states its figures the way a hospital table does.
+It does not: thirty-two `<a>` side by side in one `div.prison-select`, an `<h5>`
+between yours and the alliance's, and every figure inside the link's own text —
+`NYPD | 7th Precinct(Available cells: 2, Distance: 0.69 km, owner's tax: 0%)`.
+Everything read `tr` and `cells`, so the bar drew itself over a list it could
+then neither sort, cap nor send from.
+
+**So "the row" is worked out, not named.** Climb from the link until it is one
+of **several siblings that each hold a destination**: that is what one
+destination per block looks like in any layout, table or not, and on the prison
+page the answer is the link itself. A list of class names to try would have
+answered nothing here, exactly as a list of section ids answered nothing before
+it.
+
+**The brackets are the cells.** A block that is not a row states its name and
+then a bracketed, comma-separated list, so the head is one piece and each item
+inside is another — split only inside the brackets, or a name with a comma in it
+comes apart. `Distance: 0.69 km` then **names its own column** on a list that
+has no headings at all, and the word in front of the figure comes off before any
+rule reads it. That is what lets one set of rules read both shapes.
+
+**Free space is the one plain count a destination states.** The prison list says
+`Free cells: 1` where the hospital table says `29 / 30`, so where no piece reads
+as `n / n` the first piece that is a plain whole number — after the distance and
+the tax have been taken by shape — is that count. Nothing reads the word, so it
+is the same rule in whatever language the game is being played in.
+
+**A page with no tax column and no department label simply has neither read**,
+which leaves a prison a plain distance case — the safe end to be wrong on. And
+green says nothing on a list of green buttons: a block that is not a row is
+marked `active`, Bootstrap's own word for the one that is chosen.
+
+**Wherever there are destinations, not only on a vehicle page.** A prisoner can
+be sent from inside a mission window too, and that page's address is not
+`/vehicles/<id>` — so the page is asked what it holds rather than what it is
+called.
 
 **A capture button says where it is being pressed, before it is pressed.** The
 first one was taken on the map and came back with 67 building links and no
@@ -465,9 +496,11 @@ ambulance goes: `requirements` is empty of it, no patient spawns, the treatment
 bar stays at nothing and `#missing_text` is silent too, so every reading ends
 green on a call the game will not close. That is a fault on their side, and the
 one requirement in this repo that came from neither the catalogue nor the page.
-It is **keyed on the game's own name, not on a type id** — the id has never been
-seen from this side and a made-up one would put an ambulance on whatever mission
-happened to hold it. It is added only where nothing has already asked for it, so
+It is **keyed on the game's own name where no id has been seen** — a made-up id
+would put an ambulance on whatever mission happened to hold it — and **on the id
+the moment one is reported**, as mission 1167 was, because a type id is the
+game's own constant and names exactly one mission where a name only describes
+it. It is added only where nothing has already asked for it, so
 the day the game lists it the entry becomes a no-op, and the row reads **not in
 the game's own list** with the reason under the cursor.
 
@@ -1069,6 +1102,12 @@ the log without a module having to remember to log it.
   just dispatched is written down before the click and read back after: the same
   mission coming round again is the end of the queue, and the window closes with
   Escape rather than being dispatched a second time.
+  **Arming it belongs in the game's own mission-filter row.**
+  `#missions-panel-main` is on screen whatever mission is open, which a switch
+  inside the mission panel is not: it was two clicks away whenever that window
+  was shut, and it moved with the table under the cursor besides. Green for
+  armed and plain for not, exactly as the filters beside it — the same place
+  ShutEye's button goes, for the same reason.
   **A refusal outranks the arithmetic.** The game can turn a send down for want
   of trained crew with every row green — nothing on any page counts people —
   and it hands the window back with every box unticked, so the panel would tick

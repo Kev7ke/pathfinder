@@ -1336,6 +1336,23 @@ assert.equal(skateOnlyAmb[0], '1', 'one, and only where nothing has already aske
 assert.ok(/not in the game's own list/.test(skateOnlyAmb[1]),
   'a line nobody\'s page stated must never read like one that was');
 
+// Mission 1167 is the same fault reported with its id attached, so it is keyed on the id — a
+// type id is the game's own constant and names exactly one mission, where a name is only what
+// is used when no id has been seen.
+await mission.evaluate(() => {
+  window.__catalogue = [{ id: '1167', name: 'Something new', requirements: {} }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1167');
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(1200);
+const byId = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [tr.cells[0].textContent.trim(),
+    tr.cells[4].textContent.replace(/\s+/g, ' ').trim()]));
+console.log('by type id        :', JSON.stringify(byId));
+assert.ok(byId.some((r) => /Ambulances/.test(r[1]) && /not in the game's own list/.test(r[1])),
+  'an empty requirement list on 1167 still wants the ambulance that closes it');
+
 // ---- water comes from the tank, not from whatever is nearest ----
 // Filling the bar in arrival order sends whatever is close, and what is close is engines: asked
 // for 20,000 gallons the panel picked eleven when four were wanted, because each moved it a
@@ -1799,13 +1816,42 @@ await mission.evaluate(() =>
   document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr')));
 await mission.waitForTimeout(1200);
 assert.equal(await mission.locator('#ymca-mm-panel [data-cfg="mmaOn"]').count(), 0,
-  'the panel switch is only there while the tile is on');
+  'the arming switch is not in the panel at all any more');
 await mission.click('#ymca-mm-panel [data-do="select"]');
 await mission.waitForTimeout(800);
 assert.equal(await mission.evaluate(() => window.__dispatched), 0, 'and nothing is dispatched');
 await mission.evaluate(() => {
   document.getElementById('alert_next_btn')?.remove();
   document.getElementById('mission_next_mission_btn')?.remove();
+});
+
+// ---- arming it lives in the game's own mission-filter row ----
+// `#missions-panel-main` is on screen whatever mission is open, which a switch inside the
+// mission panel is not: it was two clicks away whenever that window was shut, and it moved
+// with the table under the cursor besides.
+await mission.evaluate(() => {
+  window.YMCA.switchElement('missionmagicianauto', true);
+  localStorage.setItem('ymca-missionmagicianauto-cfg', JSON.stringify({ on: false }));
+  const row = document.createElement('div');
+  row.id = 'missions-panel-main';
+  document.body.append(row);
+});
+await mission.waitForSelector('#ymca-mma-btn');
+const armedOff = await mission.$eval('#ymca-mma-btn', (b) => b.className);
+await mission.click('#ymca-mma-btn');
+const armedOn = await mission.evaluate(() => ({
+  cls: document.getElementById('ymca-mma-btn').className,
+  stored: JSON.parse(localStorage.getItem('ymca-missionmagicianauto-cfg')).on,
+}));
+console.log('auto button       :', armedOff.includes('btn-default') ? 'off' : '?', '->',
+  armedOn.stored ? 'armed' : '?');
+assert.ok(/btn-default/.test(armedOff), 'not armed reads as the game\'s plain filter button');
+assert.ok(/btn-success/.test(armedOn.cls) && armedOn.stored === true,
+  'clicking it arms Auto and greens the button, the way the filters beside it do');
+await mission.evaluate(() => {
+  window.YMCA.switchElement('missionmagicianauto', false);
+  document.getElementById('missions-panel-main')?.remove();
+  localStorage.setItem('ymca-missionmagicianauto-cfg', JSON.stringify({ on: false }));
 });
 
 // ---- water: best fit, and what is already carrying it counts ----
@@ -2197,6 +2243,62 @@ console.log('highfive off      : a pick arms nothing');
   assert.match(stood, /stood down/i, 'nothing within range means it says so and stops');
   assert.match(none.url(), /\/vehicles\/15079874$/, 'and it sent nothing at all');
   await none.close();
+}
+
+// ---- a prison list is not a table, and the figures are inside the link ----
+// The page the player pasted: thirty-odd `<a>` side by side in one `div.prison-select`, an
+// `<h5>` between yours and the alliance's, and every figure stated in the link's own text —
+// `NYPD | 7th Precinct(Available cells: 2, Distance: 0.69 km, owner's tax: 0%)`. Everything
+// here used to read `tr` and `cells`, so the bar drew itself over a list it could not touch.
+{
+  const jail = await b.newPage({ viewport: { width: 1100, height: 900 } });
+  const jailErrs = [];
+  jail.on('pageerror', (e) => jailErrs.push(e.message));
+  await jail.goto('http://localhost:8777/README.md');
+  const cell = (id, name, free, km, tax) => `<a data-prison-id="${id}" class="btn btn-success"
+    href="/vehicles/15042418/gefangener/${id}?load_all_prisons=true&show_only_available=true"
+    >${name}(${tax === null ? 'Free' : 'Available'} cells: ${free}, Distance: ${km} km${
+  tax === null ? '' : `, owner's tax: ${tax}%`})</a>`;
+  await jail.setContent(`<html><body>
+    <div id="prison-select-15042418" data-vehicle-id="15042418" class="prison-select">
+      ${cell(5688992, 'Prison1', 1, '1.43', null)}
+      ${cell(5677625, 'PO 3', 1, '1.82', null)}
+      <h5>Alliance Cells</h5>
+      ${cell(5615715, "NYPD | 7th Precinct", 2, '0.69', 0)}
+      ${cell(5618207, 'NYPD | 5th Precinct', 2, '1.62', 0)}
+      ${cell(5661946, 'Rikers Correctional Center', 3, '41.95', 0)}
+    </div></body></html>`);
+  await jail.evaluate(() => {
+    history.replaceState({}, '', '/vehicles/15042418');
+    localStorage.setItem('ymca-elements', JSON.stringify({ highfive: true, highfiveauto: true }));
+    localStorage.setItem('ymca-highfiveauto-cfg', JSON.stringify({ auto: true, hold: 600 }));
+  });
+  await jail.addScriptTag({ content: script });
+  await jail.waitForSelector('#hf-bar');
+  // The columns come off the words the game put in front of its own figures, because a list
+  // with no headings still names what it is stating.
+  const jailCols = await jail.$$eval('#hf-sort option', (os) => os.map((o) => o.value));
+  console.log('prison columns    :', JSON.stringify(jailCols));
+  assert.ok(jailCols.some((c) => /distance/i.test(c)),
+    'the distance names itself inside the link, so it can be sorted and capped by');
+  // Nearest first, across both halves, without a table anywhere.
+  const order = await jail.$$eval('#prison-select-15042418 a',
+    (as) => as.map((a) => a.textContent.split('(')[0]));
+  console.log('prison order      :', JSON.stringify(order.slice(0, 3)));
+  assert.equal(order[0], 'NYPD | 7th Precinct', 'nearest first is the ground state here too');
+  // And Auto picks it: no treatment question on this branch, so it is a plain distance case,
+  // and Rikers at 41.95 is outside the 25 it is allowed.
+  const chose = (await jail.textContent('#ymca-hfa-bar')).replace(/\s+/g, ' ').trim();
+  console.log('prison pick       :', chose.slice(0, 90));
+  assert.match(chose, /NYPD \| 7th Precinct/, 'the nearest cell inside the range goes');
+  assert.match(chose, /2 free/, 'and `Free cells: 1` is a count of room, read without its word');
+  assert.equal(await jail.$eval('#prison-select-15042418 a', (a) => a.classList.contains('active')),
+    true, 'the chosen one is marked before it is sent — `active`, not green on a green button');
+  await jail.waitForFunction(() => /gefangener\/5615715/.test(location.pathname), null,
+    { timeout: 8000 });
+  console.log('prison sent       : the page went to the cell it chose');
+  assert.equal(jailErrs.length, 0);
+  await jail.close();
 }
 
 // ---- the page a pick lands on is the proof, and it carries the button already ----

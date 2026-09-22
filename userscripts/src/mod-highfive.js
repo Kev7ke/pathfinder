@@ -168,6 +168,26 @@ function hfCapturePage() {
                     })),
             };
         })(),
+        /* WHAT A BLOCK SAYS, WITHOUT SAYING IT. The prison list states every
+         * figure inside the link's own text, so the wording is the structure —
+         * and the wording is the game's, the same for every player. The name is
+         * the alliance's building and is never carried: piece one is replaced
+         * by its length, every digit in the rest is shaped out, and only the
+         * first few blocks are reported. */
+        destinationBlocks: [...document.querySelectorAll(HF_PICK_LINK)]
+            .map(hfBlockOf).filter(Boolean)
+            .filter((el, i, all) => all.indexOf(el) === i)
+            .slice(0, 3)
+            .map((el) => {
+                const parts = hfParts(el);
+                return {
+                    tag: el.tagName.toLowerCase(),
+                    class: classOf(el) || undefined,
+                    isRow: !!el.cells,
+                    nameLength: (parts[0] || '').length,
+                    pieces: parts.slice(1).map((t) => t.replace(/\d+/g, '#').slice(0, 40)),
+                };
+            }),
         hasNextButton: !!document.querySelector(HF_NEXT),
     };
 }
@@ -441,8 +461,113 @@ function hfTables() {
     return [...seen];
 }
 
-const hfRowsOf = (table) => [...table.querySelectorAll('tr')]
-    .filter((tr) => tr.querySelector(HF_PICK_LINK));
+const hfText = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+
+/**
+ * ONE DESTINATION IS NOT ALWAYS A ROW.
+ *
+ * The prison list is not a table at all. Its capture came back with
+ * `rowClasses: {}`, 32 `/gefangener/` links and `destinations: { noRow: true }`
+ * — each link sitting in a plain `div`. Everything here read `tr` and `cells`,
+ * so the bar drew itself over a list it could then neither sort nor filter.
+ *
+ * WHICH ELEMENT IS "THE ROW" IS WORKED OUT, NOT NAMED. Climb from the link
+ * until it is one of SEVERAL SIBLINGS that each hold a destination: that is
+ * what "one destination per block" looks like in any layout, table or not. A
+ * list of class names to try would have answered nothing here, exactly as a
+ * list of section ids answered nothing on the same page.
+ *
+ * On the prison page the answer is the link itself — thirty-two `<a>` side by
+ * side in one `div.prison-select`, with an `<h5>` between yours and the
+ * alliance's. So the climb starts AT the link, not above it.
+ */
+function hfBlockOf(link) {
+    const tr = link.closest('tr');
+    if (tr) return tr;
+    const holds = (el) => el.matches(HF_PICK_LINK) || !!el.querySelector(HF_PICK_LINK);
+    let el = link;
+    while (el && el.parentElement && el !== document.body) {
+        if ([...el.parentElement.children].filter(holds).length > 1) return el;
+        el = el.parentElement;
+    }
+    // One destination on the page: nothing to sort or hide it against.
+    return link.parentElement || null;
+}
+
+/**
+ * The blocks, grouped by the element they sit in.
+ *
+ * Sorting only ever moves a block inside its own parent — a row lifted into
+ * another tbody would leave the game's own grouping behind it, and a card moved
+ * out of its container would leave its layout behind it.
+ */
+function hfGroups() {
+    const groups = new Map();
+    for (const a of document.querySelectorAll(HF_PICK_LINK)) {
+        const block = hfBlockOf(a);
+        if (!block || !block.parentElement) continue;
+        if (!groups.has(block.parentElement)) groups.set(block.parentElement, new Set());
+        groups.get(block.parentElement).add(block);
+    }
+    return [...groups].map(([parent, blocks]) => ({ parent, blocks: [...blocks] }));
+}
+
+/**
+ * What a block says, piece by piece.
+ *
+ * A row says it in cells. A block that is not a row says it in its own text,
+ * and the game states it the same way every time:
+ *
+ *   NYPD | 7th Precinct(Available cells: 2, Distance: 0.69 km, owner's tax: 0%)
+ *
+ * — the name, then a bracketed list. So the brackets are the cells: the head is
+ * one piece and each comma-separated item inside is another. Splitting only
+ * inside the brackets is what keeps a name with a comma in it whole.
+ *
+ * The leaves come first, so an element with no element children contributes its
+ * whole text and `29 / 30` is never broken in half by the markup around it.
+ */
+const HF_BRACKETED = /^([^(]*)\((.+)\)\s*$/;
+
+function hfParts(el) {
+    if (el.cells) return [...el.cells].map((c) => hfText(c.textContent));
+    const out = [];
+    const push = (raw) => {
+        const t = hfText(raw);
+        if (!t) return;
+        const m = HF_BRACKETED.exec(t);
+        if (!m) { out.push(t); return; }
+        const head = hfText(m[1]);
+        if (head) out.push(head);
+        for (const piece of m[2].split(',')) {
+            const p = hfText(piece);
+            if (p) out.push(p);
+        }
+    };
+    const visit = (node) => {
+        for (const child of node.childNodes) {
+            if (child.nodeType === 3) push(child.textContent);
+            else if (child.nodeType === 1) {
+                if (child.firstElementChild) visit(child);
+                else push(child.textContent);
+            }
+        }
+    };
+    visit(el);
+    return out;
+}
+
+/**
+ * The figure inside a piece, without the word the game put in front of it.
+ *
+ * `Distance: 0.69 km` is the distance column of a table that has no columns.
+ * A cell has no label, so this hands it straight back — which is what makes one
+ * set of rules read both shapes.
+ */
+const hfValue = (part) => {
+    const at = String(part || '').lastIndexOf(':');
+    return at === -1 ? hfText(part) : hfText(String(part).slice(at + 1));
+};
 
 /**
  * What this table's columns are called and which of them hold numbers.
@@ -474,22 +599,29 @@ const HF_DISTANCE_VALUE = /\d[\d.,]*\s*(km|mi|miles?|meilen)\b/i;
 /** How far a transport may go before the list stops offering it. */
 const HF_DEFAULT_MAX = 50;
 
-const hfAllRows = () => hfTables().flatMap(hfRowsOf);
+const hfAllRows = () => hfGroups().flatMap((g) => g.blocks);
 
 function hfColumns() {
     const rows = hfAllRows();
     if (!rows.length) return [];
+    const parts = rows.map(hfParts);
     const heads = [...(hfTables()[0]?.querySelectorAll('thead th, thead td') || [])];
-    const width = Math.max(...rows.map((r) => r.cells.length));
+    const width = Math.max(...parts.map((p) => p.length));
     const out = [];
     const used = new Set();
     for (let i = 0; i < width; i += 1) {
-        const values = rows.map((r) => (r.cells[i]?.textContent || '').replace(/\s+/g, ' ').trim());
+        const pieces = parts.map((p) => p[i] || '');
+        const values = pieces.map(hfValue);
         const numbers = values.filter((v) => hfNum(v) !== null).length;
         if (numbers < Math.max(2, Math.ceil(rows.length * 0.6))) continue;
         // All one value is a column nobody would sort by.
         if (new Set(values).size < 2) continue;
-        const heading = (heads[i]?.textContent || '').replace(/\s+/g, ' ').trim();
+        /* A heading where the page has one; otherwise the word the game itself
+         * put in front of the figure — `Distance: 0.69 km` names its own column
+         * on a list that has no headings at all. */
+        const stated = pieces.map((t) => (t.includes(':') ? hfText(t.slice(0, t.indexOf(':'))) : ''))
+            .filter(Boolean);
+        const heading = hfText(heads[i]?.textContent) || stated[0] || '';
         let label = heading || `Column ${i + 1}`;
         // Two tables of the same shape must not name the same column twice.
         if (used.has(label)) label = `${label} (${i + 1})`;
@@ -497,7 +629,7 @@ function hfColumns() {
         out.push({
             index: i,
             label,
-            // The cell says it, the heading over it may not be the right one.
+            // The value says it, the heading over it may not be the right one.
             distance: values.filter((v) => HF_DISTANCE_VALUE.test(v)).length > values.length / 2,
         });
     }
@@ -522,7 +654,7 @@ function hfSectionRows(id) {
     }
     if (!holder) return null;
     return new Set([...holder.querySelectorAll(HF_PICK_LINK)]
-        .map((a) => a.closest('tr')).filter(Boolean));
+        .map(hfBlockOf).filter(Boolean));
 }
 
 /** Sort, then hide what the player did not ask to see. */
@@ -536,42 +668,42 @@ function hfApply(ctx, cfg) {
     const alliance = hfSectionRows('alliance-hospitals');
     let shown = 0;
 
-    for (const table of hfTables()) {
-        const rows = hfRowsOf(table);
-        if (!rows.length) continue;
+    for (const group of hfGroups()) {
+        const blocks = group.blocks;
+        if (!blocks.length) continue;
 
         const column = columns.find((c) => c.label === cfg.sortBy) || nearest;
         if (column) {
-            const key = (tr) => hfNum(tr.cells[column.index]?.textContent);
-            const sorted = [...rows].sort((a, b) => {
+            const key = (el) => hfNum(hfValue(hfParts(el)[column.index]));
+            const sorted = [...blocks].sort((a, b) => {
                 const x = key(a);
                 const y = key(b);
-                if (x === null) return 1;      // unreadable rows go last, either way
+                if (x === null) return 1;      // unreadable blocks go last, either way
                 if (y === null) return -1;
                 return cfg.sortDown ? y - x : x - y;
             });
-            const parent = sorted[0].parentElement;
-            // Only within one parent: a row moved between tbodies would leave
-            // the game's own grouping behind it.
-            for (const tr of sorted) if (tr.parentElement === parent) parent.append(tr);
+            /* Only within one parent: a row lifted into another tbody would
+             * leave the game's own grouping behind it, and a card moved out of
+             * its container would leave its layout behind it. */
+            for (const el of sorted) group.parent.append(el);
         }
 
-        for (const tr of hfRowsOf(table)) {
+        for (const el of blocks) {
             let hide = false;
-            if (cfg.who === 'own' && own) hide = !own.has(tr);
-            if (cfg.who === 'alliance' && alliance) hide = !alliance.has(tr);
+            if (cfg.who === 'own' && own) hide = !own.has(el);
+            if (cfg.who === 'alliance' && alliance) hide = !alliance.has(el);
             /* THE RANGE IS A CEILING ON THE COLUMN BEING SORTED BY, not a
              * distance this knows the units of. Sort by distance and "at most
              * 20" is twenty of whatever that column counts in; sort by price
              * and it is a price. The page names the column and the player
-             * names the number, so neither has to be guessed — and a row whose
-             * cell cannot be read is never hidden by it. */
+             * names the number, so neither has to be guessed — and a block
+             * whose figure cannot be read is never hidden by it. */
             if (!hide && column && cfg.max > 0) {
-                const value = hfNum(tr.cells[column.index]?.textContent);
+                const value = hfNum(hfValue(hfParts(el)[column.index]));
                 if (value !== null && value > cfg.max) hide = true;
             }
             if (!hide && cfg.limit && shown >= cfg.limit) hide = true;
-            tr.style.display = hide ? 'none' : '';
+            el.style.display = hide ? 'none' : '';
             if (!hide) shown += 1;
         }
     }
@@ -899,7 +1031,13 @@ YMCA.inject('highfive', (ctx) => {
      * player can switch HighFive on while looking at the map and open a
      * transport a moment later, and marking it finished here would mean the
      * bar never appeared until the next reload. */
-    if (/^\/vehicles\/\d+/.test(location.pathname)) return hfOnPickPage(ctx);
+    /* WHEREVER THERE ARE DESTINATIONS, NOT ONLY ON A VEHICLE PAGE. A prisoner
+     * can be sent from inside a mission window too, and that page's address is
+     * not `/vehicles/<id>` — so the page is asked what it holds rather than
+     * what it is called. `hfOnPickPage` answers falsy where there is no link,
+     * so this stays a page that is not finished rather than one that is. */
+    if (/^\/vehicles\/\d+/.test(location.pathname)
+        || document.querySelector(HF_PICK_LINK)) return hfOnPickPage(ctx);
     /* Everywhere else the switch beside the radio is placed, but this is never
      * finished here: a page that is not a transport page is not a job done, and
      * the map can still become one without a fresh document. */
