@@ -53,12 +53,10 @@ userscripts/
     mod-stepops.js
     mod-renamer.js
     mod-missionmagician.js
-    mod-missionmagicianauto.js
     mod-recruitroom.js
     mod-trackops.js
     mod-elementfriend.js
     mod-highfive.js
-    mod-highfiveauto.js
     mod-eagleeye.js
     mod-shuteye.js
     mod-stationfascination.js
@@ -313,29 +311,6 @@ behind them and nothing shows. `.success` is the game's own class for exactly
 this and it is defined for both, so it goes on the row **and** on every cell —
 which also means it follows the theme instead of carrying a colour of YMCA's own.
 
-**The feedback lives in the top document.** Everything HighFive Auto does
-happens inside the vehicle window, which is a frame that reloads on every
-send — anything drawn in there is gone before it can be read. The map's own
-document does not reload, so the blocks go there and stack up as the queue works
-through itself, each one linking the vehicle and the facility by the ids the
-destination link carried.
-
-**The blocks are blue, and it is the game's own blue.** `alert-info` is a class
-the game already carries, so it follows whatever theme the page is wearing; the
-rule down the side is YMCA's navbar blue **sampled off the game** rather than
-typed in, the same way ShutEye reads the panel gradient. A page with no navbar
-to read — a frame, for one — simply goes without the rule.
-
-**And the fade is an animation, not a timer, for the same reason the block is
-there at all.** A `setTimeout` set from the vehicle window dies with the frame
-on the very next send, so the block it was going to clear sits in the corner for
-good. Scheduling it on the top window does not help either — the function still
-belongs to the frame's realm and goes with it. An animation belongs to the
-document it runs in, so it keeps going across every reload the queue makes;
-`forwards` leaves the block invisible where it finished and the next one to
-arrive sweeps up what has faded. Seven seconds each, so they leave in the order
-they arrived without anything keeping a queue.
-
 **The police branch is not a table, and that is what was wrong with it.** The
 guess was that a prison list states its figures the way a hospital table does.
 It does not: thirty-two `<a>` side by side in one `div.prison-select`, an `<h5>`
@@ -394,11 +369,10 @@ id, so the first one in the page is worked and the pick lands on its own page.
 "The first ten" is ten per list for the same reason: one running count across
 all of them left the later vehicles showing nothing at all.
 
-**A prisoner still waiting for a cell holds MissionMagician Auto back.** The
-call stays open however green the requirement table is, and Dispatch and Next
-would skip straight past it, leaving the prisoners to the game's own timer. It
-is read as **a destination link, not as a prison** — the same question HighFive
-asks of a page — so a branch nobody here has seen answers it too.
+**A prisoner still waiting for a cell keeps a mission open**, however green the
+requirement table is, which is why the bar is offered there at all. It is found
+as **a destination link, not as a prison** — the same question HighFive asks of
+any page — so a branch nobody here has seen answers it too.
 
 **A capture button says where it is being pressed, before it is pressed.** The
 first one was taken on the map and came back with 67 building links and no
@@ -669,6 +643,17 @@ flag is derived from the key against the vocabulary the page already carries:
 `gw_gefahrgut` finds `gwgefahrgut`, because **the game spells a capability with
 and without its underscores** and the derivation reads both now. Still nothing
 invented — the flag has to be one some vehicle in that table actually carries.
+
+**A refusal outranks the arithmetic.** The game can turn a send down for want of
+trained crew with every row green — nothing on any page counts people — and it
+hands the window back with every box unticked, so a panel that only did the
+arithmetic would tick the same set again. A danger alert that is not
+`.alert-missing-vehicles` and that **names one of the trainings this mission
+itself asks for** is the game saying it out loud, and that is the only case
+read: an alert naming nothing this mission wants is left alone rather than
+guessed at. The table stops calling itself finished for that mission, said in a
+sentence beside the crew line, so nobody is told a call is covered that the game
+has just refused.
 
 **What is still not claimed is that the people aboard a HazMat hold the HazMat
 training.** No page says that. The claim is the other way round: a vehicle the
@@ -1192,95 +1177,22 @@ the log without a module having to remember to log it.
   back, so MissionMagician ticks the game's own checkboxes and stops; the player
   presses Dispatch. The preview is the whole product, and that is not a
   limitation to be lifted later.
-- **MissionMagician Auto is the third exception, and it was asked for.** It
-  presses the game's own **Dispatch and Next** — `a#alert_next_btn.alert_next`,
-  the one control that keeps a queue moving — but only after a Tick the player
-  pressed, and **only on a green table**: one line short and it says so and
-  stops, which is the case the panel exists for. Armed, it also presses Tick
-  itself when a mission opens, keyed on the mission so the several redraws a
-  window goes through press it once. A table that stays short is tried again a
-  second later, three times by default, because the game fills a window over
-  several seconds and the vehicle arriving late is often the one that would have
-  finished it. Then it takes `#mission_next_mission_btn` — whose href names the
-  mission it goes to, so **a button pointing at the mission already open is a
-  loop, not a way on**, and is treated as no button at all. Where there is none,
-  the window closes with Escape.
-  **A module handed somebody else's context asks the shell for its own.**
-  `mmaAfterTick` is called with MissionMagician's `ctx`, and `ctx.store` is
-  namespaced to whoever owns it — so reading its own hold through it read a
-  setting that was never written, and waited the default in silence.
-  **The last mission in the queue is the one that loops, and nothing in a
-  variable can catch it.** `Dispatch and Next` reloads the frame, so everything
-  this module holds — "I have already ticked this one" included — is gone by the
-  time the next page draws. Where there is no next mission the game hands back
-  the same one, and a module with no memory ticks it, finds it green and sends
-  it again. What survives a reload is `sessionStorage`, so the mission that was
-  just dispatched is written down before the click and read back after: the same
-  mission coming round again is the end of the queue, and the window closes with
-  Escape rather than being dispatched a second time.
-  **Arming it belongs in the game's own mission-filter row.**
-  `#missions-panel-main` is on screen whatever mission is open, which a switch
-  inside the mission panel is not: it was two clicks away whenever that window
-  was shut, and it moved with the table under the cursor besides. Green for
-  armed and **red when it is off**, the way HighFive Auto's is: a switch that
-  writes to the player's account says which it is at a glance, and plain grey
-  reads as "not a button" rather than "not armed". The same place ShutEye's
-  button goes, for the same reason.
-  **A transport waiting comes before the next mission.** The game puts it in
-  the window as a button of its own — `<a class="btn btn-xs btn-success"
-  href="/vehicles/15096931">ALS Ambulance - Transport Requested</a>` — and it
-  is the one link on the page whose href is a **bare `/vehicles/<id>` and which
-  is styled as a button**: the vehicle names in the tables are plain links and
-  the recall buttons carry `/backalarm`. Found by that pair rather than by its
-  words, which are the game's and change with the language. Going on would
-  leave the patient or the prisoner sitting at the mission, and the page it
-  leads to is a status-5 page — which is what HighFive Auto was written for, so
-  **this only presses the way in** and the queue on the other side is already
-  somebody else's job. Where boxes are ticked the send goes first: the
-  transport is still waiting when the queue comes back round, and a vehicle
-  held back is one that is not on its way.
-  **Following a transport is a one-way door, and that was what was wrong with
-  it.** The link leads to the vehicle, HighFive Auto works the queue through to
-  its end, and its end is Escape — the window closes and the map is left
-  sitting there with nothing to open. So **the way back is written down before
-  the door is gone through**: `sessionStorage` survives the frame being
-  replaced and then removed, and it is shared between the frame and the map, so
-  the note written inside the mission window is read by the map a minute later.
-  What it presses is the game's own `a#alarm_button_<id>.mission-alarm-button`,
-  the first in the map's mission list — the same link a player clicks — so the
-  run-through starts again from the top.
-  **The shell's injection watch expires after thirty seconds**, which is right
-  for a page that never grew what a module was waiting for and wrong for
-  anything waiting on something minutes away. A transport queue takes minutes,
-  so Auto keeps **its own** MutationObserver on the map. It is still the map's
-  own mutations rather than a poll: nothing asks the game anything, it is told
-  when its own page changes.
-  **A refusal outranks the arithmetic.** The game can turn a send down for want
-  of trained crew with every row green — nothing on any page counts people —
-  and it hands the window back with every box unticked, so the panel would tick
-  the same set and send exactly what was refused. A danger alert that is not
-  `.alert-missing-vehicles` and that **names one of the trainings this mission
-  itself asks for** is the game saying it out loud, and that is the only case
-  read: an alert naming nothing this mission wants is left alone rather than
-  guessed at. The table stops calling itself finished for that mission, said in
-  a sentence beside the crew line, and the game's own Dispatch button is
-  untouched for the player who has since moved crew about.
-- **HighFive Auto is the second exception, and it was asked for.** It presses
-  the destination button as well as the next-vehicle one, so a queue of radio
-  calls works through itself instead of being clicked one hospital at a time.
-  A transport cannot be taken back, so what stands in for the backup is: it is
-  **off until switched on** and has its own switch in ElementFriend as well as
-  the red-when-off button in the radio row; **every page shows the destination
-  it chose and why**, and holds for a beat with a Stop beside it; and it
-  **never sends beyond the range set for it** — where nothing qualifies it
-  stands down and leaves the page to the player rather than picking the least
-  bad thing. It is not a watcher: nothing polls, nothing opens a window, and it
-  only ever acts on a page the player is already looking at.
-  **Treatment, then distance, then the free one.** A facility that can treat the
-  patient beats a nearer one that cannot; where none can it is a plain distance
-  case; and if the nearest of the group charges while a free one is in it, the
-  free one goes — a saving rather than a detour, because both are already inside
-  the range.
+- **The line is LSS-Manager's line, and two modules were the wrong side of it.**
+  A tool that sorts, counts, shows and ticks is one that helps somebody play;
+  one that presses the game's own buttons through a queue is playing for them,
+  and that is what an automation rule is aimed at. **MissionMagician Auto** and
+  **HighFive Auto** were removed in 0.0.51 — not switched off, removed — and the
+  work they were built on stayed, because none of it was the pressing:
+  MissionMagician ticks and stops, HighFive sorts, caps and follows the game's
+  own `#next-vehicle-fms-5` **after a pick the player made**, pressing Escape
+  when the game names no next transport. That is exactly LSS-Manager's
+  behaviour and it is what was asked for.
+  **What was learnt building them is not lost and is not to be re-derived**: the
+  status-5 branches and their two spellings, the prison list's shape, the
+  mission window being a frame, the refusal alert, the crew column. All of it is
+  still written down above, in the reading half of the module it belongs to.
+  **Do not put either back without being asked**, and if asked, say what is
+  above first.
 - **RecruitRoom is the one exception, and it was asked for.** Opening a tab per
   station was worse than the clicking it replaced, so it recruits at every ticked
   station itself. Credits spent on people do not come back, so what stands in for

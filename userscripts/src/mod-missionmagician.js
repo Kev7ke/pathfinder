@@ -2293,10 +2293,6 @@ function mmMountPanel(ctx) {
         panel.innerHTML = mmGamePanelHtml(plan, cfg, ctx);
         mmRecount(panel, plan);
         mmWatchScroll(panel);
-        /* A mission that has just opened with Auto armed presses Tick itself.
-         * Keyed on the mission, so the several redraws a window goes through
-         * while it fills press it once. */
-        mmaAfterDraw(panel, ctx);
     };
     const redraw = () => {
         clearTimeout(timer);
@@ -2309,10 +2305,10 @@ function mmMountPanel(ctx) {
         ctx.log.info('ticked vehicles', `${n} in the mission window`);
         const done = panel.querySelector('#mm-panel-done');
         if (done) done.hidden = false;
-        /* The game fires `change` on every box, so the counts and the table's
-         * own green land in the same turn — but only after this one, which is
-         * why the judge is asked on the next frame rather than here. */
-        requestAnimationFrame(() => mmaAfterTick(panel, ctx));
+        /* AND THAT IS WHERE IT STOPS. What follows a tick is the player
+         * reading the table and pressing the game's own Dispatch. An alarm
+         * cannot be taken back, and a tool that presses it is playing the game
+         * rather than helping somebody play it. */
     };
 
     /* The keys are read on every press rather than captured here, so changing

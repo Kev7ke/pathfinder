@@ -373,15 +373,10 @@ const ICONS = {
     diagnostics: '<circle cx="15" cy="15" r="9"/><path d="M22 22 L30 30"/>',
     missionmagician: '<path d="M7 27 L24 10"/><path d="M22 5 L24 10 L29 12 L24 14 L22 19 L20 14 '
         + 'L15 12 L20 10 Z"/>',
-    missionmagicianauto: '<path d="M7 27 L24 10"/><path d="M22 5 L24 10 L29 12 L24 14 L22 19 '
-        + 'L20 14 L15 12 L20 10 Z"/><path d="M4 8 h8"/><path d="M4 14 h5"/>',
     recruitroom: '<circle cx="13" cy="11" r="5"/><path d="M4 29c0-5 4-9 9-9s9 4 9 9"/>'
         + '<path d="M24 9v10M19 14h10"/>',
     trackops: '<path d="M5 29 H30"/><rect x="7" y="18" width="5" height="11"/>'
         + '<rect x="15" y="11" width="5" height="18"/><rect x="23" y="5" width="5" height="24"/>',
-    highfiveauto: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'
-        + '<path d="M19 16v-7a2 2 0 0 1 4 0v12a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7v-6a2 2 0 0 1 4 0"/>'
-        + '<path d="M26 4l2 3 3-1-1 3 3 2-3 1 1 3-3-1-2 3"/>',
     eagleeye: '<path d="M2 17s5.5-8 15-8 15 8 15 8-5.5 8-15 8-15-8-15-8Z"/>'
         + '<circle cx="17" cy="17" r="4.5"/>',
     shuteye: '<path d="M3 13c3 4.5 8 7.5 14 7.5S28 17.5 31 13"/><path d="M8 19l-2.5 4"/>'

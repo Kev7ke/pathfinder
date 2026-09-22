@@ -1295,7 +1295,7 @@ assert.ok(/~100 credits/.test(head), 'average_credits is the game\'s own number,
 // Nothing on any page counts people, and that has not changed. But a refusal is the game saying
 // out loud what it otherwise keeps to itself, so it is read where it is unambiguous: this
 // mission names a training, and the alert names that training back. The table stops calling
-// itself finished, which is what keeps Auto from sending exactly what was just turned down.
+// itself finished, so the table does not read green on a send the game has just refused.
 // `.alert-missing-vehicles` is the game's own line for the other shortfall and must be ignored.
 await mission.evaluate(() => {
   const missing = document.createElement('div');
@@ -1325,7 +1325,7 @@ const refused = await mission.evaluate(() => ({
 }));
 console.log('refused           :', JSON.stringify(refused));
 assert.equal(refused.ok, false, 'a refused send is not a finished table, whatever the rows say');
-assert.equal(refused.short, true, 'and it reads as short, which is what Auto holds back on');
+assert.equal(refused.short, true, 'and it reads as short, so the player is not told it is done');
 assert.ok(/HazMat crew/.test(refused.said),
   'it says which training the game named, in the game\'s own word');
 // It is remembered, because a refused dispatch hands the window back with every box unticked:
@@ -1662,8 +1662,7 @@ const elements = await pg.$$eval('.ymca-tile.el', (b) => b.map((x) => x.dataset.
 console.log('elements          :', JSON.stringify(elements));
 await pg.screenshot({ path: '/tmp/ymca-elements.png' });
 assert.deepEqual(elements,
-  ['renamer', 'missionmagician', 'missionmagicianauto', 'trackops', 'highfive', 'highfiveauto',
-    'eagleeye'],
+  ['renamer', 'missionmagician', 'trackops', 'highfive', 'eagleeye'],
   'every switchable module that is not in a group should have an element tile');
 assert.equal(await pg.locator('.ymca-tile.el[data-el="shuteye"]').count(), 0,
   'a module in a group is listed inside the group, not beside it');
@@ -1672,11 +1671,13 @@ for (const id of ['renamer', 'missionmagician', 'trackops', 'highfive', 'eagleey
   assert.equal(await pg.locator(`.ymca-switch[data-sw="${id}"] input`).isChecked(), true,
     `${id} should be on until somebody says otherwise`);
 }
-// Everything else here shows or moves. This one sends, so it waits to be asked for.
-for (const id of ['highfiveauto', 'missionmagicianauto']) {
-  assert.equal(await pg.locator(`.ymca-switch[data-sw="${id}"] input`).isChecked(), false,
-    `${id} writes, so it is off until somebody switches it on`);
-}
+// EVERY ONE OF THEM SHOWS, SORTS OR COUNTS, and that is now the whole of YMCA: the two that
+// pressed the game's own buttons on a queue are gone. Nothing here writes to the account
+// except on a press the player made, for the thing they pressed.
+assert.equal(await pg.locator('.ymca-switch[data-sw="missionmagicianauto"]').count(), 0,
+  'MissionMagician Auto is gone, not switched off');
+assert.equal(await pg.locator('.ymca-switch[data-sw="highfiveauto"]').count(), 0,
+  'HighFive Auto is gone, not switched off');
 
 // A switch takes the tool out of the launcher, not just out of this page.
 await pg.click('.ymca-switch[data-sw="trackops"]');
@@ -1916,213 +1917,6 @@ assert.ok(skate.some((r) => /Ambulances/.test(r[4]) && /this window states/.test
 assert.ok(/Tick 2 vehicles/.test(await mission.textContent('#ymca-mm-panel [data-do="select"]')),
   'and it is picked: an engine for the catalogue, an ambulance for the window');
 await mission.evaluate(() => { document.getElementById('missing_text').textContent = ''; });
-
-// ---- MissionMagician Auto dispatches only on a green table ----
-// The press that sends is downstream of a press the player made, and the thing it waits for is
-// the table saying it is finished. One line short and it says so instead.
-await mission.evaluate(() => {
-  document.getElementById('mission_vehicle_at_mission')?.remove();
-  document.getElementById('mission_vehicle_driving')?.remove();
-  document.getElementById('vehicle_show_table_body_all').innerHTML = '';
-  const tbody = document.getElementById('vehicle_show_table_body_all');
-  for (const id of [401, 402]) {
-    const tr = document.createElement('tr');
-    tr.className = 'vehicle_select_table_tr';
-    tr.setAttribute('vehicle_id', String(id));
-    tr.setAttribute('data-distance', '1');
-    tr.innerHTML = `<td><input type="checkbox" class="vehicle_checkbox" value="${id}"
-      id="vehicle_checkbox_${id}" name="vehicle_ids[]" vehicle_type_id="13" fms="2"
-      fire="1" dlk="1"></td><td id="vehicle_sort_${id}" timevalue="${id}">1 min.</td>`;
-    tbody.append(tr);
-  }
-  const next = document.createElement('a');
-  next.id = 'alert_next_btn';
-  next.className = 'btn btn-success alert_next';
-  next.href = '#';
-  window.__dispatched = 0;
-  next.addEventListener('click', () => { window.__dispatched += 1; });
-  document.body.append(next);
-  window.__catalogue = [{ id: '312', name: 'Two engines', requirements: { firetrucks: 3 } }];
-  localStorage.removeItem('ymca-cache-/einsaetze.json');
-  localStorage.setItem('ymca-elements', JSON.stringify({ missionmagicianauto: true }));
-  localStorage.setItem('ymca-missionmagicianauto-cfg',
-    JSON.stringify({ on: true, hold: 120, tries: 2, closeAfter: 150 }));
-  const onward = document.createElement('a');
-  onward.id = 'mission_next_mission_btn';
-  onward.href = '/missions/999888?ift=sw';
-  window.__wentOn = 0;
-  onward.addEventListener('click', (e) => { e.preventDefault(); window.__wentOn += 1; });
-  document.body.append(onward);
-  document.getElementById('mission_general_info').setAttribute('data-mission-type', '312');
-});
-// Armed, it presses Tick itself the moment the panel draws. Three wanted, two in range: it
-// tries again a second later, and when it is still short it takes the game's own Next Mission.
-await mission.waitForTimeout(3600);
-const short = (await mission.textContent('#mma-note')).replace(/\s+/g, ' ').trim();
-console.log('auto held back    :', short.slice(0, 70));
-assert.equal(await mission.evaluate(() => window.__dispatched), 0,
-  'a table that is still short dispatches nothing at all');
-assert.equal(await mission.evaluate(() => window.__wentOn), 1,
-  'and it moves on to the mission the game is offering');
-
-// Now the mission only wants two, so ticking covers it and the button gets pressed.
-await mission.evaluate(() => {
-  window.__catalogue = [{ id: '313', name: 'Two engines', requirements: { firetrucks: 2 } }];
-  localStorage.removeItem('ymca-cache-/einsaetze.json');
-  document.getElementById('mission_general_info').setAttribute('data-mission-type', '313');
-  // A new mission is a new page in the game; here it is a new form action, which is what
-  // the run-through keys on so a redraw does not press Tick twice for one mission.
-  document.getElementById('mission-form').setAttribute('action', '/missions/506003399/alarm');
-  // The panel watches the markup, not the attributes, so give it something to see.
-  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
-});
-await mission.waitForTimeout(2000);
-console.log('auto dispatched   :', (await mission.textContent('#mma-note')).replace(/\s+/g, ' ')
-  .trim().slice(0, 60));
-assert.ok(await mission.evaluate(() => window.__dispatched) >= 1,
-  'green table, Dispatch and Next gets pressed — the game\'s own button');
-
-// ---- a prisoner still waiting for a cell holds the dispatch ----
-// The game gives every vehicle carrying one a list of `/gefangener/` links on the mission page,
-// and until one is picked the call stays open however green the requirement table is. Dispatch
-// and Next would skip straight past it. It is read as a destination link, not as a prison, so
-// a branch nobody here has seen answers it too.
-await mission.evaluate(() => {
-  window.__dispatched = 0;
-  const waiting = document.createElement('div');
-  waiting.id = 'prison-select-777';
-  waiting.className = 'prison-select';
-  waiting.innerHTML = `<a class="btn btn-success" href="/vehicles/777/gefangener/5615711"
-    >NYPD | 1st Precinct(Free cells: 1, Distance: 0.82 km)</a>
-    <a class="btn btn-success" href="/vehicles/777/gefangener/5615707"
-    >NYPD Headquarters(Free cells: 2, Distance: 1.17 km)</a>`;
-  document.body.append(waiting);
-  document.getElementById('mission-form').setAttribute('action', '/missions/506003401/alarm');
-  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
-});
-await mission.waitForTimeout(2000);
-const waited = (await mission.textContent('#mma-note')).replace(/\s+/g, ' ').trim();
-console.log('held for a cell   :', waited.slice(0, 70));
-assert.match(waited, /waiting on a destination/i,
-  'it says what it is waiting for rather than silently doing nothing');
-assert.equal(await mission.evaluate(() => window.__dispatched), 0,
-  'a green table is not a finished mission while somebody still needs a destination');
-await mission.evaluate(() => document.getElementById('prison-select-777')?.remove());
-
-// ---- a transport waiting comes before the next mission ----
-// The game puts it in the window as a button of its own — a bare `/vehicles/<id>` href styled
-// as a button, where the vehicle names in the tables are plain links and the recall buttons
-// carry `/backalarm`. Going on would leave the patient sitting there, and the page it leads to
-// is the one HighFive Auto already works through to its end.
-await mission.evaluate(() => {
-  window.__dispatched = 0;
-  window.__wentToVehicle = 0;
-  const waiting = document.createElement('a');
-  waiting.id = 'ymca-test-transport';
-  waiting.className = 'btn btn-xs btn-success';
-  waiting.href = '/vehicles/15096931';
-  waiting.textContent = 'ALS Ambulance - Transport Requested';
-  waiting.addEventListener('click', (e) => { e.preventDefault(); window.__wentToVehicle += 1; });
-  document.body.append(waiting);
-  // Nothing in range, so the table is green with no box ticked: the mission has nothing left
-  // to send and a transport is waiting.
-  document.getElementById('vehicle_show_table_body_all').innerHTML = '';
-  window.__catalogue = [{ id: '1201', name: 'Nothing to send', requirements: {} }];
-  localStorage.removeItem('ymca-cache-/einsaetze.json');
-  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1201');
-  document.getElementById('mission-form').setAttribute('action', '/missions/506003402/alarm');
-  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
-});
-await mission.waitForTimeout(2600);
-console.log('transport first   :', (await mission.textContent('#mma-note'))
-  .replace(/\s+/g, ' ').trim().slice(0, 62));
-assert.equal(await mission.evaluate(() => window.__wentToVehicle), 1,
-  'it goes to the vehicle that is asking to transport');
-assert.equal(await mission.evaluate(() => window.__dispatched), 0,
-  'and does not press Dispatch and Next past it');
-await mission.evaluate(() => document.getElementById('ymca-test-transport')?.remove());
-
-// ---- and the way back from it ----
-// Following a transport is a one-way door: HighFive Auto works the queue to its end, and its
-// end is Escape. The map is then left sitting there with nothing to open. So the way back is
-// written down before the door is gone through, and the map presses the game's own Dispatch on
-// the first mission in its list once the window is gone.
-await mission.evaluate(() => {
-  window.__reopened = 0;
-  const list = document.createElement('div');
-  list.id = 'mission_list';
-  const open = document.createElement('a');
-  open.id = 'alarm_button_506479578';
-  open.className = 'btn btn-default btn-xs lightbox-open mission-alarm-button';
-  open.href = '/missions/506479578';
-  open.textContent = 'Dispatch';
-  open.addEventListener('click', (e) => { e.preventDefault(); window.__reopened += 1; });
-  list.append(open);
-  document.body.append(list);
-  // The note the mission window leaves behind, and no frame left open over the map.
-  sessionStorage.setItem('ymca-mma-resume', String(Date.now()));
-  // On a real map the injection runs at load and the watch goes up with it; here the page has
-  // been alive for a while, so it is re-run the way flicking the switch re-runs it.
-  window.YMCA.switchElement('missionmagicianauto', false);
-  window.YMCA.switchElement('missionmagicianauto', true);
-});
-await mission.evaluate(() =>
-  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr')));
-await mission.waitForTimeout(1600);
-console.log('came back         :', await mission.evaluate(() => window.__reopened),
-  'mission reopened from the map');
-assert.equal(await mission.evaluate(() => window.__reopened), 1,
-  'the first mission in the game\'s own list is opened again');
-assert.equal(await mission.evaluate(() => sessionStorage.getItem('ymca-mma-resume')), null,
-  'and the note is torn up, so it happens once rather than every redraw');
-await mission.evaluate(() => document.getElementById('mission_list')?.remove());
-
-// Switched off in ElementFriend, the switch is not even in the panel.
-await mission.evaluate(() => {
-  window.YMCA.switchElement('missionmagicianauto', false);
-  window.__dispatched = 0;
-});
-await mission.evaluate(() =>
-  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr')));
-await mission.waitForTimeout(1200);
-assert.equal(await mission.locator('#ymca-mm-panel [data-cfg="mmaOn"]').count(), 0,
-  'the arming switch is not in the panel at all any more');
-await mission.click('#ymca-mm-panel [data-do="select"]');
-await mission.waitForTimeout(800);
-assert.equal(await mission.evaluate(() => window.__dispatched), 0, 'and nothing is dispatched');
-await mission.evaluate(() => {
-  document.getElementById('alert_next_btn')?.remove();
-  document.getElementById('mission_next_mission_btn')?.remove();
-});
-
-// ---- arming it lives in the game's own mission-filter row ----
-// `#missions-panel-main` is on screen whatever mission is open, which a switch inside the
-// mission panel is not: it was two clicks away whenever that window was shut, and it moved
-// with the table under the cursor besides.
-await mission.evaluate(() => {
-  window.YMCA.switchElement('missionmagicianauto', true);
-  localStorage.setItem('ymca-missionmagicianauto-cfg', JSON.stringify({ on: false }));
-  const row = document.createElement('div');
-  row.id = 'missions-panel-main';
-  document.body.append(row);
-});
-await mission.waitForSelector('#ymca-mma-btn');
-const armedOff = await mission.$eval('#ymca-mma-btn', (b) => b.className);
-await mission.click('#ymca-mma-btn');
-const armedOn = await mission.evaluate(() => ({
-  cls: document.getElementById('ymca-mma-btn').className,
-  stored: JSON.parse(localStorage.getItem('ymca-missionmagicianauto-cfg')).on,
-}));
-console.log('auto button       :', armedOff.includes('btn-default') ? 'off' : '?', '->',
-  armedOn.stored ? 'armed' : '?');
-assert.ok(/btn-danger/.test(armedOff), 'off is red, the way HighFive Auto\'s button is');
-assert.ok(/btn-success/.test(armedOn.cls) && armedOn.stored === true,
-  'clicking it arms Auto and greens the button, the way the filters beside it do');
-await mission.evaluate(() => {
-  window.YMCA.switchElement('missionmagicianauto', false);
-  document.getElementById('missions-panel-main')?.remove();
-  localStorage.setItem('ymca-missionmagicianauto-cfg', JSON.stringify({ on: false }));
-});
 
 // ---- water: best fit, and what is already carrying it counts ----
 // Arrival order sent eleven engines for what four could carry; biggest-first then sent the one
@@ -2458,120 +2252,6 @@ assert.equal(await pg.evaluate(() => sessionStorage.getItem('ymca-highfive-jump'
   'with advancing off, a pick arms nothing');
 console.log('highfive off      : a pick arms nothing');
 
-// ---- HighFive Auto presses the send button too, by the rules ----
-// Treatment first, then the nearest of those, then a free one over a paying one — and never
-// past the range. Mercy General (12.40, Yes, 0%) and County (7.10, Yes, 5%) both treat;
-// St Anne is nearer at 2.79 but cannot. So: County is the nearest that treats, it charges,
-// and Mercy General is the free one in the same group — that is the swap.
-{
-  const auto = await b.newPage({ viewport: { width: 1100, height: 900 } });
-  const autoErrs = [];
-  auto.on('pageerror', (e) => autoErrs.push(e.message));
-  await auto.goto('http://localhost:8777/README.md');
-  const row = (name, id, free, km, tax, dept) => `
-    <tr><td>${name}<div class="visible-xs small" id="div_free_beds_${id}">${km} km</div></td>
-      <td class="hidden-xs">${free} / 30</td><td class="hidden-xs">${km} km</td>
-      <td class="hidden-xs">${tax} %</td>
-      <td class="hidden-xs"><span class="label">${dept}</span></td>
-      <td><a class="btn btn-success" href="/vehicles/15079874/patient/${id}"
-        >Transport Patient</a></td>
-      <td class="hidden-xs"></td></tr>`;
-  // A frame, because that is what a vehicle window is — and the whole point of putting the
-  // feedback in the top document is that the frame is about to be replaced.
-  await auto.setContent('<html><body><iframe id="f" src="/README.md" '
-    + 'style="width:100%;height:600px"></iframe></body></html>');
-  await auto.waitForSelector('#f');
-  const inner = auto.frames().find((f) => f !== auto.mainFrame());
-  await inner.setContent(`<html><body><table id="own-hospitals">
-    <thead><tr><th>Buildings</th><th>Free beds</th><th>Distance</th><th>Department</th>
-      <th></th><th></th></tr></thead>
-    <tbody>
-      ${row('Mercy General', 41, 6, '12.40', 0, 'Yes')}
-      ${row('St Anne', 42, 2, '2.79', 10, 'No')}
-      ${row('County', 43, 9, '7.10', 5, 'Yes')}
-      ${row('Faraway', 44, 9, '80.00', 0, 'Yes')}
-      ${row('Full up', 45, 0, '1.00', 0, 'Yes')}
-    </tbody></table></body></html>`);
-  await inner.evaluate(() => {
-    history.replaceState({}, '', '/vehicles/15079874');
-    localStorage.setItem('ymca-elements', JSON.stringify({ highfiveauto: true }));
-    localStorage.setItem('ymca-highfiveauto-cfg', JSON.stringify({ auto: true, hold: 700 }));
-  });
-  await inner.addScriptTag({ content: script });
-  await inner.waitForSelector('#ymca-hfa-bar');
-  const said = (await inner.textContent('#ymca-hfa-bar')).replace(/\s+/g, ' ').trim();
-  console.log('auto chose        :', said.slice(0, 110));
-  assert.match(said, /Mercy General/,
-    'County is the nearest that can treat, but it charges and Mercy General is free');
-  // Green on the cells, not on the row: the theme puts a background on `td`, so a colour on
-  // the `<tr>` alone sits behind it and nothing shows.
-  const green = await inner.evaluate(() => {
-    const tr = [...document.querySelectorAll('#own-hospitals tbody tr')]
-      .find((r) => r.querySelector('a[href*="/patient/41"]'));
-    return { row: tr.classList.contains('success'),
-      cells: [...tr.cells].every((c) => c.classList.contains('success')) };
-  });
-  console.log('green row         :', JSON.stringify(green));
-  assert.ok(green.row && green.cells, 'the chosen row is marked before it is sent');
-
-  // The block goes in the top document, because the frame it was chosen in is about to reload.
-  await auto.waitForSelector('#ymca-hfa-toasts a[href="/buildings/41"]');
-  const toast = (await auto.textContent('#ymca-hfa-toasts')).replace(/\s+/g, ' ').trim();
-  console.log('feedback block    :', toast.slice(0, 60));
-  assert.match(toast, /Mercy General/, 'it says where the transport went');
-  // YMCA's blue, and the game's own: `alert-info` follows whatever theme the page wears, and
-  // the rule down the side is the navbar's colour sampled rather than typed in.
-  const blue = await auto.$eval('#ymca-hfa-toasts > div', (d) => ({
-    cls: d.className, rule: d.style.borderLeft,
-  }));
-  console.log('block blue        :', JSON.stringify(blue));
-  assert.match(blue.cls, /alert-info/, 'the block is blue, in the game\'s own class');
-
-  await auto.waitForFunction(
-    () => /patient\/41$/.test(document.getElementById('f').contentWindow.location.pathname),
-    null, { timeout: 8000 });
-  console.log('auto sent         : the frame went to the destination, the block stayed put');
-
-  // And then it goes. A corner that fills up and never empties stops being feedback; each
-  // block carries its own clock, so they leave in the order they arrived, and each one fades
-  // rather than vanishing — a block that is simply gone reads as something that was missed.
-  // An animation, not a timer: the frame that drew this has just reloaded, and a timer set
-  // from in there would have gone with it — which is how a block came to sit there for good.
-  assert.match(await auto.$eval('#ymca-hfa-toasts > div', (d) => d.style.animation),
-    /ymca-hfa-fade/, 'it fades out rather than disappearing, and does it in the top document');
-  await auto.waitForFunction(
-    () => getComputedStyle(document.querySelector('#ymca-hfa-toasts > div')).opacity === '0',
-    null, { timeout: 12000 });
-  console.log('block faded       : gone a few seconds later, across the frame that drew it');
-  assert.equal(autoErrs.length, 0);
-  await auto.close();
-}
-
-// Nothing inside the range with a bed free: it stands down rather than picking the least bad.
-{
-  const none = await b.newPage({ viewport: { width: 1100, height: 900 } });
-  await none.goto('http://localhost:8777/README.md');
-  await none.setContent(`<html><body><table id="own-hospitals"><tbody>
-    <tr><td>Faraway<div id="div_free_beds_44"></div></td><td class="hidden-xs">9 / 30</td>
-      <td class="hidden-xs">80.00 km</td><td class="hidden-xs">0 %</td>
-      <td class="hidden-xs"><span class="label">Yes</span></td>
-      <td><a href="/vehicles/15079874/patient/44">Transport Patient</a></td></tr>
-    </tbody></table></body></html>`);
-  await none.evaluate(() => {
-    history.replaceState({}, '', '/vehicles/15079874');
-    localStorage.setItem('ymca-elements', JSON.stringify({ highfiveauto: true }));
-    localStorage.setItem('ymca-highfiveauto-cfg', JSON.stringify({ auto: true, hold: 100 }));
-  });
-  await none.addScriptTag({ content: script });
-  await none.waitForSelector('#ymca-hfa-bar');
-  await none.waitForTimeout(600);
-  const stood = (await none.textContent('#ymca-hfa-bar')).replace(/\s+/g, ' ').trim();
-  console.log('auto stood down   :', stood.slice(0, 80));
-  assert.match(stood, /stood down/i, 'nothing within range means it says so and stops');
-  assert.match(none.url(), /\/vehicles\/15079874$/, 'and it sent nothing at all');
-  await none.close();
-}
-
 // ---- a prison list is not a table, and the figures are inside the link ----
 // The page the player pasted: thirty-odd `<a>` side by side in one `div.prison-select`, an
 // `<h5>` between yours and the alliance's, and every figure stated in the link's own text —
@@ -2597,8 +2277,8 @@ console.log('highfive off      : a pick arms nothing');
     </div></body></html>`);
   await jail.evaluate(() => {
     history.replaceState({}, '', '/vehicles/15042418');
-    localStorage.setItem('ymca-elements', JSON.stringify({ highfive: true, highfiveauto: true }));
-    localStorage.setItem('ymca-highfiveauto-cfg', JSON.stringify({ auto: true, hold: 600 }));
+    localStorage.setItem('ymca-elements', JSON.stringify({ highfive: true }));
+    localStorage.setItem('ymca-highfive-cfg', JSON.stringify({ sortBy: '', max: 25, seeded: 1 }));
   });
   await jail.addScriptTag({ content: script });
   await jail.waitForSelector('#hf-bar');
@@ -2613,17 +2293,13 @@ console.log('highfive off      : a pick arms nothing');
     (as) => as.map((a) => a.textContent.split('(')[0]));
   console.log('prison order      :', JSON.stringify(order.slice(0, 3)));
   assert.equal(order[0], 'NYPD | 7th Precinct', 'nearest first is the ground state here too');
-  // And Auto picks it: no treatment question on this branch, so it is a plain distance case,
-  // and Rikers at 41.95 is outside the 25 it is allowed.
-  const chose = (await jail.textContent('#ymca-hfa-bar')).replace(/\s+/g, ' ').trim();
-  console.log('prison pick       :', chose.slice(0, 90));
-  assert.match(chose, /NYPD \| 7th Precinct/, 'the nearest cell inside the range goes');
-  assert.match(chose, /2 free/, 'and `Free cells: 1` is a count of room, read without its word');
-  assert.equal(await jail.$eval('#prison-select-15042418 a', (a) => a.classList.contains('active')),
-    true, 'the chosen one is marked before it is sent — `active`, not green on a green button');
-  await jail.waitForFunction(() => /gefangener\/5615715/.test(location.pathname), null,
-    { timeout: 8000 });
-  console.log('prison sent       : the page went to the cell it chose');
+  // And the range caps it: Rikers at 41.95 is outside the 25 this is set to. The player still
+  // clicks the cell — this only puts the right one under the cursor.
+  const hidden = await jail.$$eval('#prison-select-15042418 a',
+    (as) => as.filter((a) => a.style.display === 'none').map((a) => a.textContent.split('(')[0]));
+  console.log('prison capped     :', JSON.stringify(hidden));
+  assert.deepEqual(hidden, ['Rikers Correctional Center'],
+    'what is out of range is hidden, and nothing is picked or pressed');
   assert.equal(jailErrs.length, 0);
   await jail.close();
 }
@@ -2660,8 +2336,7 @@ console.log('highfive off      : a pick arms nothing');
     </tbody></table></body></html>`);
   await win.evaluate(() => {
     history.replaceState({}, '', '/missions/506524437');
-    localStorage.setItem('ymca-elements', JSON.stringify({ highfive: true, highfiveauto: true }));
-    localStorage.setItem('ymca-highfiveauto-cfg', JSON.stringify({ auto: true, hold: 600 }));
+    localStorage.setItem('ymca-elements', JSON.stringify({ highfive: true }));
   });
   await win.addScriptTag({ content: script });
   await win.waitForSelector('#hf-bar');
@@ -2670,16 +2345,13 @@ console.log('highfive off      : a pick arms nothing');
     [...document.querySelectorAll('#prison-select-15079750 a')].map((a) => a.style.display));
   console.log('nested blocks     :', blocks.length, 'destinations read separately');
   assert.equal(blocks.length, 3, 'the childRow is not the block; each link is');
-  // And Auto works one vehicle at a time — the href says which. Choosing across the whole page
-  // would take the nearest cell for whichever vehicle happened to be closest to it.
-  const chose = (await win.textContent('#ymca-hfa-bar')).replace(/\s+/g, ' ').trim();
-  console.log('window pick       :', chose.slice(0, 80));
-  assert.match(chose, /NYPD \| 1st Precinct/,
-    'the first vehicle in the page is the one worked, at 0.82 not the other vehicle\'s 0.10');
-  await win.waitForFunction(
-    () => /\/vehicles\/15079750\/gefangener\/5615711/.test(location.pathname),
-    null, { timeout: 8000 });
-  console.log('window sent       : straight to that vehicle\'s own page, where the queue runs');
+  // And one vehicle at a time — the href says which. Sorting across the whole page would
+  // order one vehicle's cells by another vehicle's distances.
+  const first = await win.$$eval('#prison-select-15079750 a',
+    (as) => as.map((a) => a.textContent.split('(')[0]));
+  console.log('window order      :', JSON.stringify(first));
+  assert.equal(first[0], 'NYPD | 1st Precinct',
+    'the first vehicle is sorted on its own figures, at 0.82 not the other vehicle\'s 0.10');
   assert.equal(winErrs.length, 0);
   await win.close();
 }
