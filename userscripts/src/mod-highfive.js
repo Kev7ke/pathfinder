@@ -480,10 +480,16 @@ const hfText = (s) => String(s || '').replace(/\s+/g, ' ').trim();
  * On the prison page the answer is the link itself — thirty-two `<a>` side by
  * side in one `div.prison-select`, with an `<h5>` between yours and the
  * alliance's. So the climb starts AT the link, not above it.
+ *
+ * AND `closest('tr')` IS NOT A SHORTCUT TO IT. Inside a mission window the
+ * whole `div.prison-select` sits in one `tr.tablesorter-childRow` under the
+ * vehicle it belongs to — so taking the nearest row first swallowed all
+ * thirty-two destinations into a single block, which the capture showed as one
+ * "row" with a 2604-character name and no pieces at all. The climb answers
+ * every layout on its own, including a table's: a hospital link's `<td>` has no
+ * destination-carrying siblings, so it climbs to the `<tr>`, which does.
  */
 function hfBlockOf(link) {
-    const tr = link.closest('tr');
-    if (tr) return tr;
     const holds = (el) => el.matches(HF_PICK_LINK) || !!el.querySelector(HF_PICK_LINK);
     let el = link;
     while (el && el.parentElement && el !== document.body) {
@@ -667,10 +673,16 @@ function hfApply(ctx, cfg) {
     const own = hfSectionRows('own-hospitals');
     const alliance = hfSectionRows('alliance-hospitals');
     let shown = 0;
+    let total = 0;
 
     for (const group of hfGroups()) {
         const blocks = group.blocks;
         if (!blocks.length) continue;
+        /* "The first ten" is ten per list. Inside a mission window every
+         * vehicle carrying a prisoner has a list of its own, and one running
+         * count across all of them left the later vehicles with nothing
+         * showing at all. */
+        shown = 0;
 
         const column = columns.find((c) => c.label === cfg.sortBy) || nearest;
         if (column) {
@@ -704,11 +716,11 @@ function hfApply(ctx, cfg) {
             }
             if (!hide && cfg.limit && shown >= cfg.limit) hide = true;
             el.style.display = hide ? 'none' : '';
-            if (!hide) shown += 1;
+            if (!hide) { shown += 1; total += 1; }
         }
     }
-    ctx.log.info('destinations filtered', `${shown} shown, by ${cfg.sortBy || 'page order'}`);
-    return shown;
+    ctx.log.info('destinations filtered', `${total} shown, by ${cfg.sortBy || 'page order'}`);
+    return total;
 }
 
 /**

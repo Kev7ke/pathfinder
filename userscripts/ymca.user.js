@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.43
+// @version      0.0.44
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.43',
+    version: '0.0.44',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -4741,6 +4741,13 @@ function mmaAfterTick(panel, ctx) {
         note.innerHTML = html;
     };
 
+    if (mmaWaitingForADestination()) {
+        say('<b>Not dispatched.</b> Somebody here is still waiting on a destination \u2014 '
+            + 'pick it first, and this mission is finished then rather than skipped past.', true);
+        own.log.info('held back, a destination is still to be picked');
+        return;
+    }
+
     const table = panel.querySelector('.mm-table');
     if (!table || !table.classList.contains('mm-ok')) {
         mmaNotGreen(panel, own, say);
@@ -4778,6 +4785,24 @@ function mmaAfterTick(panel, ctx) {
         mmaRemember(mmaMissionId());
         button.click();
     }, hold);
+}
+
+
+/**
+ * A prisoner still waiting for a cell is a mission that is not finished.
+ *
+ * The game states it on the mission page itself: every vehicle carrying one
+ * gets a `div.prison-select` full of `/gefangener/` links, and until one is
+ * picked the call stays open however green the requirement table is. Dispatch
+ * and Next would skip straight past it, and the prisoners would be left to the
+ * game's own timer.
+ *
+ * READ AS A DESTINATION LINK, NOT AS A PRISON. It is the same question HighFive
+ * asks — is there somewhere on this page still to be picked — so it is the same
+ * reading, and a branch of the game nobody here has seen answers it too.
+ */
+function mmaWaitingForADestination() {
+    return !!document.querySelector(HF_PICK_LINK);
 }
 
 /* ----------------------------------------------------------- the run-through */
@@ -5072,7 +5097,10 @@ function mmaPaintButton() {
     const btn = document.getElementById(MMA_BUTTON_ID);
     if (!btn) return;
     const on = mmaArmed();
-    btn.className = `btn btn-xs mission_selection ${on ? 'btn-success' : 'btn-default'}`;
+    /* Red when it is off, the way HighFive Auto's button is: a switch that
+     * writes to the player's account says which it is at a glance, and plain
+     * grey reads as "not a button" rather than "not armed". */
+    btn.className = `btn btn-xs mission_selection ${on ? 'btn-success' : 'btn-danger'}`;
     btn.innerHTML = `<span class="glyphicon glyphicon-${on ? 'flash' : 'off'}"></span>
     Auto${on ? '' : ' off'}`;
 }
@@ -6881,10 +6909,16 @@ const hfText = (s) => String(s || '').replace(/\s+/g, ' ').trim();
  * On the prison page the answer is the link itself — thirty-two `<a>` side by
  * side in one `div.prison-select`, with an `<h5>` between yours and the
  * alliance's. So the climb starts AT the link, not above it.
+ *
+ * AND `closest('tr')` IS NOT A SHORTCUT TO IT. Inside a mission window the
+ * whole `div.prison-select` sits in one `tr.tablesorter-childRow` under the
+ * vehicle it belongs to — so taking the nearest row first swallowed all
+ * thirty-two destinations into a single block, which the capture showed as one
+ * "row" with a 2604-character name and no pieces at all. The climb answers
+ * every layout on its own, including a table's: a hospital link's `<td>` has no
+ * destination-carrying siblings, so it climbs to the `<tr>`, which does.
  */
 function hfBlockOf(link) {
-    const tr = link.closest('tr');
-    if (tr) return tr;
     const holds = (el) => el.matches(HF_PICK_LINK) || !!el.querySelector(HF_PICK_LINK);
     let el = link;
     while (el && el.parentElement && el !== document.body) {
@@ -7068,10 +7102,16 @@ function hfApply(ctx, cfg) {
     const own = hfSectionRows('own-hospitals');
     const alliance = hfSectionRows('alliance-hospitals');
     let shown = 0;
+    let total = 0;
 
     for (const group of hfGroups()) {
         const blocks = group.blocks;
         if (!blocks.length) continue;
+        /* "The first ten" is ten per list. Inside a mission window every
+         * vehicle carrying a prisoner has a list of its own, and one running
+         * count across all of them left the later vehicles with nothing
+         * showing at all. */
+        shown = 0;
 
         const column = columns.find((c) => c.label === cfg.sortBy) || nearest;
         if (column) {
@@ -7105,11 +7145,11 @@ function hfApply(ctx, cfg) {
             }
             if (!hide && cfg.limit && shown >= cfg.limit) hide = true;
             el.style.display = hide ? 'none' : '';
-            if (!hide) shown += 1;
+            if (!hide) { shown += 1; total += 1; }
         }
     }
-    ctx.log.info('destinations filtered', `${shown} shown, by ${cfg.sortBy || 'page order'}`);
-    return shown;
+    ctx.log.info('destinations filtered', `${total} shown, by ${cfg.sortBy || 'page order'}`);
+    return total;
 }
 
 /**
@@ -7716,7 +7756,20 @@ function hfaSay(ctx, html, bad) {
 function hfaRun(ctx) {
     if (hfaArmed) return true;
     if (hfaCfg(ctx).auto !== true) return false;
-    const rows = hfAllRows().map(hfaRead).filter(Boolean);
+    const all = hfAllRows().map(hfaRead).filter(Boolean);
+    if (!all.length) return false;
+
+    /* ONE VEHICLE AT A TIME, AND THE LINK SAYS WHICH. On a vehicle page every
+     * destination belongs to the same vehicle, so this changes nothing there.
+     * Inside a mission window each vehicle carrying a prisoner gets its own
+     * list — ninety-six links across three of them in the capture — and
+     * choosing across the lot would pick the nearest cell for whichever vehicle
+     * happened to be closest to it. The href carries the vehicle id, so the
+     * first one in the page is worked through and the pick lands on that
+     * vehicle's own page, where the rest of the queue already works. */
+    const owner = (r) => (/^\/vehicles\/(\d+)\//.exec(r.href) || [])[1] || '';
+    const first = owner(all[0]);
+    const rows = all.filter((r) => owner(r) === first);
     if (!rows.length) return false;
 
     const cfg = hfaCfg(ctx);
@@ -7887,7 +7940,12 @@ YMCA.register({
 });
 
 YMCA.inject('highfiveauto', (ctx) => {
-    if (/^\/vehicles\/\d+/.test(location.pathname)) return hfaRun(ctx);
+    /* Wherever there are destinations, not only on a vehicle page — a prisoner
+     * is picked from inside the mission window too, and that page's address is
+     * `/missions/<id>`. The pick lands on the vehicle's own page, where the
+     * queue this was written for already runs. */
+    if (/^\/vehicles\/\d+/.test(location.pathname)
+        || document.querySelector(HF_PICK_LINK)) return hfaRun(ctx);
     hfaMountButton(ctx);
     return false;
 });

@@ -1807,6 +1807,33 @@ console.log('auto dispatched   :', (await mission.textContent('#mma-note')).repl
 assert.ok(await mission.evaluate(() => window.__dispatched) >= 1,
   'green table, Dispatch and Next gets pressed — the game\'s own button');
 
+// ---- a prisoner still waiting for a cell holds the dispatch ----
+// The game gives every vehicle carrying one a list of `/gefangener/` links on the mission page,
+// and until one is picked the call stays open however green the requirement table is. Dispatch
+// and Next would skip straight past it. It is read as a destination link, not as a prison, so
+// a branch nobody here has seen answers it too.
+await mission.evaluate(() => {
+  window.__dispatched = 0;
+  const waiting = document.createElement('div');
+  waiting.id = 'prison-select-777';
+  waiting.className = 'prison-select';
+  waiting.innerHTML = `<a class="btn btn-success" href="/vehicles/777/gefangener/5615711"
+    >NYPD | 1st Precinct(Free cells: 1, Distance: 0.82 km)</a>
+    <a class="btn btn-success" href="/vehicles/777/gefangener/5615707"
+    >NYPD Headquarters(Free cells: 2, Distance: 1.17 km)</a>`;
+  document.body.append(waiting);
+  document.getElementById('mission-form').setAttribute('action', '/missions/506003401/alarm');
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(2000);
+const waited = (await mission.textContent('#mma-note')).replace(/\s+/g, ' ').trim();
+console.log('held for a cell   :', waited.slice(0, 70));
+assert.match(waited, /waiting on a destination/i,
+  'it says what it is waiting for rather than silently doing nothing');
+assert.equal(await mission.evaluate(() => window.__dispatched), 0,
+  'a green table is not a finished mission while somebody still needs a destination');
+await mission.evaluate(() => document.getElementById('prison-select-777')?.remove());
+
 // Switched off in ElementFriend, the switch is not even in the panel.
 await mission.evaluate(() => {
   window.YMCA.switchElement('missionmagicianauto', false);
@@ -1845,7 +1872,7 @@ const armedOn = await mission.evaluate(() => ({
 }));
 console.log('auto button       :', armedOff.includes('btn-default') ? 'off' : '?', '->',
   armedOn.stored ? 'armed' : '?');
-assert.ok(/btn-default/.test(armedOff), 'not armed reads as the game\'s plain filter button');
+assert.ok(/btn-danger/.test(armedOff), 'off is red, the way HighFive Auto\'s button is');
 assert.ok(/btn-success/.test(armedOn.cls) && armedOn.stored === true,
   'clicking it arms Auto and greens the button, the way the filters beside it do');
 await mission.evaluate(() => {
@@ -2299,6 +2326,62 @@ console.log('highfive off      : a pick arms nothing');
   console.log('prison sent       : the page went to the cell it chose');
   assert.equal(jailErrs.length, 0);
   await jail.close();
+}
+
+// ---- the same list, nested the way a mission window nests it ----
+// Each vehicle carrying a prisoner gets its own `div.prison-select`, and the whole thing sits
+// in one `tr.tablesorter-childRow` under that vehicle's row. Taking `closest('tr')` first
+// swallowed all thirty-two destinations into a single block — the capture showed it as one
+// "row" with a 2604-character name and no pieces at all.
+{
+  const win = await b.newPage({ viewport: { width: 1100, height: 900 } });
+  const winErrs = [];
+  win.on('pageerror', (e) => winErrs.push(e.message));
+  await win.goto('http://localhost:8777/README.md');
+  const cellFor = (v, id, name, free, km) => `<a data-prison-id="${id}" class="btn btn-success"
+    href="/vehicles/${v}/gefangener/${id}?load_all_prisons=true"
+    >${name}(Free cells: ${free}, Distance: ${km} km)</a>`;
+  const vehicle = (v, near) => `
+    <tr id="vehicle_row_${v}" class="tablesorter-hasChildRow"><td>${v}</td></tr>
+    <tr class="tablesorter-childRow"><td colspan="7" class="vehicle_prisoner_select"
+      id="vehicle_prisoner_select_${v}" vehicle_id="${v}">
+      <div id="prison-select-${v}" data-vehicle-id="${v}" class="prison-select">
+        ${cellFor(v, 5677622, 'PO 1', 1, near)}
+        ${cellFor(v, 5677625, 'PO 3', 1, '1.24')}
+        <h5>Alliance Cells</h5>
+        ${cellFor(v, 5615711, 'NYPD | 1st Precinct', 1, '0.82')}
+      </div></td></tr>`;
+  await win.setContent(`<html><body>
+    <div class="alert alert-danger alert-missing-vehicles" id="missing_text">
+      Prisoners must be transported.</div>
+    <table id="mission_vehicle_at_mission"><tbody>
+      ${vehicle('15079750', '3.85')}
+      ${vehicle('15079748', '0.10')}
+    </tbody></table></body></html>`);
+  await win.evaluate(() => {
+    history.replaceState({}, '', '/missions/506524437');
+    localStorage.setItem('ymca-elements', JSON.stringify({ highfive: true, highfiveauto: true }));
+    localStorage.setItem('ymca-highfiveauto-cfg', JSON.stringify({ auto: true, hold: 600 }));
+  });
+  await win.addScriptTag({ content: script });
+  await win.waitForSelector('#hf-bar');
+  // Each `<a>` is its own destination, in its own vehicle's list.
+  const blocks = await win.evaluate(() =>
+    [...document.querySelectorAll('#prison-select-15079750 a')].map((a) => a.style.display));
+  console.log('nested blocks     :', blocks.length, 'destinations read separately');
+  assert.equal(blocks.length, 3, 'the childRow is not the block; each link is');
+  // And Auto works one vehicle at a time — the href says which. Choosing across the whole page
+  // would take the nearest cell for whichever vehicle happened to be closest to it.
+  const chose = (await win.textContent('#ymca-hfa-bar')).replace(/\s+/g, ' ').trim();
+  console.log('window pick       :', chose.slice(0, 80));
+  assert.match(chose, /NYPD \| 1st Precinct/,
+    'the first vehicle in the page is the one worked, at 0.82 not the other vehicle\'s 0.10');
+  await win.waitForFunction(
+    () => /\/vehicles\/15079750\/gefangener\/5615711/.test(location.pathname),
+    null, { timeout: 8000 });
+  console.log('window sent       : straight to that vehicle\'s own page, where the queue runs');
+  assert.equal(winErrs.length, 0);
+  await win.close();
 }
 
 // ---- the page a pick lands on is the proof, and it carries the button already ----

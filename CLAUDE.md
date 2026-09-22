@@ -345,6 +345,15 @@ page the answer is the link itself. A list of class names to try would have
 answered nothing here, exactly as a list of section ids answered nothing before
 it.
 
+**`closest('tr')` is not a shortcut to it, and taking it first broke the
+window.** Inside a mission window the whole `div.prison-select` sits in one
+`tr.tablesorter-childRow` under the vehicle it belongs to, so the nearest row
+swallowed all thirty-two destinations into a single block — the capture showed
+it as one "row" with a 2604-character name and no pieces at all. The climb
+answers a table on its own anyway: a hospital link's `<td>` has no
+destination-carrying siblings, so it climbs to the `<tr>`, which does. One rule,
+no shortcut.
+
 **The brackets are the cells.** A block that is not a row states its name and
 then a bracketed, comma-separated list, so the head is one piece and each item
 inside is another — split only inside the brackets, or a name with a comma in it
@@ -363,10 +372,27 @@ which leaves a prison a plain distance case — the safe end to be wrong on. And
 green says nothing on a list of green buttons: a block that is not a row is
 marked `active`, Bootstrap's own word for the one that is chosen.
 
-**Wherever there are destinations, not only on a vehicle page.** A prisoner can
-be sent from inside a mission window too, and that page's address is not
-`/vehicles/<id>` — so the page is asked what it holds rather than what it is
-called.
+**Wherever there are destinations, not only on a vehicle page.** A prisoner is
+picked from inside the mission window too, and that page's address is
+`/missions/<id>` — so the page is asked what it holds rather than what it is
+called. **The step out of the mission window was the missing one**: the
+status-5 handling was right all along, and what it never got was the click that
+lands on the vehicle, which is where the queue it was written for runs.
+
+**One vehicle at a time, and the link says which.** On a vehicle page every
+destination belongs to the same vehicle, so nothing changes there. In a mission
+window each vehicle carrying a prisoner has a list of its own — ninety-six links
+across three of them — and choosing across the lot would take the nearest cell
+for whichever vehicle happened to be closest to it. The href carries the vehicle
+id, so the first one in the page is worked and the pick lands on its own page.
+"The first ten" is ten per list for the same reason: one running count across
+all of them left the later vehicles showing nothing at all.
+
+**A prisoner still waiting for a cell holds MissionMagician Auto back.** The
+call stays open however green the requirement table is, and Dispatch and Next
+would skip straight past it, leaving the prisoners to the game's own timer. It
+is read as **a destination link, not as a prison** — the same question HighFive
+asks of a page — so a branch nobody here has seen answers it too.
 
 **A capture button says where it is being pressed, before it is pressed.** The
 first one was taken on the map and came back with 67 building links and no
@@ -1106,8 +1132,10 @@ the log without a module having to remember to log it.
   `#missions-panel-main` is on screen whatever mission is open, which a switch
   inside the mission panel is not: it was two clicks away whenever that window
   was shut, and it moved with the table under the cursor besides. Green for
-  armed and plain for not, exactly as the filters beside it — the same place
-  ShutEye's button goes, for the same reason.
+  armed and **red when it is off**, the way HighFive Auto's is: a switch that
+  writes to the player's account says which it is at a glance, and plain grey
+  reads as "not a button" rather than "not armed". The same place ShutEye's
+  button goes, for the same reason.
   **A refusal outranks the arithmetic.** The game can turn a send down for want
   of trained crew with every row green — nothing on any page counts people —
   and it hands the window back with every box unticked, so the panel would tick

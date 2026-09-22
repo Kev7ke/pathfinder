@@ -87,6 +87,13 @@ function mmaAfterTick(panel, ctx) {
         note.innerHTML = html;
     };
 
+    if (mmaWaitingForADestination()) {
+        say('<b>Not dispatched.</b> Somebody here is still waiting on a destination \u2014 '
+            + 'pick it first, and this mission is finished then rather than skipped past.', true);
+        own.log.info('held back, a destination is still to be picked');
+        return;
+    }
+
     const table = panel.querySelector('.mm-table');
     if (!table || !table.classList.contains('mm-ok')) {
         mmaNotGreen(panel, own, say);
@@ -124,6 +131,24 @@ function mmaAfterTick(panel, ctx) {
         mmaRemember(mmaMissionId());
         button.click();
     }, hold);
+}
+
+
+/**
+ * A prisoner still waiting for a cell is a mission that is not finished.
+ *
+ * The game states it on the mission page itself: every vehicle carrying one
+ * gets a `div.prison-select` full of `/gefangener/` links, and until one is
+ * picked the call stays open however green the requirement table is. Dispatch
+ * and Next would skip straight past it, and the prisoners would be left to the
+ * game's own timer.
+ *
+ * READ AS A DESTINATION LINK, NOT AS A PRISON. It is the same question HighFive
+ * asks — is there somewhere on this page still to be picked — so it is the same
+ * reading, and a branch of the game nobody here has seen answers it too.
+ */
+function mmaWaitingForADestination() {
+    return !!document.querySelector(HF_PICK_LINK);
 }
 
 /* ----------------------------------------------------------- the run-through */
@@ -418,7 +443,10 @@ function mmaPaintButton() {
     const btn = document.getElementById(MMA_BUTTON_ID);
     if (!btn) return;
     const on = mmaArmed();
-    btn.className = `btn btn-xs mission_selection ${on ? 'btn-success' : 'btn-default'}`;
+    /* Red when it is off, the way HighFive Auto's button is: a switch that
+     * writes to the player's account says which it is at a glance, and plain
+     * grey reads as "not a button" rather than "not armed". */
+    btn.className = `btn btn-xs mission_selection ${on ? 'btn-success' : 'btn-danger'}`;
     btn.innerHTML = `<span class="glyphicon glyphicon-${on ? 'flash' : 'off'}"></span>
     Auto${on ? '' : ' off'}`;
 }

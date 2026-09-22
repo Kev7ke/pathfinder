@@ -268,7 +268,20 @@ function hfaSay(ctx, html, bad) {
 function hfaRun(ctx) {
     if (hfaArmed) return true;
     if (hfaCfg(ctx).auto !== true) return false;
-    const rows = hfAllRows().map(hfaRead).filter(Boolean);
+    const all = hfAllRows().map(hfaRead).filter(Boolean);
+    if (!all.length) return false;
+
+    /* ONE VEHICLE AT A TIME, AND THE LINK SAYS WHICH. On a vehicle page every
+     * destination belongs to the same vehicle, so this changes nothing there.
+     * Inside a mission window each vehicle carrying a prisoner gets its own
+     * list — ninety-six links across three of them in the capture — and
+     * choosing across the lot would pick the nearest cell for whichever vehicle
+     * happened to be closest to it. The href carries the vehicle id, so the
+     * first one in the page is worked through and the pick lands on that
+     * vehicle's own page, where the rest of the queue already works. */
+    const owner = (r) => (/^\/vehicles\/(\d+)\//.exec(r.href) || [])[1] || '';
+    const first = owner(all[0]);
+    const rows = all.filter((r) => owner(r) === first);
     if (!rows.length) return false;
 
     const cfg = hfaCfg(ctx);
@@ -439,7 +452,12 @@ YMCA.register({
 });
 
 YMCA.inject('highfiveauto', (ctx) => {
-    if (/^\/vehicles\/\d+/.test(location.pathname)) return hfaRun(ctx);
+    /* Wherever there are destinations, not only on a vehicle page — a prisoner
+     * is picked from inside the mission window too, and that page's address is
+     * `/missions/<id>`. The pick lands on the vehicle's own page, where the
+     * queue this was written for already runs. */
+    if (/^\/vehicles\/\d+/.test(location.pathname)
+        || document.querySelector(HF_PICK_LINK)) return hfaRun(ctx);
     hfaMountButton(ctx);
     return false;
 });
