@@ -1,7 +1,7 @@
 {
   "note": "MissionChief vehicle types, by the id the game uses in vehicle_type_id. Names come from the game's own buy pages, which name every type it sells whether or not the player can afford one. Capabilities are the plain attributes the game puts on a vehicle's checkbox in a mission window, so a type only carries them once one has been seen in a selection table; a type with a name and no capabilities is named but not yet judged, and MissionMagician leaves such a vehicle alone rather than assuming it covers nothing. Nothing here is guessed. `tank` is what a vehicle of the type carries and by how much a tanker lifts the total — {water, foam, bonus} straight off `wasser_amount`, `foam_amount_display` and `water_modifier_raw` on a selection checkbox; a zero is an answer, an absent `tank` is not. `crewSeen` is how many the type actually seats, measured off the at-mission table's Crew column, which is the only place in the game where a type and its crew meet. It is NOT `crew`, which is the buy page's Max. Crew — a cap somebody set, kept because the game states it and never used as a measurement.",
-  "source": "names: the game's own vehicle buy pages, via Diagnostics -> Vehicle types; capabilities: mission-window selection tables, via Diagnostics -> Copy the report; tanks and crewSeen: the player's own mission windows, via Diagnostics -> Copy what is missing",
-  "updated": "2026-09-22",
+  "source": "names: the game's own vehicle buy pages, via Diagnostics -> Vehicle types; capabilities: mission-window selection tables, via Diagnostics -> Copy the report; tanks and crewSeen: the player's own mission windows, via Diagnostics -> Copy what is missing; tanks: the player's own mission windows, reported 2026-09-23 (Diagnostics -> Copy the report, tanksByType)",
+  "updated": "2026-09-23",
   "types": {
     "0": {
       "name": "Type 1 fire engine",
@@ -16,7 +16,12 @@
         "crew_carrier_or_fire_engine",
         "road_rescue_or_fire_engine"
       ],
-      "category": "Firetruck"
+      "category": "Firetruck",
+      "tank": {
+        "water": 500,
+        "foam": 25,
+        "bonus": 0
+      }
     },
     "2": {
       "name": "Platform truck",
@@ -29,7 +34,12 @@
         "elw1_or_elw2",
         "elw1_or_elw_drone"
       ],
-      "category": "Other vehicles"
+      "category": "Other vehicles",
+      "tank": {
+        "water": 0,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "4": {
       "name": "Heavy rescue vehicle",
@@ -45,14 +55,24 @@
         "ambulance_or_rapid_responder"
       ],
       "category": "Ambulance",
-      "requiredExtension": "Ambulance Extension"
+      "requiredExtension": "Ambulance Extension",
+      "tank": {
+        "water": 0,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "6": {
       "name": "Mobile air",
       "capabilities": [
         "gwa"
       ],
-      "category": "Other vehicles"
+      "category": "Other vehicles",
+      "tank": {
+        "water": 0,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "7": {
       "name": "Water Tanker",
@@ -62,7 +82,12 @@
         "gwl2wasser_all",
         "water_damage_pump"
       ],
-      "category": "Other vehicles"
+      "category": "Other vehicles",
+      "tank": {
+        "water": 3000,
+        "foam": 0,
+        "bonus": 25
+      }
     },
     "8": {
       "name": "Utility unit",
@@ -74,7 +99,12 @@
         "gwgefahrgut",
         "gw_gefahrgut_only"
       ],
-      "category": "Other vehicles"
+      "category": "Other vehicles",
+      "tank": {
+        "water": 0,
+        "foam": 50,
+        "bonus": 0
+      }
     },
     "10": {
       "name": "Patrol car",
@@ -83,7 +113,12 @@
         "fustw_or_police_motorcycle",
         "police_car_or_service_group_leader"
       ],
-      "category": "Police Cars"
+      "category": "Police Cars",
+      "tank": {
+        "water": 0,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "12": {
       "name": "MCV",
@@ -96,7 +131,12 @@
         "elw1_or_elw_drone",
         "elw2_or_elw2_drone"
       ],
-      "source": "flags read off this type’s checkbox in a mission window, report 0.0.32"
+      "source": "flags read off this type’s checkbox in a mission window, report 0.0.32",
+      "tank": {
+        "water": 0,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "13": {
       "name": "Quint",
@@ -110,7 +150,12 @@
         "crew_carrier_or_fire_engine",
         "road_rescue_or_fire_engine"
       ],
-      "category": "Firetruck"
+      "category": "Firetruck",
+      "tank": {
+        "water": 500,
+        "foam": 25,
+        "bonus": 0
+      }
     },
     "15": {
       "name": "Fly-Car",
@@ -129,7 +174,12 @@
       "capabilities": [
         "arff"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 4500,
+        "foam": 650,
+        "bonus": 0
+      }
     },
     "18": {
       "name": "Rescue Engine",
@@ -142,7 +192,12 @@
         "crew_carrier_or_fire_engine",
         "road_rescue_or_fire_engine"
       ],
-      "category": "Firetruck"
+      "category": "Firetruck",
+      "tank": {
+        "water": 750,
+        "foam": 25,
+        "bonus": 0
+      }
     },
     "19": {
       "name": "K-9 Unit",
@@ -203,7 +258,12 @@
         "crew_carrier_or_fire_engine",
         "road_rescue_or_fire_engine"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 500,
+        "foam": 20,
+        "bonus": 0
+      }
     },
     "31": {
       "name": "Type 5 engine",
@@ -215,7 +275,12 @@
         "brush_truck_2",
         "water_damage_pump"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 400,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "32": {
       "name": "Type 7 engine",
@@ -226,7 +291,12 @@
         "brush_truck",
         "brush_truck_3"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 50,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "33": {
       "name": "Pumper Tanker",
@@ -240,7 +310,12 @@
         "crew_carrier_or_fire_engine",
         "road_rescue_or_fire_engine"
       ],
-      "category": "Other vehicles"
+      "category": "Other vehicles",
+      "tank": {
+        "water": 2500,
+        "foam": 25,
+        "bonus": 25
+      }
     },
     "34": {
       "name": "Crew Carrier",
@@ -256,7 +331,12 @@
         "brush_truck_4",
         "water_damage_pump"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 750,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "39": {
       "name": "Type 6 engine",
@@ -267,7 +347,12 @@
         "brush_truck",
         "brush_truck_5"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 150,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "40": {
       "name": "Dozer Trailer",
@@ -278,7 +363,12 @@
         "trailer",
         "dozer_trailer"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 0,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "41": {
       "name": "Crew cab semi",
@@ -360,7 +450,12 @@
         "fire_investigation",
         "police_car_or_service_group_leader"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 0,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "63": {
       "name": "Fire Prevention Unit",
@@ -369,7 +464,12 @@
       "capabilities": [
         "fire_investigation"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 0,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "64": {
       "name": "Foam Tender",
@@ -380,7 +480,12 @@
         "gwl2wasser_all",
         "foam"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 0,
+        "foam": 2500,
+        "bonus": 0
+      }
     },
     "65": {
       "name": "Foam Trailer",
@@ -393,7 +498,12 @@
         "trailer",
         "foam"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 0,
+        "foam": 650,
+        "bonus": 0
+      }
     },
     "66": {
       "name": "Lifeguard Truck",
@@ -422,7 +532,12 @@
       "capabilities": [
         "elw3"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 0,
+        "foam": 0,
+        "bonus": 0
+      }
     },
     "77": {
       "name": "Tanker Semi Truck Trailer",
@@ -442,7 +557,12 @@
         "ab_ruest_rw",
         "arff"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 300,
+        "foam": 50,
+        "bonus": 0
+      }
     },
     "80": {
       "name": "Medium ARFF Crash Tender",
@@ -454,7 +574,12 @@
         "ab_ruest_rw",
         "arff"
       ],
-      "source": "a player's own mission-window selection tables, reported through Diagnostics"
+      "source": "a player's own mission-window selection tables, reported through Diagnostics",
+      "tank": {
+        "water": 650,
+        "foam": 60,
+        "bonus": 0
+      }
     },
     "81": {
       "name": "Small K9 Carrier",

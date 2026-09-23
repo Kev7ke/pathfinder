@@ -964,6 +964,21 @@ function mmVehicle(row) {
         const v = box.getAttribute(name);
         return v === null || v === '' ? 0 : Number(v) || 0;
     };
+    /* THE TYPE ID IS READ AS THE GAME WROTE IT, NEVER AS A NUMBER, because
+     * `Type 1 fire engine` is type **0** and zero is falsy. Read as a number it
+     * was indistinguishable from "this row states no type", so every guard
+     * spelled `if (!v.typeId) continue` threw the commonest engine in the game
+     * away: its flags were never learnt from a selection table, its tank was
+     * never learnt, and a vehicle of that type at a mission stayed an unknown
+     * type for ever, however many times one was in range.
+     *
+     * A string keeps the two apart: `'0'` is a type and `null` is no type. It
+     * indexes every store exactly as it did, because an object key is a string
+     * either way. */
+    const attr = (name) => {
+        const v = box.getAttribute(name);
+        return v === null || v === '' ? null : v;
+    };
     /* The travel time, not the distance. The game prints it into the fourth cell
      * as `timevalue` in seconds once it has worked the route out, and it is the
      * only honest ordering: a vehicle whose dot sits closer on the map can still
@@ -975,7 +990,7 @@ function mmVehicle(row) {
     return {
         box,
         id: box.value,
-        typeId: num('vehicle_type_id'),
+        typeId: attr('vehicle_type_id'),
         /* The row says what the type is called and the checkbox says which id it
          * is, on the same row — the only place in the game the two appear
          * together. Everything else has to be told. */
@@ -2683,7 +2698,7 @@ async function mmCopyState(ctx, plan, panel) {
         picked: plan?.pick ? {
             count: plan.pick.length,
             byType: plan.pick.reduce((n, v) => {
-                n[v.typeId || 'unknown'] = (n[v.typeId || 'unknown'] || 0) + 1;
+                n[v.typeId ?? 'unknown'] = (n[v.typeId ?? 'unknown'] || 0) + 1;
                 return n;
             }, {}),
             water: plan.pick.reduce((n, v) => n + (v.water || 0), 0),

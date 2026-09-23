@@ -1935,6 +1935,58 @@ assert.ok(/Tick 2 vehicles/.test(await mission.textContent('#ymca-mm-panel [data
   'and it is picked: an engine for the catalogue, an ambulance for the window');
 await mission.evaluate(() => { document.getElementById('missing_text').textContent = ''; });
 
+// ---- type 0 is a type, and zero is falsy ----
+// `Type 1 fire engine` is vehicle_type_id 0, the commonest engine in the game. Read as a number
+// it could not be told apart from "this row states no type", so every guard spelled
+// `if (!v.typeId) continue` threw it away: its flags were never learnt off a selection table,
+// its tank was never learnt, and one at a mission stayed an unknown type for ever.
+await mission.evaluate(() => {
+  document.getElementById('mission_vehicle_at_mission')?.remove();
+  document.getElementById('mission_vehicle_driving')?.remove();
+  localStorage.removeItem('ymca-missionmagician-types');
+  localStorage.removeItem('ymca-missionmagician-tanks');
+  document.getElementById('vehicle_show_table_body_all').innerHTML = `
+    <tr class="vehicle_select_table_tr" vehicle_id="501" data-distance="1"
+      vehicle_type="Type 1 fire engine">
+      <td><input type="checkbox" class="vehicle_checkbox" id="vehicle_checkbox_501" value="501"
+        name="vehicle_ids[]" vehicle_type_id="0" fms="2" fire="1" lf_only="1"
+        wasser_amount="750" foam_amount_display="25"></td>
+      <td id="vehicle_sort_501" timevalue="300">5 min.</td></tr>`;
+  window.__catalogue = [{
+    id: '313', name: 'Bin fire', average_credits: 400, requirements: { firetrucks: 1 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '313');
+});
+await mission.waitForTimeout(1200);
+const zero = await mission.evaluate(() => ({
+  types: JSON.parse(localStorage.getItem('ymca-missionmagician-types') || '{}')['0'] || null,
+  tank: JSON.parse(localStorage.getItem('ymca-missionmagician-tanks') || '{}')['0'] || null,
+}));
+console.log('type zero learnt  :', JSON.stringify(zero));
+assert.ok(zero.types && zero.types.caps.includes('fire'),
+  'type 0 is a type: its flags are learnt off the checkbox like any other');
+assert.equal(zero.types.name, 'Type 1 fire engine', 'and the row names it');
+assert.deepEqual(zero.tank, { water: 750, foam: 25, bonus: 0 },
+  'and its tank is learnt, which a falsy id had been throwing away');
+// And it is picked for the engine the mission wants, rather than passed over.
+assert.ok(/Tick 1 vehicle/.test(await mission.textContent('#ymca-mm-panel [data-do="select"]')),
+  'the commonest engine in the game is a candidate again');
+
+// One at the mission is counted, not filed as an unknown type.
+await mission.evaluate(() => {
+  const t = document.createElement('table');
+  t.id = 'mission_vehicle_at_mission';
+  t.innerHTML = '<tbody><tr id="vehicle_row_97"><td vehicle_type_id="0">there</td></tr></tbody>';
+  document.getElementById('col_right').append(t);
+});
+await mission.waitForTimeout(1200);
+const counted = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('type zero there   :', JSON.stringify(counted[0]));
+assert.equal(counted[0][1], '1', 'a type-0 engine at the mission counts as there');
+await mission.evaluate(() => document.getElementById('mission_vehicle_at_mission')?.remove());
+
 // ---- water: best fit, and what is already carrying it counts ----
 // Arrival order sent eleven engines for what four could carry; biggest-first then sent the one
 // enormous tanker for a job a smaller one covers. Best fit is the smallest that finishes it,

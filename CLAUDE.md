@@ -591,6 +591,16 @@ cell, not on the row or the cell — the cells themselves carry only `sortvalue`
 capability flags are **not** there, and looking up what a vehicle already at the
 mission covers really does need the dataset. That question is closed.
 
+**Type 0 is a type, and zero is falsy.** `Type 1 fire engine` is
+`vehicle_type_id="0"` — the commonest engine in the game. `mmVehicle` read it
+with `Number`, which cannot tell it apart from "this row states no type", so
+every guard spelled `if (!v.typeId) continue` threw it away: its flags were
+never learnt off a selection table, its tank was never learnt, and one at a
+mission stayed an unknown type for ever, however many times one was in range.
+**A type id is read as the game wrote it, as a string**, so `'0'` is a type and
+`null` is no type. It indexes every store exactly as it did, because an object
+key is a string either way.
+
 **Somebody else's vehicle at your mission teaches nothing.** It is never in
 your selection table, so its checkbox — the only place the flags are written —
 is never yours to read. All the at-mission row gives is a type id. An alliance
