@@ -847,6 +847,13 @@ still moves nothing — which is the whole reason the arming step existed. Nothi
 has to say "Move to LI" either, because the row already names the centre. The
 one it is in now is marked and carries no tick: there is nowhere to move it to.
 
+**It opens leftwards, because the row is already at the right-hand edge.** Hung
+from the left the menu ran off the screen and half the centres could not be
+reached. `dropdown-menu-right` is Bootstrap's own word for it, with `right: 0`
+and `left: auto` saying the same thing where that class is not defined. The
+`.caret` is turned a quarter to point that way — which keeps the game's own
+colour and size and only changes where it points.
+
 **A `.caret` with no `.caret` rule behind it is a zero-sized button**, which is
 why the browser test's fixture carries the handful of Bootstrap 3 rules the
 game's own stylesheet has. Markup that borrows the game's look has to be tested

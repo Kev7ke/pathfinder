@@ -2393,6 +2393,23 @@ console.log('highfive off      : a pick arms nothing');
   assert.equal(await bld.locator('#ymca-sd-pick .dropdown-menu').isVisible(), true,
     'and the caret opens it');
 
+  // IT OPENS LEFTWARDS. The navigation row sits at the right-hand edge, so a menu hung from
+  // the left ran off the screen and half the centres could not be reached.
+  const opens = await bld.evaluate(() => {
+    const box = document.getElementById('ymca-sd-pick');
+    const menu = box.querySelector('.dropdown-menu');
+    const m = menu.getBoundingClientRect();
+    const t = box.getBoundingClientRect();
+    return { rightAligned: Math.abs(m.right - t.right) < 2, onScreen: m.left >= 0,
+      classed: menu.classList.contains('dropdown-menu-right'),
+      caretTurned: box.querySelector('.caret').style.transform };
+  });
+  console.log('dispatch opens    :', JSON.stringify(opens));
+  assert.equal(opens.rightAligned, true, 'the menu hangs from the row\'s right edge');
+  assert.equal(opens.onScreen, true, 'so none of it is off the screen');
+  assert.equal(opens.classed, true, 'by Bootstrap\'s own word for it as well as by style');
+  assert.equal(opens.caretTurned, 'rotate(90deg)', 'and the caret points the way it opens');
+
   // Every option the game offers, the one it is in now marked and with no tick — there is
   // nowhere to move it to — and a tick on each of the others.
   const rows = await bld.$$eval('#ymca-sd-pick .dropdown-menu li', (li) => li.map((x) => ({

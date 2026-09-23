@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.54
+// @version      0.0.55
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.54',
+    version: '0.0.55',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -7732,11 +7732,21 @@ async function sdMount(ctx) {
     toggle.title = current
         ? `In ${current.name}. Pick another dispatch centre.`
         : 'Not assigned to a dispatch centre. Pick one.';
-    toggle.innerHTML = '<span class="caret"></span>';
+    /* POINTING THE WAY IT OPENS. A `.caret` is the game's own down-arrow, and
+     * turning it a quarter keeps its colour and size while saying "leftwards",
+     * which is where the menu now goes. */
+    toggle.innerHTML = '<span class="caret" style="transform:rotate(90deg)"></span>';
 
     const menu = document.createElement('ul');
-    menu.className = 'dropdown-menu';
+    /* IT OPENS LEFTWARDS BECAUSE THE ROW IS ALREADY AT THE RIGHT-HAND EDGE.
+     * Hung from the left, the menu ran off the screen and half the centres
+     * could not be reached; `dropdown-menu-right` is Bootstrap's own word for
+     * it, and the two properties say the same thing where that class is not
+     * defined. */
+    menu.className = 'dropdown-menu dropdown-menu-right';
     menu.style.display = 'none';
+    menu.style.right = '0';
+    menu.style.left = 'auto';
     /* A tick at the height of the text beside it, in whatever colour it lands
      * in: no colour of YMCA's own, on the game's own page. */
     const tick = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none"'
@@ -7782,7 +7792,7 @@ async function sdMount(ctx) {
             location.reload();
         } catch (err) {
             toggle.className = 'btn btn-danger btn-xs';
-            toggle.innerHTML = '<span class="caret"></span>';
+            toggle.innerHTML = '<span class="caret" style="transform:rotate(90deg)"></span>';
             toggle.title = `It did not move: ${err.message}`;
             ctx.log.error('dispatch centre not changed', err.message);
         }
