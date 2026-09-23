@@ -818,6 +818,8 @@ async function vehicleCapabilities(ctx) {
     const found = {};
     const unanswered = [];
     let shape = null;
+    const tanks = {};
+    const noTank = [];
 
     for (const [typeId, vehicleId] of oneEach) {
         try {
@@ -826,13 +828,37 @@ async function vehicleCapabilities(ctx) {
             const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
 
             const flags = new Set();
+            /* THE TANK IS ON THE SAME ELEMENT, IF IT IS ANYWHERE. A capability
+             * is an attribute set to `1`, so the loop above steps straight over
+             * a tank, and the figures were left to be learnt one mission window
+             * at a time. They are read here as well now, off the same element
+             * and by the same names the selection checkbox uses. Whether a
+             * vehicle's own page carries them at all has never been seen from
+             * this side, so what comes back is reported either way rather than
+             * assumed. */
+            const tank = {};
             for (const el of doc.querySelectorAll('[vehicle_type_id]')) {
                 for (const attr of el.attributes) {
-                    if (attr.value !== '1') continue;
                     const n = attr.name.toLowerCase();
-                    if (CAP_NOT_A_FLAG.has(n) || !/^[a-z][a-z0-9_]*$/.test(n)) continue;
-                    flags.add(n);
+                    if (attr.value === '1') {
+                        if (CAP_NOT_A_FLAG.has(n) || !/^[a-z][a-z0-9_]*$/.test(n)) continue;
+                        flags.add(n);
+                        continue;
+                    }
+                    const number = Number(attr.value);
+                    if (!Number.isFinite(number)) continue;
+                    if (n === 'wasser_amount') tank.water = number;
+                    else if (n === 'foam_amount_display') tank.foam = number;
+                    else if (n === 'water_modifier_raw' || n === 'water_modifier') {
+                        tank.bonus = number;
+                    }
                 }
+            }
+            if ('water' in tank || 'foam' in tank || 'bonus' in tank) {
+                tanks[typeId] = { water: tank.water || 0, foam: tank.foam || 0,
+                    bonus: tank.bonus || 0 };
+            } else if (flags.size) {
+                noTank.push(typeId);
             }
             if (flags.size) {
                 found[typeId] = [...flags].sort();
@@ -875,6 +901,23 @@ async function vehicleCapabilities(ctx) {
         localStorage.setItem(key, JSON.stringify(learnt));
     } catch (e) { /* private window: the copy below still carries it */ }
 
+    /* The tanks go into their own store, the one MissionMagician reads. A zero
+     * is an answer and is written as one; a type whose page said nothing about
+     * a tank is left alone rather than written down as carrying nothing. */
+    let tanksWritten = 0;
+    try {
+        const key = 'ymca-missionmagician-tanks';
+        const had = JSON.parse(localStorage.getItem(key)) || {};
+        for (const [typeId, tank] of Object.entries(tanks)) {
+            const before = had[typeId];
+            if (before && before.water === tank.water && before.foam === tank.foam
+                && before.bonus === tank.bonus) continue;
+            had[typeId] = tank;
+            tanksWritten += 1;
+        }
+        localStorage.setItem(key, JSON.stringify(had));
+    } catch (e) { /* private window: the copy below still carries it */ }
+
     return {
         note: 'capability flags per vehicle type, read from each vehicle\'s own page in your '
             + 'game. Type ids and flag names only — nothing about the vehicles themselves.',
@@ -883,6 +926,15 @@ async function vehicleCapabilities(ctx) {
         typesAnswered: Object.keys(found).length,
         newToThisBrowser: written,
         capabilitiesByType: found,
+        /* WHAT IT CARRIES, OFF THE SAME ELEMENT. A capability is an attribute
+         * set to `1`, so the flag loop stepped straight over a tank and the
+         * figures were left to be learnt one mission window at a time — which
+         * means waiting for each type to happen to be in range of a call.
+         * Whether a vehicle's own page states a tank at all had never been seen
+         * from this side, so `answeredWithNoTank` is the answer either way. */
+        tanksByType: tanks,
+        tanksNewToThisBrowser: tanksWritten,
+        answeredWithNoTank: noTank,
         unanswered,
         /* Present only when nothing could be read, and then it is what says why. */
         pageShapeWhereNothingWasFound: shape,

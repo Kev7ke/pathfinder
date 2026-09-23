@@ -2314,25 +2314,23 @@ assert.equal(await pg.evaluate(() => sessionStorage.getItem('ymca-highfive-jump'
   'with advancing off, a pick arms nothing');
 console.log('highfive off      : a pick arms nothing');
 
-// ---- EasyEdit \u2192 SwitchDispatchCenter: the game's own field, moved to the top ----
-// The building page shows which dispatch centre a station answers to at the top, in the
-// navigation row, and lets you change it in a select far down the page. The one place the
-// answer is shown is not the place it can be changed, so a run of stations means scrolling
-// down and back up once each. The control is the game's own, moved \u2014 nothing is built.
+// ---- EasyEdit → SwitchDispatchCenter: the game's own form, from its own edit page ----
+// Two things a capture off a real building page settled. It is a FRAME — the game opens a
+// building in its own lightbox — so ruling frames out ruled out every building page there is.
+// And the select is not on it: /buildings/<id> came back with `forms: []`. It lives on the
+// building's own edit page, which one fetch hands over whole: the options to offer and the
+// real form to send.
 {
   const bld = await b.newPage({ viewport: { width: 1100, height: 900 } });
   const bldErrs = [];
   bld.on('pageerror', (e) => bldErrs.push(e.message));
-  await bld.goto('http://localhost:8777/README.md');
-  await bld.setContent(`<html><body>
-    <div class="btn-group" id="building-navigation-container">
-      <a class="btn btn-xs btn-default" href="/buildings/5677622">Previous building</a>
-      <a class="btn btn-default btn-xs" href="/buildings/5677680">NY</a>
-      <a class="btn btn-xs btn-success" href="/buildings/5677623">Next building</a>
-    </div>
-    <form id="edit_building" action="/buildings/5677640" method="post">
+  let sent = null;
+  // The edit page the module fetches, and the POST it makes afterwards.
+  await bld.route('**/buildings/5685072/edit', (route) => route.fulfill({
+    contentType: 'text/html',
+    body: `<html><body><form id="edit_building" action="/buildings/5685072" method="post">
       <input type="hidden" name="authenticity_token" value="CSRF-XYZ">
-      <input type="text" name="building[caption]" value="FS01">
+      <input type="text" name="building[name]" value="FS01">
       <div class="input-group select optional building_leitstelle_building_id">
         <label class="input-group-addon" for="building_leitstelle_building_id">Assigned
           Dispatch Center</label>
@@ -2341,18 +2339,24 @@ console.log('highfive off      : a pick arms nothing');
           <option value="5694841">EMSManiacs</option>
           <option value="5691056">LI</option>
           <option selected="selected" value="5677680">NY</option></select></div>
-      <input type="submit" name="commit" value="Save">
-    </form></body></html>`);
-  await bld.evaluate(() => {
-    history.replaceState({}, '', '/buildings/5677640');
-    // The submit is caught rather than followed, so the test can read what would be sent.
-    document.getElementById('edit_building').addEventListener('submit', (e) => {
-      e.preventDefault();
-      window.__sent = Object.fromEntries(new FormData(e.target).entries());
-    });
+      <input type="submit" name="commit" value="Save"></form></body></html>`,
+  }));
+  await bld.route('**/buildings/5685072', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    sent = route.request().postData();
+    return route.fulfill({ contentType: 'text/html', body: '<html><body>saved</body></html>' });
   });
+  await bld.goto('http://localhost:8777/README.md');
+  // The navigation row exactly as the game writes it, and nothing else: no form on this page.
+  await bld.setContent(`<html><body>
+    <div class="btn-group" id="building-navigation-container">
+      <a class="btn btn-xs btn-default" href="/buildings/5677622">Previous building</a>
+      <a class="btn btn-default btn-xs" href="/buildings/5677680">NY</a>
+      <a class="btn btn-xs btn-success" href="/buildings/5677623">Next building</a>
+    </div></body></html>`);
+  await bld.evaluate(() => history.replaceState({}, '', '/buildings/5685072'));
   await bld.addScriptTag({ content: script });
-  await bld.waitForSelector('#ymca-sd-pick');
+  await bld.waitForSelector('#ymca-sd-pick select');
 
   // It lands straight after the button naming the centre it is in now, so the answer and the
   // way to change it are in the same place.
@@ -2366,7 +2370,8 @@ console.log('highfive off      : a pick arms nothing');
   assert.deepEqual(where, { after: 'NY', before: 'Next building',
     inNav: 'building-navigation-container' },
   'the dropdown goes between the centre it is in and Next building');
-  // Its options are the game's own, and the game's own selection is what it starts on.
+  // Its options are the game's own, off the edit page, and the game's own selection is what it
+  // starts on — a page with no form of its own could not have said either.
   const opts = await bld.$$eval('#ymca-sd-pick select option',
     (o) => o.map((x) => [x.value, x.textContent.trim(), x.selected]));
   console.log('dispatch options  :', JSON.stringify(opts));
@@ -2382,34 +2387,57 @@ console.log('highfive off      : a pick arms nothing');
   await bld.waitForTimeout(150);
   const armed = await bld.evaluate(() => {
     const a = document.querySelector('#ymca-sd-pick a.btn');
-    return { text: a.textContent.trim(), title: a.title, sent: window.__sent || null };
+    return { text: a.textContent.trim(), title: a.title };
   });
   console.log('dispatch armed    :', JSON.stringify(armed));
   assert.equal(armed.text, 'Move to LI', 'the button says what it will do');
   assert.match(armed.title, /in NY until you press this/,
     'and where it is now, which is the undo');
-  assert.equal(armed.sent, null, 'picking alone sends nothing');
+  assert.equal(sent, null, 'picking alone sends nothing');
 
-  // Pressing it submits THE GAME'S OWN FORM with one field changed, so the CSRF token and
-  // every unrelated setting on the page survive exactly as they were.
+  // Pressing it posts THE GAME'S OWN FORM with one field changed, so the CSRF token and every
+  // unrelated setting on the edit page survive exactly as they were.
   await bld.click('#ymca-sd-pick a.btn');
-  await bld.waitForFunction(() => !!window.__sent, null, { timeout: 4000 });
-  const sent = await bld.evaluate(() => window.__sent);
-  console.log('dispatch sent     :', JSON.stringify(sent));
-  assert.equal(sent['building[leitstelle_building_id]'], '5691056', 'the one field changed');
-  assert.equal(sent.authenticity_token, 'CSRF-XYZ', 'the CSRF token was lost');
-  assert.equal(sent['building[caption]'], 'FS01', 'an unrelated field was lost');
-
-  // Switched off in ElementFriend, the control is not in the page at all.
-  await bld.evaluate(() => window.YMCA.switchElement('switchdispatch', false));
-  await bld.waitForTimeout(200);
-  assert.equal(await bld.locator('#ymca-sd-pick').count(), 0, 'the switch takes it away');
-  await bld.evaluate(() => window.YMCA.switchElement('switchdispatch', true));
-  await bld.waitForTimeout(300);
-  assert.equal(await bld.locator('#ymca-sd-pick').count(), 1, 'and brings it back, there and then');
+  await bld.waitForTimeout(700);
+  const fields = Object.fromEntries(new URLSearchParams(
+    (sent || '').split('\n').filter(Boolean).length && !/name="/.test(sent || '')
+      ? sent : '').entries());
+  // The body is multipart (FormData), so read the parts rather than parsing it as a query.
+  const parts = {};
+  for (const m of (sent || '').matchAll(/name="([^"]+)"\r?\n\r?\n([^\r\n]*)/g)) parts[m[1]] = m[2];
+  const got = Object.keys(parts).length ? parts : fields;
+  console.log('dispatch sent     :', JSON.stringify(got));
+  assert.equal(got['building[leitstelle_building_id]'], '5691056', 'the one field changed');
+  assert.equal(got.authenticity_token, 'CSRF-XYZ', 'the CSRF token was lost');
+  assert.equal(got['building[name]'], 'FS01', 'an unrelated field was lost');
   assert.equal(bldErrs.length, 0);
   await bld.close();
 }
+
+// A building the game does not let you assign — a dispatch centre itself — has no such select
+// on its edit page. Nothing is offered, rather than offered and dead.
+{
+  const centre = await b.newPage({ viewport: { width: 1100, height: 900 } });
+  await centre.route('**/buildings/5677680/edit', (route) => route.fulfill({
+    contentType: 'text/html',
+    body: '<html><body><form action="/buildings/5677680" method="post">'
+      + '<input type="text" name="building[name]" value="NY"></form></body></html>',
+  }));
+  await centre.goto('http://localhost:8777/README.md');
+  await centre.setContent(`<html><body><div class="btn-group"
+    id="building-navigation-container">
+    <a class="btn btn-xs btn-default" href="/buildings/5677622">Previous building</a>
+    <a class="btn btn-xs btn-success" href="/buildings/5677623">Next building</a>
+    </div></body></html>`);
+  await centre.evaluate(() => history.replaceState({}, '', '/buildings/5677680'));
+  await centre.addScriptTag({ content: script });
+  await centre.waitForTimeout(900);
+  assert.equal(await centre.locator('#ymca-sd-pick').count(), 0,
+    'no select on its edit page means nothing to mirror, so nothing is offered');
+  console.log('dispatch centre   : a building that cannot be assigned gets no control');
+  await centre.close();
+}
+
 
 // ---- a prison list is not a table, and the figures are inside the link ----
 // The page the player pasted: thirty-odd `<a>` side by side in one `div.prison-select`, an

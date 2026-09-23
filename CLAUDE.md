@@ -607,6 +607,15 @@ own game teaches their own install, on its own, on every page but a mission:
   reloaded. The check costs nothing — the fleet is already cached — so it runs
   every page load. What is remembered is a type whose page could not be read,
   so a broken one is not retried every time.
+- **Tanks come off the same element, and used not to.** A capability is an
+  attribute set to `1`, so the flag loop stepped straight over `wasser_amount`,
+  and what a type carries was left to be learnt one mission window at a time —
+  which means waiting for each type to happen to be in range of a call.
+  **Diagnostics — What they can do** reads `wasser_amount`,
+  `foam_amount_display` and `water_modifier_raw` off the same element now, and
+  reports `answeredWithNoTank` for a page that gave flags and no figures,
+  because whether a vehicle's own page states a tank at all has never been seen
+  from this side.
 - **A sweep marks itself done only once it has read something.** The same
   mistake hid in the catalogue sweep: marked first, so one failure meant a week
   of silence.
@@ -805,11 +814,23 @@ per station. **SwitchDispatchCenter mirrors the game's own field into that row**
 — after the button naming the current centre, or between Previous and Next where
 the game names none because none is set.
 
-**Nothing is built: the control is the game's own, moved.** The dropdown sets
-the value on the real `<select>`, fires the `change` the game listens for, and
-submits the form it sits in — which is what keeps the CSRF token and every
-unrelated setting on that page intact. Where the select is not in the page there
-is nothing to mirror, so nothing is offered.
+**A building page is a frame, and ruling frames out ruled out every one of
+them.** The game opens a building in its own lightbox —
+`<iframe class="lightbox_iframe" src="/buildings/5685072">` — so the address is
+`/buildings/<id>` inside an iframe, and the guard that is right for the map's
+own modules was wrong here. **Ask the page what it holds, never where it sits.**
+
+**And the select is not on the building page.** A capture came back with
+`forms: []` and no `#building_leitstelle_building_id` anywhere: it lives on the
+building's own **edit** page, which the building page only links to. That page
+is fetched once and hands over both halves at the same time — the options to
+offer and the real form to send — which is why one request does it.
+
+**Nothing is built.** The FormData comes out of the game's own form and one
+field is replaced, so the CSRF token and every unrelated setting go back exactly
+as they came. That is the route RelabelTable already takes. A building the game
+does not let you assign — a dispatch centre itself — has no such select on its
+edit page, and then nothing is offered rather than offered and dead.
 
 **And a dropdown is one slip from moving a station you meant to look at.** The
 pick only arms a button that names the move — "Move to LI" — and states where it
