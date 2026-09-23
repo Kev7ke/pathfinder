@@ -832,10 +832,25 @@ as they came. That is the route RelabelTable already takes. A building the game
 does not let you assign — a dispatch centre itself — has no such select on its
 edit page, and then nothing is offered rather than offered and dead.
 
-**And a dropdown is one slip from moving a station you meant to look at.** The
-pick only arms a button that names the move — "Move to LI" — and states where it
-is now, which is both the confirmation and the undo: the centre it was in is on
-screen until the moment it changes.
+**It looks like the game because it is the game's own dropdown.** The row is a
+`.btn-group`, so what goes in it is a nested `.btn-group`: a caret button
+wearing `btn btn-default btn-xs`, the same classes as the button naming the
+centre beside it, and a `.dropdown-menu` under it. Bootstrap shows that menu on
+**`.open`, a class rather than a script**, so none of the game's JavaScript is
+needed — and the menu's own `display` is set as well, so it still opens where a
+stylesheet is built differently.
+
+**Each entry carries its own button, and that button is the confirmation.** The
+name is inert; the tick beside it is the one thing that moves anything. So
+choosing is one press rather than pick-then-confirm, and a stray click on a list
+still moves nothing — which is the whole reason the arming step existed. Nothing
+has to say "Move to LI" either, because the row already names the centre. The
+one it is in now is marked and carries no tick: there is nowhere to move it to.
+
+**A `.caret` with no `.caret` rule behind it is a zero-sized button**, which is
+why the browser test's fixture carries the handful of Bootstrap 3 rules the
+game's own stylesheet has. Markup that borrows the game's look has to be tested
+against something that supplies it, or "invisible" passes.
 
 **A filter that only hides can be combined with the game's own.** The game's
 station search marks rows with `building-filtered-by-search`; a rule that forced

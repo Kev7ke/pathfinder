@@ -2348,7 +2348,18 @@ console.log('highfive off      : a pick arms nothing');
   });
   await bld.goto('http://localhost:8777/README.md');
   // The navigation row exactly as the game writes it, and nothing else: no form on this page.
-  await bld.setContent(`<html><body>
+  // With the handful of Bootstrap 3 rules the game's own stylesheet carries, because the look
+  // is the game's — a caret with no `.caret` rule behind it is a zero-sized button.
+  await bld.setContent(`<html><head><style>
+    .btn { display:inline-block; padding:1px 5px; border:1px solid #ccc; }
+    .caret { display:inline-block; width:0; height:0; border-top:4px solid;
+      border-right:4px solid transparent; border-left:4px solid transparent; }
+    .dropdown-menu { display:none; position:absolute; top:100%; left:0; z-index:1000;
+      min-width:160px; padding:5px 0; margin:2px 0 0; list-style:none; background:#fff;
+      border:1px solid rgba(0,0,0,.15); }
+    .open > .dropdown-menu { display:block; }
+    .dropdown-menu > li > a { display:block; padding:3px 20px; }
+  </style><body>
     <div class="btn-group" id="building-navigation-container">
       <a class="btn btn-xs btn-default" href="/buildings/5677622">Previous building</a>
       <a class="btn btn-default btn-xs" href="/buildings/5677680">NY</a>
@@ -2356,61 +2367,64 @@ console.log('highfive off      : a pick arms nothing');
     </div></body></html>`);
   await bld.evaluate(() => history.replaceState({}, '', '/buildings/5685072'));
   await bld.addScriptTag({ content: script });
-  await bld.waitForSelector('#ymca-sd-pick select');
+  await bld.waitForSelector('#ymca-sd-pick .dropdown-toggle');
 
-  // It lands straight after the button naming the centre it is in now, so the answer and the
-  // way to change it are in the same place.
+  // It lands straight after the button naming the centre it is in now, in the game's own row,
+  // wearing the game's own button classes — the same ones that button wears.
   const where = await bld.evaluate(() => {
     const box = document.getElementById('ymca-sd-pick');
     return { after: box.previousElementSibling?.textContent.trim(),
       before: box.nextElementSibling?.textContent.trim(),
-      inNav: box.parentElement.id };
+      inNav: box.parentElement.id,
+      toggle: box.querySelector('.dropdown-toggle').className,
+      caret: !!box.querySelector('.caret') };
   });
   console.log('dispatch pick     :', JSON.stringify(where));
   assert.deepEqual(where, { after: 'NY', before: 'Next building',
-    inNav: 'building-navigation-container' },
-  'the dropdown goes between the centre it is in and Next building');
-  // Its options are the game's own, off the edit page, and the game's own selection is what it
-  // starts on — a page with no form of its own could not have said either.
-  const opts = await bld.$$eval('#ymca-sd-pick select option',
-    (o) => o.map((x) => [x.value, x.textContent.trim(), x.selected]));
-  console.log('dispatch options  :', JSON.stringify(opts));
-  assert.equal(opts.length, 4, 'every option the game offers, including its empty one');
-  assert.deepEqual(opts.find((o) => o[2]), ['5677680', 'NY', true],
-    'and it starts on what the game has it set to');
+    inNav: 'building-navigation-container',
+    toggle: 'btn btn-default btn-xs dropdown-toggle', caret: true },
+  'a caret in the same button design as the one naming the centre, between it and Next');
 
-  // NOTHING IS SENT ON A PICK. One slip on a dropdown would otherwise move a station you meant
-  // only to look at, so the pick arms a button that names the move.
-  assert.equal(await bld.locator('#ymca-sd-pick a.btn').isVisible(), false,
-    'nothing to press until something is picked');
-  await bld.selectOption('#ymca-sd-pick select', '5691056');
+  // NOTHING IS ON SCREEN UNTIL THE CARET IS PRESSED.
+  assert.equal(await bld.locator('#ymca-sd-pick .dropdown-menu').isVisible(), false,
+    'the menu is not there until it is asked for');
+  await bld.click('#ymca-sd-pick .dropdown-toggle');
   await bld.waitForTimeout(150);
-  const armed = await bld.evaluate(() => {
-    const a = document.querySelector('#ymca-sd-pick a.btn');
-    return { text: a.textContent.trim(), title: a.title };
-  });
-  console.log('dispatch armed    :', JSON.stringify(armed));
-  assert.equal(armed.text, 'Move to LI', 'the button says what it will do');
-  assert.match(armed.title, /in NY until you press this/,
-    'and where it is now, which is the undo');
-  assert.equal(sent, null, 'picking alone sends nothing');
+  assert.equal(await bld.locator('#ymca-sd-pick .dropdown-menu').isVisible(), true,
+    'and the caret opens it');
 
-  // Pressing it posts THE GAME'S OWN FORM with one field changed, so the CSRF token and every
-  // unrelated setting on the edit page survive exactly as they were.
-  await bld.click('#ymca-sd-pick a.btn');
+  // Every option the game offers, the one it is in now marked and with no tick — there is
+  // nowhere to move it to — and a tick on each of the others.
+  const rows = await bld.$$eval('#ymca-sd-pick .dropdown-menu li', (li) => li.map((x) => ({
+    name: x.querySelector('span')?.textContent.trim(),
+    here: x.classList.contains('active'),
+    // An empty value is a real option — "not assigned" — so the tick is looked for by the
+    // attribute being there, never by its value being truthy.
+    go: !!x.querySelector('[data-go]'),
+  })));
+  console.log('dispatch menu     :', JSON.stringify(rows));
+  assert.equal(rows.length, 4, 'every option the game offers, including its empty one');
+  assert.deepEqual(rows.find((r) => r.here), { name: 'NY', here: true, go: false },
+    'the one it is in now is marked and carries no tick');
+  assert.equal(rows.filter((r) => r.go).length, 3, 'every other row carries its own tick');
+
+  // THE NAME IS INERT. A list where the whole row moves a station is a list one stray click
+  // ruins, which is what the arming step was there to prevent.
+  await bld.click('#ymca-sd-pick .dropdown-menu li:not(.active) span:first-child');
+  await bld.waitForTimeout(250);
+  assert.equal(sent, null, 'clicking the name sends nothing');
+
+  // The tick is the whole choice: one press, and it is the confirmation as well.
+  await bld.click('#ymca-sd-pick [data-go="5691056"]');
   await bld.waitForTimeout(700);
-  const fields = Object.fromEntries(new URLSearchParams(
-    (sent || '').split('\n').filter(Boolean).length && !/name="/.test(sent || '')
-      ? sent : '').entries());
-  // The body is multipart (FormData), so read the parts rather than parsing it as a query.
-  const parts = {};
-  for (const m of (sent || '').matchAll(/name="([^"]+)"\r?\n\r?\n([^\r\n]*)/g)) parts[m[1]] = m[2];
-  const got = Object.keys(parts).length ? parts : fields;
+  // The body is multipart (FormData), so read its parts rather than parsing it as a query.
+  const got = {};
+  for (const m of (sent || '').matchAll(/name="([^"]+)"\r?\n\r?\n([^\r\n]*)/g)) got[m[1]] = m[2];
   console.log('dispatch sent     :', JSON.stringify(got));
   assert.equal(got['building[leitstelle_building_id]'], '5691056', 'the one field changed');
   assert.equal(got.authenticity_token, 'CSRF-XYZ', 'the CSRF token was lost');
   assert.equal(got['building[name]'], 'FS01', 'an unrelated field was lost');
-  assert.equal(bldErrs.length, 0);
+    assert.equal(bldErrs.length, 0);
   await bld.close();
 }
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.53
+// @version      0.0.54
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.53',
+    version: '0.0.54',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -7595,11 +7595,23 @@ YMCA.register({
  * the CSRF token and every unrelated setting on that page go back exactly as
  * they came. That is the same route RelabelTable takes.
  *
- * AND IT ASKS FIRST. A dropdown is one slip away from moving a station you
- * meant only to look at, so the pick arms a button that names the move —
- * "Move to LI" — and says where it is now. That button is the confirmation and
- * the sentence is the undo: picking the old centre again puts it back, and the
- * centre it was in is on screen until the moment it changes.
+ * AND IT LOOKS LIKE THE GAME, BECAUSE IT IS THE GAME'S OWN DROPDOWN. The row
+ * is a `.btn-group`, so what goes in it is a nested `.btn-group`: a caret
+ * button wearing `btn btn-default btn-xs`, the same as the button naming the
+ * centre beside it, and a `.dropdown-menu` under it. The game's own Bootstrap
+ * shows that menu on `.open`, which is a class rather than a script, so this
+ * needs none of the game's JavaScript to work — and it is written to the menu's
+ * own `display` as well, so it still opens on a page whose stylesheet is built
+ * differently.
+ *
+ * EACH ENTRY CARRIES ITS OWN BUTTON, AND THAT BUTTON IS THE CONFIRMATION. The
+ * name is inert; the tick beside it is the one thing that moves anything. So
+ * choosing is one press rather than pick-then-confirm, and a stray click on a
+ * list still moves nothing — which is the whole reason the arming step existed.
+ * Nothing has to say "Move to LI" either: the row already names the centre.
+ * The one it is in now is marked and carries no tick, because there is nowhere
+ * to move it to.
+ *
  * ------------------------------------------------------------------------ */
 
 const SD_SELECT = '#building_leitstelle_building_id';
@@ -7675,6 +7687,12 @@ async function sdSend(page, value, ctx) {
     ctx.log.info('dispatch centre changed', `${page.current?.name || 'none'} → ${value}`);
 }
 
+/** The game's own Bootstrap opens a menu on `.open`; the style is the fallback. */
+function sdOpen(group, menu, open) {
+    group.classList.toggle('open', open);
+    menu.style.display = open ? 'block' : 'none';
+}
+
 async function sdMount(ctx) {
     if (document.getElementById(SD_ID)) return true;
     const nav = document.querySelector(SD_NAV);
@@ -7683,76 +7701,105 @@ async function sdMount(ctx) {
 
     /* Marked before the fetch, so a second attempt from the same page growing
      * does not ask the game twice for the same page. */
-    const box = document.createElement('span');
-    box.id = SD_ID;
-    box.style.cssText = 'display:inline-flex;gap:4px;align-items:center;margin:0 4px';
-    nav.append(box);
+    const group = document.createElement('span');
+    group.id = SD_ID;
+    group.className = 'btn-group';
+    group.style.position = 'relative';
+    nav.append(group);
 
     let page;
     try {
         page = await sdEditPage(id);
     } catch (err) {
         ctx.log.warn('could not read the edit page', err.message);
-        box.remove();
+        group.remove();
         return true;
     }
     /* A building the game does not let you assign. Nothing to offer, and that
      * is the building rather than a breakage. */
-    if (!page) { box.remove(); return true; }
+    if (!page) { group.remove(); return true; }
 
     const current = page.current;
-    const pick = document.createElement('select');
-    pick.className = 'input-sm';
-    /* A native control takes the system's own colours rather than the game's
-     * button classes: `.btn-default` came back white on white in the probe. */
-    pick.style.cssText = 'background:Field;color:FieldText;color-scheme:light dark;'
-        + 'border:1px solid rgba(0,0,0,.35);border-radius:3px;font-size:12px;padding:1px 3px';
-    pick.title = 'Assigned Dispatch Center';
-    pick.innerHTML = page.options.map((o) => `<option value="${esc(o.value)}"${
-        o.value === (current?.id || '') ? ' selected' : ''}>${
-        esc(o.name || '— none —')}</option>`).join('');
 
-    const save = document.createElement('a');
-    save.className = 'btn btn-xs btn-warning';
-    save.href = '#';
-    save.setAttribute('role', 'button');
-    save.hidden = true;
+    /* THE SAME BUTTON AS THE ONE NAMING THE CENTRE, which is what makes it read
+     * as part of the game's own row rather than as something stuck to it. */
+    const toggle = document.createElement('a');
+    toggle.className = 'btn btn-default btn-xs dropdown-toggle';
+    toggle.href = '#';
+    toggle.setAttribute('role', 'button');
+    toggle.setAttribute('aria-haspopup', 'true');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.title = current
+        ? `In ${current.name}. Pick another dispatch centre.`
+        : 'Not assigned to a dispatch centre. Pick one.';
+    toggle.innerHTML = '<span class="caret"></span>';
 
-    const armed = () => {
-        const chosen = page.options.find((o) => o.value === pick.value);
-        const changed = pick.value !== (current?.id || '');
-        save.hidden = !changed;
-        if (!changed) return;
-        save.textContent = pick.value ? `Move to ${chosen?.name || ''}` : 'Leave it unassigned';
-        save.title = current
-            ? `It is in ${current.name} until you press this. Pick ${current.name} again to undo.`
-            : 'It is unassigned until you press this.';
-    };
-    pick.addEventListener('change', armed);
+    const menu = document.createElement('ul');
+    menu.className = 'dropdown-menu';
+    menu.style.display = 'none';
+    /* A tick at the height of the text beside it, in whatever colour it lands
+     * in: no colour of YMCA's own, on the game's own page. */
+    const tick = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none"'
+        + ' stroke="currentColor" stroke-width="2.5" stroke-linecap="round"'
+        + ' stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 L6.5 12 L13 4"/></svg>';
+    menu.innerHTML = page.options.map((o) => {
+        const here = o.value === (current?.id || '');
+        const name = esc(o.name || '\u2014 not assigned \u2014');
+        /* The one it is in now has nowhere to move to, so it is marked and
+         * carries no tick. */
+        return `<li class="${here ? 'active' : ''}"><a href="#" data-sd="${esc(o.value)}"
+          style="display:flex;gap:14px;align-items:center;justify-content:space-between;
+          ${here ? 'cursor:default' : ''}" ${here ? 'data-here="1"' : ''}>
+          <span>${name}</span>
+          ${here ? '<span style="opacity:.6;font-size:11px">here</span>'
+        : `<span class="btn btn-xs btn-success" data-go="${esc(o.value)}"
+              title="Move it to ${name}">${tick}</span>`}
+        </a></li>`;
+    }).join('');
 
-    save.addEventListener('click', async (e) => {
+    toggle.addEventListener('click', (e) => {
         e.preventDefault();
-        const was = save.textContent;
-        save.textContent = 'Moving…';
+        sdOpen(group, menu, menu.style.display === 'none');
+        toggle.setAttribute('aria-expanded', menu.style.display === 'block' ? 'true' : 'false');
+    });
+
+    /* THE NAME IS INERT AND THE TICK IS THE ACTION. A list where the whole row
+     * moves a station is a list one stray click ruins, which is exactly what
+     * the arming step was there to prevent. */
+    menu.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const go = e.target.closest('[data-go]');
+        if (!go) return;
+        const value = go.getAttribute('data-go');
+        sdOpen(group, menu, false);
+        toggle.className = 'btn btn-default btn-xs disabled';
+        toggle.innerHTML = '<span style="opacity:.7">\u2026</span>';
         try {
-            await sdSend(page, pick.value, ctx);
-            /* The page shows the old centre in its own navigation row and in
-             * its own heading, so the honest thing is to let the game redraw
-             * it rather than to paint the new one over the top. */
+            await sdSend(page, value, ctx);
+            /* The page names the old centre in its own row and its own heading,
+             * so the honest thing is to let the game redraw it rather than to
+             * paint the new one over the top. */
             location.reload();
         } catch (err) {
-            save.className = 'btn btn-xs btn-danger';
-            save.textContent = `Could not move it: ${err.message}`;
-            save.title = was;
+            toggle.className = 'btn btn-danger btn-xs';
+            toggle.innerHTML = '<span class="caret"></span>';
+            toggle.title = `It did not move: ${err.message}`;
             ctx.log.error('dispatch centre not changed', err.message);
         }
     });
 
-    box.append(pick, save);
+    /* Anywhere else, or Escape: the way every menu on the page closes. */
+    document.addEventListener('click', (e) => {
+        if (!group.contains(e.target)) sdOpen(group, menu, false);
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') sdOpen(group, menu, false);
+    });
+
+    group.append(toggle, menu);
     const slot = sdSlot(nav, current);
-    if (slot.where === 'after') slot.node.after(box);
-    else if (slot.where === 'before') slot.node.before(box);
-    armed();
+    if (slot.where === 'after') slot.node.after(group);
+    else if (slot.where === 'before') slot.node.before(group);
     return true;
 }
 
