@@ -785,6 +785,23 @@ bar), `mission_missing_<id>`, `mission_missing_short_<id>`,
 is missing" without saying what; a row that goes green when its own line is
 covered leaves only the missing ones red.
 
+**An AAO is the game stating a capability out loud, and half of
+`MM_REQUIREMENTS` is sourced that way.** A dispatch order is a filter built in
+the game's own editor, so a button labelled `F-HRV` that ticks exactly the
+vehicles carrying `rw="1"` **is the game saying** which flag means a heavy
+rescue vehicle. `firetrucks` — `fire`, `platform_trucks` — `dlk`,
+`ambulances` — `any_rtw`: every one of those carries that sentence as its
+`source`, and none of them was guessed. It was done by hand, one key at a time.
+
+**Diagnostics — What the dispatch orders know** asks whether the editor pages
+state those flags per *type* rather than per vehicle. If they do, one page read
+answers the question below for good, because an editor has to list every type
+the game sells — including the ones nobody owns. Nobody here has seen that
+page, so nothing is guessed: the paths are tried and what answers is reported by
+its shape, with `verdict` saying in one line whether the flags were there. It
+takes **no dispatch-order names and no counts**: a field's name is the game's,
+its value is the player's configuration, and none of that would help anyway.
+
 **There is no page that states what an unowned type covers.** The flags are
 written per vehicle *instance*, onto that vehicle's checkbox and its own page.
 The buy page lists all 106 types with crew, patient transport and required

@@ -89,6 +89,10 @@ YMCA.register({
           that is yours: every vehicle type and what it can do, every mission the game lists,
           what you have run, what the ledger says each paid, and every requirement nothing could
           match. That is the file to hand over.<br>
+          <b>What the dispatch orders know</b> asks the game's own dispatch-order pages whether
+          they state what a vehicle type covers. They list every type the game sells, including
+          ones you do not own &mdash; which is the one thing no page has ever answered. Structure
+          and flags only: not what you called your orders, not how many of each they send.<br>
           <b>Download everything</b> is the raw endpoints. That one carries your player name,
           your alliance and your building coordinates, so share it only where you are happy
           to.</p>
@@ -97,6 +101,7 @@ YMCA.register({
         <button class="ymca-btn" data-do="vehicles">Vehicle types</button>
         <button class="ymca-btn" data-do="capabilities">What they can do</button>
         <button class="ymca-btn" data-do="sweep">Look for new types now</button>
+        <button class="ymca-btn" data-do="aao">What the dispatch orders know</button>
         <button class="ymca-btn" data-do="missions">Mission list only</button>
       </div>
 
@@ -263,6 +268,15 @@ async function run(what, ctx, put) {
         put(gap, `what the repo is missing \u2014 ${gap.counts.types} type`
             + `${gap.counts.types === 1 ? '' : 's'}`);
         ctx.log.info('repo gap copied', `${gap.counts.types} types`);
+        return;
+    }
+
+    if (what === 'aao') {
+        ctx.status('Asking the dispatch-order pages\u2026');
+        const shape = await aaoShape(ctx);
+        put(shape, shape.verdict);
+        ctx.status(shape.verdict);
+        ctx.log.info('dispatch orders asked', shape.verdict);
         return;
     }
 
@@ -548,6 +562,129 @@ function interfaceProbe() {
  * Counts and the game's own constants only. No mission instances, no balance,
  * no names.
  */
+/**
+ * WHAT THE GAME'S OWN DISPATCH ORDERS KNOW.
+ *
+ * An AAO is a filter the player built in the game's own editor, and a button
+ * labelled "F-HRV" that ticks exactly the vehicles carrying `rw="1"` is the
+ * game itself saying which flag means a heavy rescue vehicle. Half of
+ * `MM_REQUIREMENTS` is sourced that way already — by hand, one key at a time.
+ *
+ * THE OPEN QUESTION THIS ANSWERS. Capability flags have only ever been seen on
+ * a vehicle the player owns: on its checkbox in a mission window, or on its own
+ * page. So what an UNOWNED type covers has no source at all, and the dataset
+ * can only grow from what players happen to have. If the AAO editor lists every
+ * type the game sells — which it must, to let you build an order for a vehicle
+ * you are about to buy — and if those rows carry the same plain attributes the
+ * checkboxes do, then one page read closes that question for good.
+ *
+ * Nobody here has seen that page, so nothing is guessed at: the paths are
+ * tried, and what answers is reported by its SHAPE. Field names, element names,
+ * which attributes sit on anything carrying a `vehicle_type_id`, and whether
+ * any of them look like capability flags. **No AAO names and no counts**: what
+ * a player called their dispatch orders and how many of each they send is their
+ * own configuration, and none of it would help.
+ */
+const AAO_PAGES = ['/aaos', '/aaos/new', '/api/v1/aaos', '/einsatzmittel'];
+
+/** A flag is a plain attribute set to `1`, the way a checkbox writes one. */
+function aaoFlagsOn(el) {
+    const flags = [];
+    for (const a of el.attributes) {
+        const n = a.name.toLowerCase();
+        if (a.value !== '1' || CAP_NOT_A_FLAG.has(n) || !/^[a-z][a-z0-9_]*$/.test(n)) continue;
+        flags.push(n);
+    }
+    return flags;
+}
+
+async function aaoShape(ctx) {
+    const pages = {};
+    let typesWithFlags = 0;
+    let typesSeen = 0;
+    const flagVocabulary = new Set();
+    const capabilitiesByType = {};
+
+    for (const path of AAO_PAGES) {
+        try {
+            const res = await fetch(path, { credentials: 'same-origin' });
+            if (!res.ok) { pages[path] = `HTTP ${res.status}`; continue; }
+            const text = await res.text();
+            /* JSON answers for itself: the key names and nothing under them. */
+            if ((res.headers.get('content-type') || '').includes('json')) {
+                let data = null;
+                try { data = JSON.parse(text); } catch (e) { /* not JSON after all */ }
+                const first = Array.isArray(data) ? data[0] : data;
+                pages[path] = {
+                    kind: 'json',
+                    entries: Array.isArray(data) ? data.length : null,
+                    keys: first && typeof first === 'object' ? Object.keys(first) : null,
+                };
+                continue;
+            }
+            const doc = new DOMParser().parseFromString(text, 'text/html');
+            /* EVERY ELEMENT THAT NAMES A TYPE, whatever it is built from. A row,
+             * a label, an input — the question is only whether the flags ride
+             * along with the id. */
+            const carriers = [...doc.querySelectorAll('[vehicle_type_id], [data-vehicle-type-id]')];
+            for (const el of carriers) {
+                typesSeen += 1;
+                const id = el.getAttribute('vehicle_type_id')
+                    || el.getAttribute('data-vehicle-type-id');
+                const flags = aaoFlagsOn(el);
+                if (!flags.length) continue;
+                typesWithFlags += 1;
+                for (const f of flags) flagVocabulary.add(f);
+                if (id !== null && id !== '') capabilitiesByType[id] = flags.sort();
+            }
+            pages[path] = {
+                kind: 'html',
+                /* Structure only: what the page is built from, never what it
+                 * says. A form field's NAME is the game's; its value is the
+                 * player's, so only the name comes back. */
+                formFields: [...doc.querySelectorAll('form')].slice(0, 3).map((f) => ({
+                    action: (f.getAttribute('action') || '').replace(/\d+/g, '#'),
+                    method: (f.getAttribute('method') || 'get').toLowerCase(),
+                    fieldNames: [...f.elements].map((x) => x.name).filter(Boolean).slice(0, 25),
+                })),
+                elementsWithId: [...doc.querySelectorAll('[id]')]
+                    .map((el) => `${el.tagName.toLowerCase()}#${el.id.replace(/\d+/g, '#')}`)
+                    .slice(0, 30),
+                typeCarriers: carriers.length,
+                /* The answer, in one line: do the type rows carry flags? */
+                attributesOnTypeCarriers: carriers.length
+                    ? [...new Set(carriers.slice(0, 20).flatMap(
+                        (el) => [...el.attributes].map((a) => a.name)))].sort()
+                    : [],
+            };
+        } catch (err) {
+            pages[path] = `could not be read: ${err.message}`;
+        }
+        await ctx.sleep(200);
+    }
+
+    return {
+        note: 'Whether the game\'s own dispatch-order pages state what a vehicle type covers. '
+            + 'Structure and capability flags only \u2014 no dispatch-order names, no counts, '
+            + 'nothing about what this account owns.',
+        ymca: YMCA.version,
+        at: new Date().toISOString(),
+        pages,
+        typeCarriersSeen: typesSeen,
+        typeCarriersWithFlags: typesWithFlags,
+        /* THE WHOLE POINT. Empty means the flags are not on those pages either,
+         * and the dataset goes on growing one owned vehicle at a time. */
+        capabilitiesByType,
+        flagVocabulary: [...flagVocabulary].sort(),
+        verdict: typesWithFlags
+            ? `the dispatch-order pages DO state capabilities: ${typesWithFlags} of `
+              + `${typesSeen} type rows carry flags`
+            : (typesSeen
+                ? `the pages name ${typesSeen} type rows but state no flags on them`
+                : 'no page named a vehicle type at all'),
+    };
+}
+
 /**
  * WHAT THIS INSTALL KNOWS AND THE REPO DOES NOT.
  *
