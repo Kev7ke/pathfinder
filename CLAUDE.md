@@ -1485,13 +1485,31 @@ game happens to have written it, against the sixty-five words off the
 dispatch-order form — `data/vehicle-flags.json` is inlined into Diagnostics for
 exactly that. A type id on the element is no longer what makes a flag findable.
 
-And where that still finds nothing, what comes back is the page's **shape**, not
-a shrug: whether *any* of the sixty-five words is anywhere on it, every attribute
-**name** on `#vehicle_details` and everything inside it, the elements with ids,
-and — because `img#ajax-loader`, `div#load_info` and `div#loading_error` beside
-an empty details panel is what a page that fetches its own content looks like —
-**the paths the page names, with every digit masked**. Names and paths are
-structure; a figure the page is showing would not be.
+And where that still finds nothing, what comes back is the page's **shape**:
+whether *any* of the sixty-five words is anywhere on it, every attribute **name**
+on `#vehicle_details` and everything inside it, every **form field name**, the
+elements with ids, and the paths the page names with every digit masked. Names
+and paths are structure; a figure the page is showing would not be.
+
+**That shape closed the question, and the second guess was wrong too.** The
+loader, the error box and the empty details panel read like a page that fetches
+its own content, so the next thing to find was where from. It fetches nothing.
+The real page came back with **21,715 characters** of rendered text, **no path
+of its own** among the images, and every attribute on `#vehicle_details` and
+everything inside it being one of `class`, `href`, `id`, `title`. It is not a
+shell waiting to fill. **`/vehicles/<id>` simply does not carry what a vehicle
+can do**, and asking it again, in any way, answers the same. That question is
+closed.
+
+**So the question became which page does — and that is asked all at once rather
+than one release per try.** A vehicle has more than one page: its own, the
+**edit form** behind it (the game writes machine-readable things into forms, and
+that is where the dispatch-order vocabulary turned up), and its **station**,
+which lists a row per vehicle the way a mission window does. Each kind is asked
+once per type until it answers, the result says **which kind answered** per type
+and what each of the others was made of, and a kind that has answered nothing
+for three types running is **given up on** and says so. Seventy-eight requests
+to learn the same nothing is a worse button than twenty-six.
 
 **The repo ships what it has measured, not only what it has named.** Three
 fields, and each answers a different question:

@@ -82,9 +82,10 @@ YMCA.register({
         <p class="ymca-sub" style="margin:4px 0 10px"><b>Vehicle types</b> is the one to send when
           a vehicle YMCA does not know turns up: nothing can be counted by a type it cannot name.
           It carries ids, names and what each type can do, and nothing about your account.<br>
-          <b>What they can do</b> reads one vehicle of each type you own and takes the capability
-          flags off it, so a type does not have to wait until it happens to be in range of a
-          mission. Ids and flags only.<br>
+          <b>What they can do</b> asks each page a vehicle of yours has &mdash; its own page, the
+          form behind it, its station &mdash; which of them states what the vehicle can do, and
+          says which one answered. A vehicle's own page does not, measured rather than assumed,
+          so this is how the rest get ruled in or out. Ids, flag names and page structure.<br>
           <b>Send this one</b> is everything the repo needs in a single file, with nothing in it
           that is yours: every vehicle type and what it can do, every mission the game lists,
           what you have run, what the ledger says each paid, and every requirement nothing could
@@ -1160,10 +1161,68 @@ function vehiclePageShape(doc) {
         attributeNamesOnDetails: [...attributeNames].sort().slice(0, 60),
         formActions: [...doc.querySelectorAll('form')]
             .map((f) => (f.getAttribute('action') || '').replace(/\d+/g, '#')),
+        /* ASK A FORM FOR ITS FIELD NAMES BEFORE DECIDING IT IS EMPTY — the
+         * dispatch-order editor was reported as naming no vehicle type at all
+         * because the id was in the field name rather than in an attribute. */
+        formFieldNames: [...new Set([...doc.querySelectorAll('input, select, textarea')]
+            .map((f) => (f.getAttribute('name') || '').replace(/\d+/g, '#'))
+            .filter(Boolean))].sort().slice(0, 60),
         tablesAndPanels: [...doc.querySelectorAll('table, .panel, .well')]
             .map((el) => named(el)).slice(0, 20),
         pathsThePageNames: [...paths].sort().slice(0, 40),
     };
+}
+
+/**
+ * Which page of a vehicle's, if any, states what it can do.
+ *
+ * `/vehicles/<id>` is not it, and that is measured rather than suspected: a
+ * real account came back with 21,715 characters of rendered page, every
+ * attribute on `#vehicle_details` and everything inside it being one of
+ * `class`, `href`, `id`, `title`, not one of the sixty-five words the game has
+ * for a capability anywhere on it, and **no path it fetches anything from** \u2014
+ * so it is not a shell waiting to fill, it is a page that simply does not carry
+ * it. Asking it again, in any way, answers the same.
+ *
+ * So the question became which page does, and that is not a thing to guess at
+ * one release per try. Each kind is asked once per type until it answers, and
+ * a kind that has answered nothing for three types running is **given up on**
+ * and said so in the result \u2014 78 requests to learn the same nothing is a worse
+ * button than 26.
+ */
+const VEHICLE_PAGE_KINDS = [
+    { id: 'vehiclePage', path: (v) => `/vehicles/${v.id}` },
+    /* The game writes machine-readable things into forms; this one has never
+     * been looked at for flags, and the Renamer already posts to it. */
+    { id: 'vehicleEditPage', path: (v) => `/vehicles/${v.id}/edit` },
+    /* And the station lists its own vehicles, which is a row per vehicle the
+     * way a mission window has a row per vehicle. */
+    { id: 'buildingPage', path: (v) => (v.building_id ? `/buildings/${v.building_id}` : null) },
+];
+const GIVE_UP_AFTER = 3;
+
+/** The flags and the tank off one parsed page, by the rules a checkbox set. */
+function readCapabilities(doc) {
+    const flags = new Set();
+    const tank = {};
+    let carriers = [...doc.querySelectorAll('[vehicle_type_id]')];
+    if (!carriers.length) carriers = elementsCarryingAFlag(doc);
+    for (const el of carriers) {
+        for (const attr of el.attributes) {
+            const n = attr.name.toLowerCase();
+            if (attr.value === '1') {
+                if (CAP_NOT_A_FLAG.has(n) || !/^[a-z][a-z0-9_]*$/.test(n)) continue;
+                flags.add(n);
+                continue;
+            }
+            const number = Number(attr.value);
+            if (!Number.isFinite(number)) continue;
+            if (n === 'wasser_amount') tank.water = number;
+            else if (n === 'foam_amount_display') tank.foam = number;
+            else if (n === 'water_modifier_raw' || n === 'water_modifier') tank.bonus = number;
+        }
+    }
+    return { flags, tank };
 }
 
 async function vehicleCapabilities(ctx) {
@@ -1177,80 +1236,62 @@ async function vehicleCapabilities(ctx) {
     const oneEach = new Map();
     for (const v of vehicles) {
         const t = String(v.vehicle_type ?? '');
-        if (t && !oneEach.has(t)) oneEach.set(t, v.id);
+        if (t && !oneEach.has(t)) oneEach.set(t, v);
     }
 
     const found = {};
-    const unanswered = [];
-    let shape = null;
     const tanks = {};
     const noTank = [];
+    const unanswered = [];
+    const answeredBy = {};
+    const shapes = {};
+    const missed = {};
+    const gaveUpOn = {};
 
     let done = 0;
-    for (const [typeId, vehicleId] of oneEach) {
+    for (const [typeId, vehicle] of oneEach) {
         /* A button that says nothing for half a minute reads as a button that
          * did nothing, and the answer to "it is just empty" has to be visible
          * while it is still running. */
         done += 1;
         ctx.status(`Reading type ${done} of ${oneEach.size}\u2026`);
-        try {
-            const res = await fetch(`/vehicles/${vehicleId}`, { credentials: 'same-origin' });
-            if (!res.ok) { unanswered.push({ typeId, why: `HTTP ${res.status}` }); continue; }
-            const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
 
-            const flags = new Set();
-            /* THE TANK IS ON THE SAME ELEMENT, IF IT IS ANYWHERE. A capability
-             * is an attribute set to `1`, so the loop above steps straight over
-             * a tank, and the figures were left to be learnt one mission window
-             * at a time. They are read here as well now, off the same element
-             * and by the same names the selection checkbox uses. Whether a
-             * vehicle's own page carries them at all has never been seen from
-             * this side, so what comes back is reported either way rather than
-             * assumed. */
-            const tank = {};
-            /* The type id is where the flags sat in a mission window, so it is
-             * where they were looked for here. A real account answered 26 types
-             * out of 26 with "no element carries vehicle_type_id", so the page
-             * is asked for a flag by name as well — whatever element the game
-             * happens to have written it on. */
-            let carriers = [...doc.querySelectorAll('[vehicle_type_id]')];
-            if (!carriers.length) carriers = elementsCarryingAFlag(doc);
-            for (const el of carriers) {
-                for (const attr of el.attributes) {
-                    const n = attr.name.toLowerCase();
-                    if (attr.value === '1') {
-                        if (CAP_NOT_A_FLAG.has(n) || !/^[a-z][a-z0-9_]*$/.test(n)) continue;
-                        flags.add(n);
-                        continue;
+        const why = [];
+        let answered = false;
+        for (const kind of VEHICLE_PAGE_KINDS) {
+            if (answered || gaveUpOn[kind.id]) continue;
+            const path = kind.path(vehicle);
+            if (!path) continue;
+            try {
+                /* eslint-disable no-await-in-loop */
+                const res = await fetch(path, { credentials: 'same-origin' });
+                if (!res.ok) { why.push(`${kind.id}: HTTP ${res.status}`); continue; }
+                const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+                const { flags, tank } = readCapabilities(doc);
+                if (flags.size) {
+                    found[typeId] = [...flags].sort();
+                    answeredBy[typeId] = kind.id;
+                    answered = true;
+                    if ('water' in tank || 'foam' in tank || 'bonus' in tank) {
+                        tanks[typeId] = { water: tank.water || 0, foam: tank.foam || 0,
+                            bonus: tank.bonus || 0 };
+                    } else {
+                        noTank.push(typeId);
                     }
-                    const number = Number(attr.value);
-                    if (!Number.isFinite(number)) continue;
-                    if (n === 'wasser_amount') tank.water = number;
-                    else if (n === 'foam_amount_display') tank.foam = number;
-                    else if (n === 'water_modifier_raw' || n === 'water_modifier') {
-                        tank.bonus = number;
+                } else {
+                    why.push(`${kind.id}: no capability the game has a word for`);
+                    if (!shapes[kind.id]) shapes[kind.id] = vehiclePageShape(doc);
+                    missed[kind.id] = (missed[kind.id] || 0) + 1;
+                    if (missed[kind.id] >= GIVE_UP_AFTER) {
+                        gaveUpOn[kind.id] = `nothing on the first ${GIVE_UP_AFTER} tried`;
                     }
                 }
+            } catch (err) {
+                why.push(`${kind.id}: ${err.message}`);
             }
-            if ('water' in tank || 'foam' in tank || 'bonus' in tank) {
-                tanks[typeId] = { water: tank.water || 0, foam: tank.foam || 0,
-                    bonus: tank.bonus || 0 };
-            } else if (flags.size) {
-                noTank.push(typeId);
-            }
-            if (flags.size) {
-                found[typeId] = [...flags].sort();
-            } else {
-                unanswered.push({ typeId,
-                    why: 'nothing on that page carries a capability the game has a word for' });
-                /* Once only, and structure alone: the ids and classes of what the
-                 * page is built from, so the next read knows where to look. */
-                if (!shape) shape = vehiclePageShape(doc);
-            }
-        } catch (err) {
-            unanswered.push({ typeId, why: err.message });
+            await ctx.sleep(150);
         }
-        await ctx.sleep(150);
+        if (!answered) unanswered.push({ typeId, why });
     }
 
     /* Into the store every module reads, merged under what a mission window
@@ -1288,25 +1329,27 @@ async function vehicleCapabilities(ctx) {
     } catch (e) { /* private window: the copy below still carries it */ }
 
     return {
-        note: 'capability flags per vehicle type, read from each vehicle\'s own page in your '
-            + 'game. Type ids and flag names only — nothing about the vehicles themselves.',
+        note: 'which page of a vehicle\'s, if any, states what it can do. Type ids, flag names '
+            + 'and page structure \u2014 nothing about the vehicles themselves.',
         ymca: YMCA.version,
         typesYouOwn: oneEach.size,
         typesAnswered: Object.keys(found).length,
         newToThisBrowser: written,
+        /* WHICH PAGE ANSWERED. The whole point of asking more than one. */
+        answeredBy,
+        pagesTried: VEHICLE_PAGE_KINDS.map((k) => k.id),
+        pagesGivenUpOn: gaveUpOn,
         capabilitiesByType: found,
         /* WHAT IT CARRIES, OFF THE SAME ELEMENT. A capability is an attribute
          * set to `1`, so the flag loop stepped straight over a tank and the
-         * figures were left to be learnt one mission window at a time — which
-         * means waiting for each type to happen to be in range of a call.
-         * Whether a vehicle's own page states a tank at all had never been seen
-         * from this side, so `answeredWithNoTank` is the answer either way. */
+         * figures were left to be learnt one mission window at a time. */
         tanksByType: tanks,
         tanksNewToThisBrowser: tanksWritten,
         answeredWithNoTank: noTank,
         unanswered,
-        /* Present only when nothing could be read, and then it is what says why. */
-        pageShapeWhereNothingWasFound: shape,
+        /* One per kind of page, and only where that kind found nothing. This is
+         * what says why, and it is the reason to press this at all now. */
+        pageShapesWhereNothingWasFound: shapes,
     };
 }
 

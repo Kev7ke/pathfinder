@@ -151,7 +151,11 @@ window.__hired = [];
     let m = url.match(/^\/vehicles\/(\d+)\/edit$/);
     if (m) {
       const v = vehicles.find((x) => x.id === Number(m[1]));
-      return new Response(form(`/vehicles/${v.id}`, 'vehicle[caption]', v.caption),
+      // Type 5's own page states nothing; its edit form does. Which page answers is the
+      // question the reader exists to settle, so one fixture has to answer it elsewhere.
+      const extra = v.vehicle_type === 5
+        ? '<div class="caps" any_rtw="1" ktw_or_rtw="1" wasser_amount="0"></div>' : '';
+      return new Response(form(`/vehicles/${v.id}`, 'vehicle[caption]', v.caption) + extra,
         { headers: { 'content-type': 'text/html' } });
     }
     m = url.match(/^\/buildings\/(\d+)\/hire_do\/(\d+)$/);
@@ -211,17 +215,16 @@ window.__hired = [];
     }
     // A vehicle's own page, in the three shapes a real account came back with.
     // Type 13 carries its flags on an element with vehicle_type_id, the way a mission window
-    // does. Type 5 carries them with no type id on the element at all — which the first reader
-    // walked straight past. Everything else is the page 26 types out of 26 answered with: a
-    // details panel, a loader, an error box, and not one word the game has for a capability.
+    // does. Everything else is the page 26 types out of 26 answered with: a details panel, a
+    // loader, an error box, and not one word the game has for a capability — 21,715 characters
+    // of rendered page and no path it fetches anything from, so not a shell, simply a page that
+    // does not carry it.
     m = url.match(/^\/vehicles\/(\d+)$/);
     if (m) {
       const v = vehicles.find((x) => x.id === Number(m[1]));
       let body;
       if (v && (v.vehicle_type === 13 || v.vehicle_type === 904)) {
         body = `<div vehicle_type_id="${v.vehicle_type}" fire="1" dlk="1" fms="2" custom_="1"></div>`;
-      } else if (v && v.vehicle_type === 5) {
-        body = '<div class="vehicle-caps" any_rtw="1" ktw_or_rtw="1" wasser_amount="0"></div>';
       } else {
         body = `<img id="ajax-loader" src="/images/loader.gif">
            <div id="vehicle_details">
@@ -528,15 +531,21 @@ console.log('capabilities      :', JSON.stringify(caps.capabilitiesByType),
   'unanswered:', JSON.stringify(caps.unanswered.map((u) => u.typeId)));
 assert.deepEqual(caps.capabilitiesByType['13'], ['dlk', 'fire'],
   'the flags come off the vehicle\'s own page, and fms and custom_ are not flags');
-// A REAL ACCOUNT ANSWERED 26 TYPES OUT OF 26 WITH "no element carries vehicle_type_id". The
-// flags are read by name now, off whatever element the game wrote them on.
+// A REAL ACCOUNT ANSWERED 26 TYPES OUT OF 26 ON /vehicles/<id>, so more than one page of a
+// vehicle's is asked and the result says WHICH one answered.
+console.log('answered by       :', JSON.stringify(caps.answeredBy));
+assert.equal(caps.answeredBy['13'], 'vehiclePage', 'a page that does carry them still answers');
+assert.equal(caps.answeredBy['5'], 'vehicleEditPage',
+  'and where its own page states nothing, the form behind it is asked');
 assert.deepEqual(caps.capabilitiesByType['5'], ['any_rtw', 'ktw_or_rtw'],
-  'a page that names the flags without a type id on the element is read all the same');
+  'the flags come off whatever page had them, by name rather than by a type id');
 assert.deepEqual(caps.tanksByType['5'], { water: 0, foam: 0, bonus: 0 },
   'and the tank off the same element, where a zero is an answer');
 assert.deepEqual(caps.unanswered.map((u) => u.typeId), ['10'],
-  'a page built without them says so rather than reporting the type as covering nothing');
-const pageShape = caps.pageShapeWhereNothingWasFound;
+  'a type no page states says so rather than being reported as covering nothing');
+assert.match(caps.unanswered[0].why.join(' '), /vehiclePage.*vehicleEditPage/,
+  'and names every page that was asked, so the next read knows what is already ruled out');
+const pageShape = caps.pageShapesWhereNothingWasFound.vehiclePage;
 console.log('page shape        :', JSON.stringify({
   flags: pageShape.anyFlagAnywhere, paths: pageShape.pathsThePageNames }));
 assert.match(String(pageShape.anyFlagAnywhere), /none of the 65 words/,
@@ -549,6 +558,12 @@ assert.ok(pageShape.pathsThePageNames.includes('/vehicles/#/details'),
   'a page that fetches its own content names where from, with every digit masked');
 assert.ok(!/\d/.test(pageShape.pathsThePageNames.join(' ')),
   'no id of the player\'s rides along in a path');
+// A form is asked for its field NAMES: the dispatch-order editor was called empty because the
+// id sat in the name rather than in an attribute, and that mistake is not made twice.
+const editShape = caps.pageShapesWhereNothingWasFound.vehicleEditPage;
+console.log('edit form fields  :', JSON.stringify(editShape.formFieldNames));
+assert.ok(editShape.formFieldNames.includes('vehicle[caption]'),
+  'a form hands over its field names even where it carried no flag');
 assert.ok(!JSON.stringify(caps).includes('Old A'), 'no vehicle name may leave in this one');
 // It lands where MissionMagician reads it, so the type is known before a mission asks.
 const taught = await pg.evaluate(() =>
