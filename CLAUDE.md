@@ -807,6 +807,24 @@ got that wrong: it looked for `vehicle_type_id="4"`, found nothing, and reported
 "no page named a vehicle type at all" about a page listing every one of them.
 **Ask a form for its field names before deciding it is empty.**
 
+**Sixty-five flags came back, and seventeen requirement keys were the same
+word.** `arff`, `brush_truck`, `fire_investigation`, `k9`, `foam`, `fwk`,
+`flood_equipment`, `technical_rescue`, `riot_police`, `coastal_boat`,
+`fire_aviation`, `search_and_rescue`, `mountain_lift`, `mountain_lift_2`,
+`police_drone`, `fbi_drone`, `swat_armored_vehicle` — key and flag identical,
+character for character, across 654 mission-uses. That is a **reading, not a
+resemblance**, so each went into `MM_REQUIREMENTS` sourced as *the editor names
+this flag itself*. Anything needing a suffix added or a word swapped
+(`sheriff` — `sheriff_unit`, `boats` — `boot`) is **not** there: that would be
+inferring from a name, which every other entry was written to avoid. Forty keys
+stay unmatched and stay listed.
+
+**The whole vocabulary is in `data/vehicle-flags.json`**, with the editor's own
+tab as `branch`. Three of the sixty-five — `wasser_amount`, `foam_amount`,
+`water_damage_pump_value` — are **figures the editor filters on rather than
+capabilities**, and are marked `isAmount` so nothing treats them as a flag a
+vehicle either has or has not.
+
 **What the editor does not state is which flags a type carries.** The flag boxes
 and the type boxes are siblings on a form, not a mapping; they share a tab, and
 a tab is a *branch* rather than a capability. So `byTab` is reported as branch
@@ -1387,6 +1405,11 @@ lists what is confirmed, what is still open, and how each answer was reached.
 `data/vehicle-types.json` is the vehicle type ids, their names and the
 capability flags the game puts on their checkboxes. It is what the tools fall
 back on before they have seen a type themselves.
+
+`data/vehicle-flags.json` is the other half: **every capability the game has a
+word for**, read off its own dispatch-order form, with the branch each one sits
+in. A type's flags are measured per vehicle; this is the list of what a flag can
+ever be.
 
 ### Naming a vehicle type
 

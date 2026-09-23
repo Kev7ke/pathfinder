@@ -1130,6 +1130,43 @@ console.log('unmatched keys    :', JSON.stringify(remembered.slice(-3)));
 assert.ok(remembered.includes('hovercraft_wranglers'),
   'and carried into the report so it can be added');
 
+// ---- seventeen keys the game named itself ----
+// /aaos/new carries a checkbox per capability the game has — aao[k9], aao[arff], aao[fwk] —
+// and for these the requirement key and the flag are the same word, character for character.
+// So the match is a reading rather than a resemblance, and a vehicle carrying the flag is
+// picked for the key without anybody mapping the two by hand.
+await mission.evaluate(() => {
+  window.__catalogue = [{
+    id: '314', name: 'Dog search', average_credits: 700,
+    requirements: { k9: 1, technical_rescue: 1 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('vehicle_show_table_body_all').innerHTML = `
+    <tr class="vehicle_select_table_tr" vehicle_id="601" data-distance="1">
+      <td><input type="checkbox" class="vehicle_checkbox" value="601" name="vehicle_ids[]"
+        vehicle_type_id="88" fms="2" k9="1"></td>
+      <td id="vehicle_sort_601" timevalue="300">5 min.</td></tr>
+    <tr class="vehicle_select_table_tr" vehicle_id="602" data-distance="1">
+      <td><input type="checkbox" class="vehicle_checkbox" value="602" name="vehicle_ids[]"
+        vehicle_type_id="96" fms="2" technical_rescue="1"></td>
+      <td id="vehicle_sort_602" timevalue="400">6 min.</td></tr>`;
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '314');
+});
+await mission.waitForTimeout(1200);
+const named = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('named by the game :', JSON.stringify(named.map((r) => r[4])));
+const labels = named.map((r) => r[4]);
+assert.ok(labels.includes('K9 units') && labels.includes('Technical rescue'),
+  'both are lines with a label of their own, not "nothing could match this"');
+assert.ok(labels.every((l) => !/could not be matched/i.test(l)),
+  'and neither is listed as unmatched any more');
+// And a vehicle carrying the flag is picked for the key it is named by.
+assert.deepEqual(await mission.evaluate(() =>
+  (document.getElementById('ymca-mm-panel')?.dataset.pick || '')
+    .split(',').filter(Boolean).sort()), ['601', '602'],
+'the K9 unit answers k9 and the technical rescue answers technical_rescue');
+
 // ---- a requirement nothing maps, answered by the page's own vocabulary ----
 // The game names the same capability twice: `hazmat_vehicles` in the requirements, and an
 // attribute of that name on the checkbox of every vehicle that satisfies it. Where the two line

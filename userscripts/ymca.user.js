@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.58
+// @version      0.0.59
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.58',
+    version: '0.0.59',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2160,6 +2160,33 @@ const MM_REQUIREMENTS = {
         anyOf: ['rw', 'dlk'], label: 'A rescue or a ladder', icon: 'arm',
         source: 'the key names its own alternatives',
     },
+
+    /* SEVENTEEN KEYS THE GAME NAMED ITSELF, and not one of them inferred.
+     * `/aaos/new` carries a checkbox per capability the game has, called
+     * `aao[<flag>]`, because a dispatch order can say "every vehicle that can
+     * do this". Sixty-five of them came back, and for each of these the
+     * requirement key and the flag are **the same word, character for
+     * character** — so the match is a reading rather than a resemblance.
+     * Anything that needed a suffix added or a word swapped is not here: that
+     * would be inferring from a name, which is what every other entry above
+     * was written to avoid. They stay unmatched and stay listed. */
+    arff: { flag: 'arff', label: 'Airport crash tenders', icon: 'flame', source: 'the editor names this flag itself' },
+    brush_truck: { flag: 'brush_truck', label: 'Brush trucks', icon: 'flame', source: 'the editor names this flag itself' },
+    coastal_boat: { flag: 'coastal_boat', label: 'Coastal boats', icon: 'wave', source: 'the editor names this flag itself' },
+    fbi_drone: { flag: 'fbi_drone', label: 'FBI drones', icon: 'star', source: 'the editor names this flag itself' },
+    fire_aviation: { flag: 'fire_aviation', label: 'Fire aviation', icon: 'wind', source: 'the editor names this flag itself' },
+    fire_investigation: { flag: 'fire_investigation', label: 'Fire investigators', icon: 'star', source: 'the editor names this flag itself' },
+    flood_equipment: { flag: 'flood_equipment', label: 'Flood equipment', icon: 'wave', source: 'the editor names this flag itself' },
+    foam: { flag: 'foam', label: 'Foam', icon: 'tank', source: 'the editor names this flag itself' },
+    fwk: { flag: 'fwk', label: 'Fire cranes', icon: 'arm', source: 'the editor names this flag itself' },
+    k9: { flag: 'k9', label: 'K9 units', icon: 'shield', source: 'the editor names this flag itself' },
+    mountain_lift: { flag: 'mountain_lift', label: 'Mountain lifts', icon: 'ladder', source: 'the editor names this flag itself' },
+    mountain_lift_2: { flag: 'mountain_lift_2', label: 'Mountain lifts (2)', icon: 'ladder', source: 'the editor names this flag itself' },
+    police_drone: { flag: 'police_drone', label: 'Police drones', icon: 'shield', source: 'the editor names this flag itself' },
+    riot_police: { flag: 'riot_police', label: 'Riot police', icon: 'shield', source: 'the editor names this flag itself' },
+    search_and_rescue: { flag: 'search_and_rescue', label: 'Search and rescue', icon: 'arm', source: 'the editor names this flag itself' },
+    swat_armored_vehicle: { flag: 'swat_armored_vehicle', label: 'SWAT armoured', icon: 'shield', source: 'the editor names this flag itself' },
+    technical_rescue: { flag: 'technical_rescue', label: 'Technical rescue', icon: 'arm', source: 'the editor names this flag itself' },
 
     /* Patients live under `additional`, not in `requirements`. They are counted
      * into the ambulance row rather than shown as a line of their own.
