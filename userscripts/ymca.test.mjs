@@ -115,15 +115,35 @@ window.__hired = [];
     if (url === '/einsaetze.json') return new Response(JSON.stringify(missions));
     /* The game's own dispatch-order editor, as the question to be answered: does it
      * state the flags per vehicle type, for types nobody owns as well? */
-    if (url === '/aaos') {
-      return new Response(`<html><body><form action="/aaos" method="post">
-        <input type="hidden" name="authenticity_token" value="X">
-        <div id="aao_row_7" vehicle_type_id="7" gwl2wasser="1" gwl2wasser_only="1"
-          water_damage_pump="1"><label>Water Tanker</label>
-          <input type="number" name="aao[vehicle_type_ids][7]" value="2"></div>
-        <div id="aao_row_91" vehicle_type_id="91" hazmat="1" gwgefahrgut="1"><label>Unowned</label>
-          <input type="number" name="aao[vehicle_type_ids][91]" value="0"></div>
-        </form></body></html>`, { headers: { 'content-type': 'text/html' } });
+    if (url === '/aaos/new') {
+      /* The real form, as the game writes it: a checkbox per capability the game has,
+       * and one per type it sells — the type id in the FIELD NAME, never an attribute. */
+      return new Response(`<html><body><form id="new_aao" action="/aaos" method="post">
+        <input name="utf8"><input name="authenticity_token" value="X">
+        <input id="aao_caption" name="aao[caption]"><input name="aao[color]">
+        <select name="aao[category_id]"></select><select name="aao[building_ids][]"></select>
+        <input name="aao[reset]">
+        <ul id="tabs"><li>Fire</li><li>Police</li></ul>
+        <div id="tab_panels">
+          <div id="fire">
+            <input type="checkbox" id="aao_fire" name="aao[fire]">
+            <input type="checkbox" id="aao_dlk" name="aao[dlk]">
+            <input type="checkbox" id="aao_rw" name="aao[rw]">
+            <input type="checkbox" id="aao_gwgefahrgut" name="aao[gwgefahrgut]">
+            <input type="checkbox" id="aao_crew_carrier" name="aao[crew_carrier]">
+            <input type="checkbox" id="vehicle_type_ids_0" name="vehicle_type_ids[0]">
+            <input type="checkbox" id="vehicle_type_ids_4" name="vehicle_type_ids[4]">
+            <input type="checkbox" id="vehicle_type_ids_91" name="vehicle_type_ids[91]">
+          </div>
+          <div id="polizei">
+            <input type="checkbox" id="aao_fustw" name="aao[fustw]">
+            <input type="checkbox" id="vehicle_type_ids_10" name="vehicle_type_ids[10]">
+          </div>
+        </div></form></body></html>`, { headers: { 'content-type': 'text/html' } });
+    }
+    if (url === '/api/v1/aaos') {
+      return new Response(JSON.stringify([{ id: 1, caption: 'x', vehicle_classes: ['fire'] }]),
+        { headers: { 'content-type': 'application/json' } });
     }
     if (url === '/api/credits') return new Response(JSON.stringify({ credits_user_current: 500000 }));
     let m = url.match(/^\/vehicles\/(\d+)\/edit$/);
@@ -364,29 +384,36 @@ await pg.evaluate(() => {
 });
 
 // ---- what the game's own dispatch orders know ----
-// An AAO is a filter the player built in the game's own editor, so a button that ticks exactly
-// the vehicles carrying rw="1" is the game saying which flag means a heavy rescue. The open
-// question is whether the editor states those flags per TYPE — including types nobody owns,
-// which is the one thing no page has ever answered. Nobody here has seen that page, so the
-// paths are tried and what answers is reported by its shape.
+// The AAO editor is a form and the form is the answer: a checkbox per capability the game has —
+// aao[fire], aao[dlk], aao[gwgefahrgut], aao[crew_carrier] — because an order can say "every
+// vehicle that can do this", and one per type it sells beside them. THE TYPE ID IS IN THE FIELD
+// NAME, not in an attribute, which is what the first read got wrong: it looked for
+// vehicle_type_id="4", found nothing, and reported "no page named a vehicle type at all" about
+// a page listing every one of them.
 await pg.click('[data-do="aao"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('verdict'));
 const aao = JSON.parse(await pg.inputValue('#ymca-diag-out'));
 console.log('dispatch orders   :', aao.verdict);
-assert.match(aao.verdict, /DO state capabilities/,
-  'a page whose type rows carry flags is the answer this button exists for');
-assert.deepEqual(aao.capabilitiesByType['7'],
-  ['gwl2wasser', 'gwl2wasser_only', 'water_damage_pump'],
-  'the flags come off the type row exactly as they come off a checkbox');
-assert.ok(aao.capabilitiesByType['91'],
-  'INCLUDING a type nobody owns, which is the whole point');
-// The player's own configuration is not in it: no order names, no counts.
-const asText = JSON.stringify(aao);
-assert.ok(!/Water Tanker|Unowned/.test(asText), 'no labels off that page ride along');
-assert.ok(!/"2"|value/.test(JSON.stringify(aao.pages['/aaos'].formFields)),
-  'a field name is the game\'s; its value is the player\'s, so only names come back');
-console.log('dispatch orders   :', JSON.stringify(aao.pages['/aaos'].formFields[0].fieldNames));
-// And a page that names types but states no flags says so, rather than looking broken.
+assert.deepEqual(aao.flagVocabulary,
+  ['crew_carrier', 'dlk', 'fire', 'fustw', 'gwgefahrgut', 'rw'],
+  'every capability the game has a word for, including ones no vehicle here carries');
+assert.deepEqual(aao.typeIdsTheGameSells, [0, 4, 10, 91],
+  'and every type it sells, read off the field name — type 0 included, because zero is a type');
+assert.deepEqual(aao.orderSettings.sort(),
+  ['building_ids', 'caption', 'category_id', 'color', 'reset'],
+  'an order\'s own settings are told apart from its capabilities rather than counted as flags');
+// The tabs are the game's own grouping: a branch, never a capability.
+console.log('dispatch tabs     :', JSON.stringify(aao.byTab));
+assert.deepEqual(aao.byTab.polizei, { flags: ['fustw'], typeIds: [10] },
+  'which flags and which types share a tab is branch membership, and it is reported as that');
+// And the question it does NOT answer stays open and says so, rather than being inferred.
+assert.deepEqual(aao.capabilitiesByType, {},
+  'flag boxes and type boxes are siblings on a form, never a mapping');
+assert.match(aao.verdict, /never says which type carries which/,
+  'so the verdict says plainly what is still missing');
+// The player's own configuration is not in it.
+assert.ok(!/hotkey|building_ids/.test(JSON.stringify(aao.flagVocabulary)),
+  'a setting is not a capability');
 
 // ---- the catalogue reads itself, so no install waits on a release ----
 // The buy pages name every type the game sells, and the sweep reads them on its own a few

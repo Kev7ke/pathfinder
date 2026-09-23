@@ -793,14 +793,34 @@ rescue vehicle. `firetrucks` — `fire`, `platform_trucks` — `dlk`,
 `ambulances` — `any_rtw`: every one of those carries that sentence as its
 `source`, and none of them was guessed. It was done by hand, one key at a time.
 
-**Diagnostics — What the dispatch orders know** asks whether the editor pages
-state those flags per *type* rather than per vehicle. If they do, one page read
-answers the question below for good, because an editor has to list every type
-the game sells — including the ones nobody owns. Nobody here has seen that
-page, so nothing is guessed: the paths are tried and what answers is reported by
-its shape, with `verdict` saying in one line whether the flags were there. It
-takes **no dispatch-order names and no counts**: a field's name is the game's,
-its value is the player's configuration, and none of that would help anyway.
+**The editor's form is the vocabulary, stated by the game.** `/aaos/new` carries
+a checkbox per capability the game has — `aao[fire]`, `aao[dlk]`, `aao[rw]`,
+`aao[gwl2wasser_only]`, `aao[gwgefahrgut]`, `aao[crew_carrier]` — because an
+order can say "every vehicle that can do this". That is **every flag the game
+has a word for, including ones no vehicle on this account carries**, which is
+exactly what a requirement key is matched against: a wider vocabulary is a
+shorter `unmatched` list. Beside them sit `vehicle_type_ids[<id>]`, one per type
+the game sells.
+
+**The type id is in the field name, not in an attribute**, and the first read
+got that wrong: it looked for `vehicle_type_id="4"`, found nothing, and reported
+"no page named a vehicle type at all" about a page listing every one of them.
+**Ask a form for its field names before deciding it is empty.**
+
+**What the editor does not state is which flags a type carries.** The flag boxes
+and the type boxes are siblings on a form, not a mapping; they share a tab, and
+a tab is a *branch* rather than a capability. So `byTab` is reported as branch
+membership and nothing is inferred from it — the per-type flags stay where they
+always were, on a vehicle.
+
+`/api/v1/aaos` answers with the player's own saved orders:
+`id, caption, color, column, hotkey, reset, text_color, automatic_text_color,
+aao_category_id, vehicle_classes`. `vehicle_classes` is the flag list an order
+selects on, which is the same vocabulary from a second place — and the rest of
+it is configuration, so none of it is taken.
+
+**Diagnostics — What the dispatch orders know** reads that form and takes
+**field names only**: no order names, no counts, nothing this account owns.
 
 **There is no page that states what an unowned type covers.** The flags are
 written per vehicle *instance*, onto that vehicle's checkbox and its own page.

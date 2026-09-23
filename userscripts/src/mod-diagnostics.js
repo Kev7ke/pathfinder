@@ -585,7 +585,80 @@ function interfaceProbe() {
  * a player called their dispatch orders and how many of each they send is their
  * own configuration, and none of it would help.
  */
-const AAO_PAGES = ['/aaos', '/aaos/new', '/api/v1/aaos', '/einsatzmittel'];
+const AAO_PAGES = ['/aaos', '/aaos/new', '/api/v1/aaos'];
+
+/* What an `aao[...]` field is when it is NOT a capability: the order's own
+ * settings, read off the real form rather than assumed. Everything else in
+ * those brackets is the game naming a flag. */
+const AAO_SETTINGS = new Set([
+    'caption', 'color', 'text_color', 'automatic_text_color', 'column_number',
+    'category_id', 'category', 'building_ids', 'hotkey', 'equipment_mode',
+    'reset', 'name', 'id', 'position', 'user_id', 'equipment',
+]);
+
+const AAO_FIELD = /^aao\[([a-z][a-z0-9_]*)\]$/;
+const AAO_TYPE_FIELD = /^vehicle_type_ids\[(\d+)\]$/;
+
+/**
+ * The editor's own vocabulary, and the types it lists.
+ *
+ * `/aaos/new` is a form and the form is the answer. Every capability the game
+ * has is a checkbox called `aao[<flag>]` — `aao[fire]`, `aao[dlk]`,
+ * `aao[gwgefahrgut]`, `aao[crew_carrier]` — because a dispatch order can say
+ * "every vehicle that can do this". Beside them sit `vehicle_type_ids[<id>]`,
+ * one per type the game sells, because an order can also name a type outright.
+ *
+ * THE TYPE ID IS IN THE FIELD NAME, NOT IN AN ATTRIBUTE, which is what the
+ * first read got wrong: it looked for `vehicle_type_id="4"` and found nothing,
+ * then reported "no page named a vehicle type at all" about a page listing
+ * every one of them.
+ *
+ * What this does NOT give is which flags a type carries: the flag boxes and the
+ * type boxes are siblings, not a mapping. They share a tab, and a tab is a
+ * branch rather than a capability. So the vocabulary is measured here and the
+ * per-type flags are still only ever read off a vehicle.
+ */
+function aaoForm(doc) {
+    const flags = new Set();
+    const settings = new Set();
+    const typeIds = new Set();
+    for (const el of doc.querySelectorAll('input[name], select[name]')) {
+        const name = el.getAttribute('name') || '';
+        const type = AAO_TYPE_FIELD.exec(name);
+        if (type) { typeIds.add(Number(type[1])); continue; }
+        const field = AAO_FIELD.exec(name.replace(/\[\]$/, ''));
+        if (!field) continue;
+        (AAO_SETTINGS.has(field[1]) ? settings : flags).add(field[1]);
+    }
+
+    /* The tabs are the game's own grouping. Which flags and which types sit in
+     * the same panel says which branch they belong to — not what a type can
+     * do, and the difference matters. */
+    const panels = {};
+    for (const panel of doc.querySelectorAll('#tab_panels > div[id], .tab-pane[id]')) {
+        const inside = aaoPanel(panel);
+        if (inside.flags.length || inside.typeIds.length) panels[panel.id] = inside;
+    }
+    return {
+        flagVocabulary: [...flags].sort(),
+        orderSettings: [...settings].sort(),
+        typeIds: [...typeIds].sort((x, y) => x - y),
+        byTab: panels,
+    };
+}
+
+function aaoPanel(panel) {
+    const flags = [];
+    const typeIds = [];
+    for (const el of panel.querySelectorAll('input[name]')) {
+        const name = el.getAttribute('name') || '';
+        const type = AAO_TYPE_FIELD.exec(name);
+        if (type) { typeIds.push(Number(type[1])); continue; }
+        const field = AAO_FIELD.exec(name);
+        if (field && !AAO_SETTINGS.has(field[1])) flags.push(field[1]);
+    }
+    return { flags: [...new Set(flags)].sort(), typeIds: [...new Set(typeIds)].sort((x, y) => x - y) };
+}
 
 /** A flag is a plain attribute set to `1`, the way a checkbox writes one. */
 function aaoFlagsOn(el) {
@@ -598,19 +671,38 @@ function aaoFlagsOn(el) {
     return flags;
 }
 
+/**
+ * WHAT THE GAME'S OWN DISPATCH ORDERS KNOW.
+ *
+ * An AAO is a filter the player built in the game's own editor, and a button
+ * labelled "F-HRV" that ticks exactly the vehicles carrying `rw="1"` is the
+ * game itself saying which flag means a heavy rescue vehicle. Half of
+ * `MM_REQUIREMENTS` is sourced that way already — by hand, one key at a time.
+ *
+ * The editor states **the whole vocabulary**: every capability the game has,
+ * including ones no vehicle on this account carries. That is what requirement
+ * keys are matched against, so a wider vocabulary is a narrower `unmatched`
+ * list. It also names **every type the game sells**, by id.
+ *
+ * It does not say which flags a type carries. Those two are siblings on the
+ * form rather than a mapping, so that question stays where it was: on a
+ * vehicle. Nothing here infers one from the other.
+ *
+ * No dispatch-order names and no counts: a field's NAME is the game's, its
+ * value is the player's configuration.
+ */
 async function aaoShape(ctx) {
     const pages = {};
+    let form = null;
+    const capabilitiesByType = {};
     let typesWithFlags = 0;
     let typesSeen = 0;
-    const flagVocabulary = new Set();
-    const capabilitiesByType = {};
 
     for (const path of AAO_PAGES) {
         try {
             const res = await fetch(path, { credentials: 'same-origin' });
             if (!res.ok) { pages[path] = `HTTP ${res.status}`; continue; }
             const text = await res.text();
-            /* JSON answers for itself: the key names and nothing under them. */
             if ((res.headers.get('content-type') || '').includes('json')) {
                 let data = null;
                 try { data = JSON.parse(text); } catch (e) { /* not JSON after all */ }
@@ -623,39 +715,28 @@ async function aaoShape(ctx) {
                 continue;
             }
             const doc = new DOMParser().parseFromString(text, 'text/html');
-            /* EVERY ELEMENT THAT NAMES A TYPE, whatever it is built from. A row,
-             * a label, an input — the question is only whether the flags ride
-             * along with the id. */
-            const carriers = [...doc.querySelectorAll('[vehicle_type_id], [data-vehicle-type-id]')];
-            for (const el of carriers) {
+            const read = aaoForm(doc);
+            if (read.flagVocabulary.length || read.typeIds.length) form = { path, ...read };
+
+            /* The original question, still asked: does anything on the page
+             * carry a type id AND the flags together? */
+            for (const el of doc.querySelectorAll('[vehicle_type_id], [data-vehicle-type-id]')) {
                 typesSeen += 1;
                 const id = el.getAttribute('vehicle_type_id')
                     || el.getAttribute('data-vehicle-type-id');
                 const flags = aaoFlagsOn(el);
                 if (!flags.length) continue;
                 typesWithFlags += 1;
-                for (const f of flags) flagVocabulary.add(f);
                 if (id !== null && id !== '') capabilitiesByType[id] = flags.sort();
             }
             pages[path] = {
                 kind: 'html',
-                /* Structure only: what the page is built from, never what it
-                 * says. A form field's NAME is the game's; its value is the
-                 * player's, so only the name comes back. */
-                formFields: [...doc.querySelectorAll('form')].slice(0, 3).map((f) => ({
-                    action: (f.getAttribute('action') || '').replace(/\d+/g, '#'),
-                    method: (f.getAttribute('method') || 'get').toLowerCase(),
-                    fieldNames: [...f.elements].map((x) => x.name).filter(Boolean).slice(0, 25),
-                })),
+                flagsOnForm: read.flagVocabulary.length,
+                typesOnForm: read.typeIds.length,
+                tabs: Object.keys(read.byTab),
                 elementsWithId: [...doc.querySelectorAll('[id]')]
                     .map((el) => `${el.tagName.toLowerCase()}#${el.id.replace(/\d+/g, '#')}`)
                     .slice(0, 30),
-                typeCarriers: carriers.length,
-                /* The answer, in one line: do the type rows carry flags? */
-                attributesOnTypeCarriers: carriers.length
-                    ? [...new Set(carriers.slice(0, 20).flatMap(
-                        (el) => [...el.attributes].map((a) => a.name)))].sort()
-                    : [],
             };
         } catch (err) {
             pages[path] = `could not be read: ${err.message}`;
@@ -663,25 +744,30 @@ async function aaoShape(ctx) {
         await ctx.sleep(200);
     }
 
+    const vocab = form ? form.flagVocabulary : [];
     return {
-        note: 'Whether the game\'s own dispatch-order pages state what a vehicle type covers. '
-            + 'Structure and capability flags only \u2014 no dispatch-order names, no counts, '
-            + 'nothing about what this account owns.',
+        note: 'The capability vocabulary and the type ids the game\'s own dispatch-order editor '
+            + 'states. Field NAMES only \u2014 no order names, no counts, nothing this account owns.',
         ymca: YMCA.version,
         at: new Date().toISOString(),
         pages,
+        /* THE PRIZE. Every capability the game has a word for, whether or not
+         * any vehicle here carries it. */
+        flagVocabulary: vocab,
+        typeIdsTheGameSells: form ? form.typeIds : [],
+        orderSettings: form ? form.orderSettings : [],
+        byTab: form ? form.byTab : {},
+        /* Still asked, still separate: flags stated per type would end the need
+         * to learn them off owned vehicles. Siblings on a form are not that. */
+        capabilitiesByType,
         typeCarriersSeen: typesSeen,
         typeCarriersWithFlags: typesWithFlags,
-        /* THE WHOLE POINT. Empty means the flags are not on those pages either,
-         * and the dataset goes on growing one owned vehicle at a time. */
-        capabilitiesByType,
-        flagVocabulary: [...flagVocabulary].sort(),
-        verdict: typesWithFlags
-            ? `the dispatch-order pages DO state capabilities: ${typesWithFlags} of `
-              + `${typesSeen} type rows carry flags`
-            : (typesSeen
-                ? `the pages name ${typesSeen} type rows but state no flags on them`
-                : 'no page named a vehicle type at all'),
+        verdict: vocab.length
+            ? `the editor names ${vocab.length} capabilities and `
+              + `${form.typeIds.length} vehicle types`
+              + (typesWithFlags ? `, and ${typesWithFlags} rows state both together`
+                  : ', but never says which type carries which')
+            : 'no dispatch-order form answered',
     };
 }
 
