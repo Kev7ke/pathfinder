@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.51';
+export const VERSION = '0.0.52';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -196,6 +196,10 @@ function build() {
         read('userscripts/src/mod-highfive.js'),
         /* EagleEye is a group and ShutEye is in it, so the group registers
          * first: ElementFriend lists in register order. */
+        /* EasyEdit is a group too, and its members follow it for the same
+         * reason: ElementFriend lists in register order. */
+        read('userscripts/src/mod-easyedit.js'),
+        read('userscripts/src/mod-switchdispatch.js'),
         read('userscripts/src/mod-eagleeye.js'),
         read('userscripts/src/mod-shuteye.js'),
         read('userscripts/src/mod-stationfascination.js'),

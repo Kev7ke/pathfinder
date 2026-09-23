@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.51
+// @version      0.0.52
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.51',
+    version: '0.0.52',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1067,6 +1067,11 @@ const ICONS = {
         + '<path d="M2 29h30"/>',
     elementfriend: '<circle cx="17" cy="17" r="4"/><path d="M17 4v5M17 25v5M4 17h5M25 17h5"/>'
         + '<path d="M8.4 8.4l3.5 3.5M22.1 22.1l3.5 3.5M25.6 8.4l-3.5 3.5M11.9 22.1l-3.5 3.5"/>',
+    easyedit: '<path d="M6 24 L20 10 L24 14 L10 28 H6 Z"/><path d="M19 7 L21 5a2 2 0 0 1 3 0'
+        + ' l3 3a2 2 0 0 1 0 3 l-2 2"/><path d="M20 30 H30"/>',
+    switchdispatch: '<rect x="4" y="13" width="10" height="10" rx="1"/>'
+        + '<rect x="18" y="13" width="10" height="10" rx="1"/>'
+        + '<path d="M11 8 H24 M21 5 L24 8 L21 11"/>',
     highfive: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'
         + '<path d="M19 16v-7a2 2 0 0 1 4 0v12a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7v-6a2 2 0 0 1 4 0"/>',
     default: '<rect x="6" y="6" width="9" height="9"/><rect x="19" y="6" width="9" height="9"/>'
@@ -1386,6 +1391,8 @@ const PATHS = [
 
 YMCA.register({
     id: 'stepops',
+    optional: true,
+    defaultOn: true,
     title: 'StepOps',
     tagline: 'What to build next',
     description: 'Reads your stations and the mission list straight from the game. '
@@ -5039,6 +5046,8 @@ async function rrHire(buildingId, days) {
 
 YMCA.register({
     id: 'recruitroom',
+    optional: true,
+    defaultOn: true,
     title: 'RecruitDude',
     tagline: 'Hiring, every station at once',
 
@@ -6160,27 +6169,85 @@ function efWireSwitches(root, ctx, after) {
     });
 }
 
+/**
+ * One tile: what it is, what it does in a sentence or three, and its switch.
+ *
+ * THE DESCRIPTION IS THE POINT OF THE PAGE. A tagline of four words tells
+ * somebody which tool this is and nothing about whether they want it, and "do
+ * I want it" is the only question this page exists to answer. So the tile
+ * carries the module's own `description` — the same sentences its own panel
+ * heads itself with, so there is one wording to keep true rather than two.
+ *
+ * A GROUP SAYS WHAT IS IN IT instead, by name. "Switch this off and every one
+ * of them goes" means nothing until the list is on the tile.
+ */
+function efTile(m) {
+    const on = YMCA.isOn(m);
+    const inside = YMCA.inGroup ? YMCA.inGroup(m.id) : [];
+    const holds = inside.length
+        ? `<span class="ymca-dim" style="font-size:12px">Holds ${
+            inside.map((x) => esc(x.title)).join(', ')}</span>`
+        : '';
+    return `<div class="ymca-tile el ${on ? '' : 'off'}" data-el="${esc(m.id)}"
+      role="button" tabindex="0">
+      ${iconFor(m.id)}<b>${esc(m.title)}</b>
+      <span>${esc(m.description || m.tagline || '')}</span>
+      ${holds}
+      ${!inside.length && m.mainTile === false
+        ? '<span class="ymca-dim" style="font-size:12px">Lives in the game’s own pages</span>'
+        : ''}
+      <div class="ymca-foot">
+        <span class="ymca-dim" style="font-size:12px">${m.settings
+        ? 'Open for settings' : 'Nothing to set'}</span>
+        ${efSwitch(m.id, on)}
+      </div>
+    </div>`;
+}
+
+/**
+ * A group's own page of tiles — one renderer, not one per group.
+ *
+ * EagleEye had a copy of this inside it, and the moment EasyEdit wanted the
+ * same page there would have been two copies to keep in step. Any group gets
+ * it by calling this from its `settings`.
+ */
+function efGroupTiles(el, ctx, groupId, lead) {
+    const inside = YMCA.inGroup(groupId);
+    el.innerHTML = `
+    <p class="ymca-lead">${esc(lead)}</p>
+    <div class="ymca-tiles">
+      ${inside.map(efTile).join('')}
+      <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
+        <span>This is where the next ones land.</span></div>
+    </div>`;
+
+    /* A member's settings replace the whole panel, and Back comes here rather
+     * than all the way out to the switchboard. */
+    const panel = el.closest('#ymca-panel') || el;
+    const self = YMCA.modules.find((m) => m.id === groupId);
+    el.querySelectorAll('[data-el]').forEach((tile) => {
+        tile.addEventListener('click', (e) => {
+            if (e.target.closest('.ymca-switch')) return;
+            const mod = YMCA.modules.find((m) => m.id === tile.dataset.el);
+            if (mod) {
+                efOpen(panel, ctx, mod,
+                    () => efOpen(panel, YMCA.contextFor(groupId), self));
+            }
+        });
+    });
+    efWireSwitches(el, ctx, (id, on) => {
+        el.querySelector(`[data-el="${id}"]`)?.classList.toggle('off', !on);
+    });
+}
+
 function efTiles(el, ctx) {
     const mods = efElements();
     el.innerHTML = `
-    <p class="ymca-lead">A switch takes the tool out of the launcher <em>and</em> out of the
-      game's own pages &mdash; nothing of it runs. Open a tile for what it can be set to.</p>
+    <p class="ymca-lead">Everything YMCA is made of, one tile each. A switch takes that part
+      out of the launcher <em>and</em> out of the game's own pages &mdash; nothing of it runs.
+      Open a tile for what it can be set to.</p>
     <div class="ymca-tiles">
-      ${mods.map((m) => {
-        const on = YMCA.isOn(m);
-        return `<div class="ymca-tile el ${on ? '' : 'off'}" data-el="${esc(m.id)}"
-          role="button" tabindex="0">
-          ${iconFor(m.id)}<b>${esc(m.title)}</b><span>${esc(m.tagline || '')}</span>
-          ${m.mainTile === false
-        ? '<span class="ymca-dim" style="font-size:12px">Lives in the game’s own pages</span>'
-        : ''}
-          <div class="ymca-foot">
-            <span class="ymca-dim" style="font-size:12px">${m.settings
-        ? 'Open for settings' : 'Nothing to set'}</span>
-            ${efSwitch(m.id, on)}
-          </div>
-        </div>`;
-    }).join('')}
+      ${mods.map(efTile).join('')}
       <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
         <span>This is where the next elements land.</span></div>
     </div>`;
@@ -6264,7 +6331,7 @@ YMCA.register({
 });
 
 /* --------------------------------------------------------------------------
- * HighFive — clicking through status 5.
+ * Status 5 Helper (id: highfive) — clicking through the transports.
  *
  * Status 5 is a vehicle transporting: an ambulance taking a patient to a
  * hospital, a patrol car taking somebody to a prison. Each one wants a
@@ -6929,6 +6996,112 @@ function hfSectionRows(id) {
 }
 
 /** Sort, then hide what the player did not ask to see. */
+/**
+ * One destination, read off whatever it states its figures in.
+ *
+ * A hospital is a row and says it in cells. A prison is a single `<a>` among
+ * thirty-one others and says it in its own text:
+ *
+ *   NYPD | 7th Precinct(Available cells: 2, Distance: 0.69 km, owner's tax: 0%)
+ *
+ * `hfParts` hands both back as pieces, so one set of rules reads both: a figure
+ * carries its unit, free space is `n / n`, tax ends in `%`. The only thing the
+ * bracketed form adds is the word in front of the figure, and `hfValue` takes
+ * that off.
+ *
+ * FREE SPACE IS THE ONE PLAIN COUNT A DESTINATION STATES. The prison list says
+ * `Free cells: 1` where the hospital table says `29 / 30`, so where no piece
+ * reads as `n / n` the first piece that is a plain whole number — and is
+ * neither the distance nor the tax, both of which are read by shape first — is
+ * that count. Nothing here reads the word, so it is the same rule in any
+ * language the game is played in.
+ */
+function hfRead(block) {
+    const link = block.matches?.(HF_PICK_LINK) ? block : block.querySelector(HF_PICK_LINK);
+    if (!link) return null;
+    const parts = hfParts(block);
+    /* On a row, cell 0 repeats everything for a narrow screen, so it is never
+     * asked for a figure — only for the name. A block that is not a row states
+     * its name in the same first piece and nothing twice. */
+    const rest = block.cells ? parts.slice(1) : parts;
+    const values = rest.map(hfValue);
+    const distance = values.find((t) => HF_DISTANCE_VALUE.test(t));
+    const beds = values.map((t) => /^(\d+)\s*\/\s*(\d+)$/.exec(t)).find(Boolean);
+    const tax = values.map((t) => /^(\d[\d.,]*)\s*%$/.exec(t)).find(Boolean);
+    const count = beds ? null : values.find((t) => /^\d+$/.test(t));
+    const label = block.querySelector?.('.label');
+    const said = (label?.textContent || '').trim();
+    return {
+        block,
+        name: ((block.cells ? block.cells[0]?.firstChild?.textContent : null)
+            || parts[0] || '').trim().slice(0, 60),
+        km: distance ? hfNum(distance) : null,
+        free: beds ? Number(beds[1]) : (count ? Number(count) : null),
+        tax: tax ? hfNum(tax[1]) : null,
+        // Yes, no, or the page did not say — and "did not say" is not "no".
+        department: /^(yes|ja)$/i.test(said) ? true : /^(no|nein)$/i.test(said) ? false : null,
+    };
+}
+
+/**
+ * Which one is the best of a list — and it is only ever MARKED.
+ *
+ * Treatment first: a patient who can be treated where he lands is the whole
+ * point, so a hospital with the department wins over a nearer one without. Only
+ * where none of them has it does it become a plain distance case.
+ *
+ * Then the nearest of those. Then, and only then, the swap: if the nearest
+ * charges and there is a free one in the same group, the free one is the pick.
+ * That is a saving rather than a detour, because everything still on screen is
+ * already inside the range the player set.
+ *
+ * NOTHING IS PRESSED, AND THAT IS THE WHOLE DESIGN. The mark says which one
+ * this would have chosen; the click is the player's, on the game's own link.
+ * A destination with no room left is not a candidate, and one whose distance
+ * cannot be read is left out rather than assumed to be near.
+ */
+function hfBest(rows) {
+    const usable = rows.filter((r) => r.km !== null && (r.free === null || r.free > 0));
+    if (!usable.length) return null;
+    const treating = usable.filter((r) => r.department === true);
+    const pool = treating.length ? treating : usable;
+    const byDistance = pool.slice().sort((a, b) => a.km - b.km);
+    const nearest = byDistance[0];
+    const why = (pick, reason) => ({ pick, why: reason, treats: !!treating.length });
+    if (!(nearest.tax > 0)) return why(nearest, 'nearest');
+    const free = byDistance.find((r) => r.tax === 0);
+    return free ? why(free, 'nearest free') : why(nearest, 'nearest');
+}
+
+/**
+ * Put the mark on, and take every other one off.
+ *
+ * GREEN ON THE CELLS, NOT ON THE ROW. Bootstrap's table styling and the game's
+ * dark theme both put a background on `td`, so a colour on the `<tr>` sits
+ * behind them and nothing shows. `.success` is the game's own class for this
+ * and it is defined for both, so it goes on the row AND on every cell — which
+ * also means it follows the theme rather than carrying a colour of YMCA's own.
+ *
+ * And green says nothing on a list of green buttons: a block that is not a row
+ * is marked `active`, Bootstrap's own word for the one that is chosen.
+ */
+function hfMark(blocks, best) {
+    for (const el of blocks) {
+        el.classList.remove('success', 'active');
+        if (el.cells) for (const td of el.cells) td.classList.remove('success');
+        el.removeAttribute('data-ymca-best');
+    }
+    if (!best) return;
+    const el = best.pick.block;
+    if (el.cells) {
+        el.classList.add('success');
+        for (const td of el.cells) td.classList.add('success');
+    } else {
+        el.classList.add('active');
+    }
+    el.setAttribute('data-ymca-best', best.why);
+}
+
 function hfApply(ctx, cfg) {
     const columns = hfColumns();
     /* Nearest first is the ground state, not a choice somebody has to make
@@ -6940,9 +7113,11 @@ function hfApply(ctx, cfg) {
     let shown = 0;
     let total = 0;
 
+    const marked = [];
     for (const group of hfGroups()) {
         const blocks = group.blocks;
         if (!blocks.length) continue;
+        const visible = [];
         /* "The first ten" is ten per list. Inside a mission window every
          * vehicle carrying a prisoner has a list of its own, and one running
          * count across all of them left the later vehicles with nothing
@@ -6981,11 +7156,23 @@ function hfApply(ctx, cfg) {
             }
             if (!hide && cfg.limit && shown >= cfg.limit) hide = true;
             el.style.display = hide ? 'none' : '';
-            if (!hide) { shown += 1; total += 1; }
+            if (!hide) { shown += 1; total += 1; visible.push(el); }
         }
+
+        /* THE BEST ONE IS MARKED, NEVER PRESSED. It is judged on what is still
+         * on screen, so the range and the sections the player set are already
+         * in it, and it is redone on every redraw — a mark that stayed put when
+         * the range changed would be pointing at a hospital that is no longer
+         * offered. One per list, because in a mission window each vehicle
+         * carrying a prisoner has a list of its own and the nearest cell for
+         * one of them is the wrong answer for another. */
+        const best = cfg.best === false ? null
+            : hfBest(visible.map(hfRead).filter(Boolean));
+        hfMark(blocks, best);
+        if (best) marked.push(best);
     }
     ctx.log.info('destinations filtered', `${total} shown, by ${cfg.sortBy || 'page order'}`);
-    return total;
+    return { total, marked };
 }
 
 /**
@@ -7034,7 +7221,7 @@ function hfOnPickPage(ctx) {
     bar.style.margin = '6px 0';
     bar.innerHTML = `
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
-      <b>HighFive</b>
+      <b>Status 5 Helper</b>
       <label style="font-weight:400;margin:0;cursor:pointer">
         <input type="checkbox" id="hf-advance" ${cfg.advance !== false ? 'checked' : ''}>
         Go straight to the next transport</label>
@@ -7068,8 +7255,12 @@ function hfOnPickPage(ctx) {
         ['alliance', 'The alliance\u2019s only']].map(([v, t]) => `<option value="${v}"${
         v === (cfg.who || 'all') ? ' selected' : ''}>${t}</option>`).join('')}
         </select></label>` : ''}
+      <label style="font-weight:400;margin:0;cursor:pointer">
+        <input type="checkbox" id="hf-best" ${cfg.best !== false ? 'checked' : ''}>
+        Mark the best one</label>
       <span style="opacity:.75" id="hf-count"></span>
-    </div>`;
+    </div>
+    <div style="margin-top:7px" id="hf-best-said"></div>`;
 
     /* Above whatever holds the destinations. `before()` needs a parent, so a
      * table sitting directly in <body> falls back to going in at the top. */
@@ -7082,6 +7273,7 @@ function hfOnPickPage(ctx) {
         advance: bar.querySelector('#hf-advance').checked,
         sortBy: bar.querySelector('#hf-sort')?.value || '',
         sortDown: !!bar.querySelector('#hf-down')?.checked,
+        best: !!bar.querySelector('#hf-best')?.checked,
         limit: Number(bar.querySelector('#hf-limit').value) || 0,
         max: Number(bar.querySelector('#hf-max')?.value) || 0,
         who: bar.querySelector('#hf-who')?.value || 'all',
@@ -7105,9 +7297,22 @@ function hfOnPickPage(ctx) {
             max.title = effective ? '' : 'no column in this table reads as a number';
             max.nextElementSibling.textContent = effective ? effective.label : '\u2014';
         }
-        const shown = hfApply(ctx, now);
+        const { total: shown, marked } = hfApply(ctx, now);
         bar.querySelector('#hf-count').textContent = shown < total
             ? `${shown} of ${total} shown` : '';
+        /* WHICH ONE AND WHY, IN WORDS, because a green row on its own is a
+         * recommendation nobody can check. The click stays the player's, so
+         * the reason has to be readable before they make it. */
+        const said = bar.querySelector('#hf-best-said');
+        if (said) {
+            const first = marked[0];
+            said.innerHTML = !first ? ''
+                : `<b>Best: ${esc(first.pick.name)}</b> · ${first.pick.km} away${
+                    first.pick.free !== null ? ` · ${first.pick.free} free` : ''}${
+                    first.treats ? ` · can treat` : ''} <span style="opacity:.75">(${
+                    esc(first.why)}${marked.length > 1
+                        ? `, and one per list in ${marked.length} lists` : ''})</span>`;
+        }
     };
     bar.addEventListener('change', redraw);
     // A number field only fires `change` when it loses focus, and a range you
@@ -7248,7 +7453,7 @@ function hfPaintButton(ctx) {
     if (!btn) return;
     const on = hfCfg(ctx).advance !== false;
     btn.className = `btn btn-xs pull-right ${on ? 'btn-success' : 'btn-danger'}`;
-    btn.textContent = `HighFive: ${on ? 'On' : 'Off'}`;
+    btn.textContent = `Status 5: ${on ? 'On' : 'Off'}`;
 }
 
 function hfMountButton(ctx) {
@@ -7274,12 +7479,15 @@ function hfMountButton(ctx) {
 }
 
 YMCA.register({
+    /* The id stays `highfive`: it is the key every stored setting is filed
+     * under, and renaming it would read as a fresh install to anybody who had
+     * already set a range. Only what the player sees changed. */
     id: 'highfive',
-    title: 'HighFive',
+    title: 'Status 5 Helper',
     tagline: 'Click through the transports',
-    description: 'Picks a hospital or a prison for every vehicle in status 5, one after the '
-        + 'next. It does not work yet — the game’s own window has not been seen from '
-        + 'this side.',
+    description: 'Sorts the hospitals and prisons a transporting vehicle can go to, nearest '
+        + 'first, and marks the best one — treatment, then distance, then the free one. '
+        + 'You click it; it then follows the game’s own link to the next transport.',
 
     /* An element tile, so it is never in the launcher: its work happens in the
      * game's own pages, and a tile on the front would open a panel that does
@@ -7323,6 +7531,211 @@ YMCA.inject('highfive', (ctx) => {
 });
 
 /* --------------------------------------------------------------------------
+ * EasyEdit — the game's own settings, where you already are.
+ *
+ * A group rather than a tool. Everything under it takes a setting the game
+ * keeps two or three clicks away and puts the game's own control for it on the
+ * page you are already looking at. Nothing under it invents a request: the
+ * control it offers is the game's own, moved, so what gets sent is what the
+ * game would have sent.
+ *
+ * A module joins by declaring `group: 'easyedit'`. ElementFriend then lists it
+ * inside this tile rather than beside it, and switching EasyEdit off takes
+ * every one of them with it.
+ * ------------------------------------------------------------------------ */
+
+YMCA.register({
+    id: 'easyedit',
+    title: 'EasyEdit',
+    tagline: 'Settings where you already are',
+    description: 'Takes a setting the game keeps behind two or three clicks and puts its own '
+        + 'control on the page you are already on. Every one of them moves the game’s own '
+        + 'field rather than building a request, and every one asks before it saves.',
+
+    mainTile: false,
+    optional: true,
+    defaultOn: true,
+
+    settings(el, ctx) {
+        efGroupTiles(el, ctx, 'easyedit',
+            'Each of these moves one of the game’s own fields. Nothing is sent until you '
+            + 'press the button that says what it will do.');
+    },
+});
+
+/* --------------------------------------------------------------------------
+ * SwitchDispatchCenter — which dispatch centre a station answers to, up top.
+ *
+ * The game already has the control. It is a plain `<select>` in the building's
+ * own form, down the page with everything else a station can be set to:
+ *
+ *   <select name="building[leitstelle_building_id]"
+ *           id="building_leitstelle_building_id">
+ *     <option value=""></option>
+ *     <option value="5694841">EMSManiacs</option>
+ *     <option selected="selected" value="5677680">NY</option>
+ *   </select>
+ *
+ * And the answer is already at the top of the page, in the navigation row —
+ * `#building-navigation-container`, Previous building, the centre's own name as
+ * a button, Next building. So the one place the answer is *shown* is not the
+ * place it can be *changed*, and moving a run of stations means scrolling down
+ * and back up once per station.
+ *
+ * THE CONTROL IS THE GAME'S OWN, MOVED. Nothing here builds a request. The
+ * dropdown sets the value on the game's own `<select>`, fires the `change` the
+ * game listens for, and submits the game's own form — which is what keeps the
+ * CSRF token and every unrelated setting on that page intact. Where the select
+ * is not in the page there is nothing to mirror, so nothing is offered.
+ *
+ * AND IT ASKS FIRST. Picking from a dropdown is one slip away from moving a
+ * station you meant to look at, so the pick only arms a button that names what
+ * it will do — "Move to LI" — and says what it is moving from. That button is
+ * the confirmation and the sentence is the undo: the centre it was in is on
+ * screen until the moment it changes.
+ * ------------------------------------------------------------------------ */
+
+const SD_SELECT = '#building_leitstelle_building_id';
+const SD_NAV = '#building-navigation-container';
+const SD_ID = 'ymca-sd-pick';
+
+/** The game's own field, or nothing — this is never built from scratch. */
+function sdField() {
+    const select = document.querySelector(SD_SELECT);
+    return select && select.options.length ? select : null;
+}
+
+/** What the game currently has it set to, by its own selected option. */
+function sdCurrent(select) {
+    const option = select.options[select.selectedIndex] || null;
+    return option && option.value
+        ? { id: option.value, name: (option.textContent || '').trim() }
+        : null;
+}
+
+/**
+ * Where it goes in the navigation row.
+ *
+ * Straight after the button that names the current centre, so the answer and
+ * the way to change it are in the same place. With no centre set the game puts
+ * no such button there at all, and then it goes between Previous and Next,
+ * which is where that button would have been.
+ */
+function sdSlot(nav, current) {
+    const links = [...nav.querySelectorAll('a')];
+    if (current) {
+        const naming = links.find((a) => (a.textContent || '').trim() === current.name);
+        if (naming) return { node: naming, where: 'after' };
+    }
+    const next = links.find((a) => /\/buildings\/\d+$/.test(a.getAttribute('href') || '')
+        && a.classList.contains('btn-success'));
+    if (next) return { node: next, where: 'before' };
+    return { node: nav, where: 'append' };
+}
+
+function sdMount(ctx) {
+    if (document.getElementById(SD_ID)) return true;
+    const select = sdField();
+    const nav = document.querySelector(SD_NAV);
+    /* Both halves have to be there: the game's own field to move, and the row
+     * to put the control in. One without the other is a page this does not
+     * belong on, not a page to wait on. */
+    if (!select || !nav) return false;
+
+    const current = sdCurrent(select);
+    const box = document.createElement('span');
+    box.id = SD_ID;
+    box.style.cssText = 'display:inline-flex;gap:4px;align-items:center;margin:0 4px';
+
+    const pick = document.createElement('select');
+    pick.className = 'input-sm';
+    /* A native control takes the system's own colours rather than the game's
+     * button classes: `.btn-default` came back white on white in the probe. */
+    pick.style.cssText = 'background:Field;color:FieldText;color-scheme:light dark;'
+        + 'border:1px solid rgba(0,0,0,.35);border-radius:3px;font-size:12px;padding:1px 3px';
+    pick.title = 'Assigned Dispatch Center';
+    pick.innerHTML = [...select.options].map((o) => `<option value="${esc(o.value)}"${
+        o.value === (current?.id || '') ? ' selected' : ''}>${
+        esc((o.textContent || '').trim() || '— none —')}</option>`).join('');
+
+    const save = document.createElement('a');
+    save.className = 'btn btn-xs btn-warning';
+    save.href = '#';
+    save.setAttribute('role', 'button');
+    save.hidden = true;
+
+    const armed = () => {
+        const chosen = [...pick.options].find((o) => o.value === pick.value);
+        const changed = pick.value !== (current?.id || '');
+        save.hidden = !changed;
+        if (!changed) return;
+        const name = (chosen?.textContent || '').trim();
+        save.textContent = pick.value ? `Move to ${name}` : 'Leave it unassigned';
+        save.title = current
+            ? `It is in ${current.name} until you press this. Pick ${current.name} again to undo.`
+            : 'It is unassigned until you press this.';
+    };
+    pick.addEventListener('change', armed);
+
+    save.addEventListener('click', (e) => {
+        e.preventDefault();
+        /* THE GAME'S OWN FIELD, THE GAME'S OWN FORM. Setting the value and
+         * firing `change` is what any handler the game has on it expects, and
+         * submitting the form it sits in is what keeps the CSRF token and
+         * every other setting on the page exactly as they were. */
+        select.value = pick.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        const form = select.form || select.closest('form');
+        if (!form) {
+            save.textContent = 'The game’s own form is not on this page';
+            ctx.log.warn('no form to submit', 'the dispatch centre select has no form');
+            return;
+        }
+        ctx.log.info('dispatch centre changed', `${current?.name || 'none'} → ${pick.value}`);
+        const button = form.querySelector('input[type="submit"], button[type="submit"]');
+        if (button) button.click();
+        else if (form.requestSubmit) form.requestSubmit();
+        else form.submit();
+    });
+
+    box.append(pick, save);
+    const slot = sdSlot(nav, current);
+    if (slot.where === 'after') slot.node.after(box);
+    else if (slot.where === 'before') slot.node.before(box);
+    else nav.append(box);
+    armed();
+    return true;
+}
+
+YMCA.register({
+    id: 'switchdispatch',
+    title: 'SwitchDispatchCenter',
+    tagline: 'Move a station, from the top',
+    description: 'Puts the building’s own “Assigned Dispatch Center” dropdown into the '
+        + 'navigation row at the top of the page, beside the centre it is in now. Picking one '
+        + 'arms a button that names the move; nothing is sent until you press it.',
+
+    group: 'easyedit',
+    mainTile: false,
+    optional: true,
+    defaultOn: true,
+
+    onSwitch(on, ctx) {
+        if (!on) document.getElementById(SD_ID)?.remove();
+        else sdMount(ctx);
+    },
+});
+
+YMCA.inject('switchdispatch', (ctx) => {
+    /* A building page, and never a frame: the mission window's address bar says
+     * `/` and the map has no building form on it. Asking the page what it holds
+     * is what decides, so a route this has never seen answers too. */
+    if (window.top !== window.self) return true;
+    if (!document.querySelector(SD_SELECT)) return false;
+    return sdMount(ctx);
+});
+
+/* --------------------------------------------------------------------------
  * EagleEye — what the game shows you, and how much of it.
  *
  * A group rather than a tool. Everything under it changes how the game's own
@@ -7348,44 +7761,9 @@ YMCA.register({
     defaultOn: true,
 
     settings(el, ctx) {
-        const inside = YMCA.inGroup('eagleeye');
-        el.innerHTML = `
-      <p class="ymca-lead">Nothing in here changes what the game does &mdash; only how much of
-        it you are looking at.</p>
-      <div class="ymca-tiles">
-        ${inside.map((m) => {
-        const on = YMCA.isOn(m);
-        return `<div class="ymca-tile el ${on ? '' : 'off'}" data-el="${esc(m.id)}"
-            role="button" tabindex="0">
-            ${iconFor(m.id)}<b>${esc(m.title)}</b><span>${esc(m.tagline || '')}</span>
-            <div class="ymca-foot">
-              <span class="ymca-dim" style="font-size:12px">${m.settings
-            ? 'Open for settings' : 'Nothing to set'}</span>
-              ${efSwitch(m.id, on)}
-            </div>
-          </div>`;
-    }).join('')}
-        <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
-          <span>This is where the next ones land.</span></div>
-      </div>`;
-
-        /* A member's settings replace the whole panel, and Back comes here
-         * rather than all the way out to the switchboard. */
-        const panel = el.closest('#ymca-panel') || el;
-        const self = YMCA.modules.find((m) => m.id === 'eagleeye');
-        const open = (id) => {
-            const mod = YMCA.modules.find((m) => m.id === id);
-            if (mod) efOpen(panel, ctx, mod, () => efOpen(panel, YMCA.contextFor('eagleeye'), self));
-        };
-        el.querySelectorAll('[data-el]').forEach((tile) => {
-            tile.addEventListener('click', (e) => {
-                if (e.target.closest('.ymca-switch')) return;
-                open(tile.dataset.el);
-            });
-        });
-        efWireSwitches(el, ctx, (id, on) => {
-            el.querySelector(`[data-el="${id}"]`)?.classList.toggle('off', !on);
-        });
+        efGroupTiles(el, ctx, 'eagleeye',
+            'Nothing in here changes what the game does \u2014 only how much of it you are '
+            + 'looking at.');
     },
 });
 
@@ -7907,6 +8285,8 @@ function slimMissions(data) {
 
 YMCA.register({
     id: 'diagnostics',
+    optional: true,
+    defaultOn: true,
     title: 'Diagnostics',
     tagline: 'Send data back',
     description: 'Every button here copies or downloads something. Use them to report a '

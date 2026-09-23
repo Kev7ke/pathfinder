@@ -24,43 +24,8 @@ YMCA.register({
     defaultOn: true,
 
     settings(el, ctx) {
-        const inside = YMCA.inGroup('eagleeye');
-        el.innerHTML = `
-      <p class="ymca-lead">Nothing in here changes what the game does &mdash; only how much of
-        it you are looking at.</p>
-      <div class="ymca-tiles">
-        ${inside.map((m) => {
-        const on = YMCA.isOn(m);
-        return `<div class="ymca-tile el ${on ? '' : 'off'}" data-el="${esc(m.id)}"
-            role="button" tabindex="0">
-            ${iconFor(m.id)}<b>${esc(m.title)}</b><span>${esc(m.tagline || '')}</span>
-            <div class="ymca-foot">
-              <span class="ymca-dim" style="font-size:12px">${m.settings
-            ? 'Open for settings' : 'Nothing to set'}</span>
-              ${efSwitch(m.id, on)}
-            </div>
-          </div>`;
-    }).join('')}
-        <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
-          <span>This is where the next ones land.</span></div>
-      </div>`;
-
-        /* A member's settings replace the whole panel, and Back comes here
-         * rather than all the way out to the switchboard. */
-        const panel = el.closest('#ymca-panel') || el;
-        const self = YMCA.modules.find((m) => m.id === 'eagleeye');
-        const open = (id) => {
-            const mod = YMCA.modules.find((m) => m.id === id);
-            if (mod) efOpen(panel, ctx, mod, () => efOpen(panel, YMCA.contextFor('eagleeye'), self));
-        };
-        el.querySelectorAll('[data-el]').forEach((tile) => {
-            tile.addEventListener('click', (e) => {
-                if (e.target.closest('.ymca-switch')) return;
-                open(tile.dataset.el);
-            });
-        });
-        efWireSwitches(el, ctx, (id, on) => {
-            el.querySelector(`[data-el="${id}"]`)?.classList.toggle('off', !on);
-        });
+        efGroupTiles(el, ctx, 'eagleeye',
+            'Nothing in here changes what the game does \u2014 only how much of it you are '
+            + 'looking at.');
     },
 });

@@ -46,6 +46,8 @@ function slimMissions(data) {
 
 YMCA.register({
     id: 'diagnostics',
+    optional: true,
+    defaultOn: true,
     title: 'Diagnostics',
     tagline: 'Send data back',
     description: 'Every button here copies or downloads something. Use them to report a '

@@ -89,6 +89,8 @@ async function rrHire(buildingId, days) {
 
 YMCA.register({
     id: 'recruitroom',
+    optional: true,
+    defaultOn: true,
     title: 'RecruitDude',
     tagline: 'Hiring, every station at once',
 

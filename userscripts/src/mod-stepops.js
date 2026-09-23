@@ -16,6 +16,8 @@ const PATHS = [
 
 YMCA.register({
     id: 'stepops',
+    optional: true,
+    defaultOn: true,
     title: 'StepOps',
     tagline: 'What to build next',
     description: 'Reads your stations and the mission list straight from the game. '

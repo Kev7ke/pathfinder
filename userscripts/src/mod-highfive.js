@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------
- * HighFive — clicking through status 5.
+ * Status 5 Helper (id: highfive) — clicking through the transports.
  *
  * Status 5 is a vehicle transporting: an ambulance taking a patient to a
  * hospital, a patrol car taking somebody to a prison. Each one wants a
@@ -664,6 +664,112 @@ function hfSectionRows(id) {
 }
 
 /** Sort, then hide what the player did not ask to see. */
+/**
+ * One destination, read off whatever it states its figures in.
+ *
+ * A hospital is a row and says it in cells. A prison is a single `<a>` among
+ * thirty-one others and says it in its own text:
+ *
+ *   NYPD | 7th Precinct(Available cells: 2, Distance: 0.69 km, owner's tax: 0%)
+ *
+ * `hfParts` hands both back as pieces, so one set of rules reads both: a figure
+ * carries its unit, free space is `n / n`, tax ends in `%`. The only thing the
+ * bracketed form adds is the word in front of the figure, and `hfValue` takes
+ * that off.
+ *
+ * FREE SPACE IS THE ONE PLAIN COUNT A DESTINATION STATES. The prison list says
+ * `Free cells: 1` where the hospital table says `29 / 30`, so where no piece
+ * reads as `n / n` the first piece that is a plain whole number — and is
+ * neither the distance nor the tax, both of which are read by shape first — is
+ * that count. Nothing here reads the word, so it is the same rule in any
+ * language the game is played in.
+ */
+function hfRead(block) {
+    const link = block.matches?.(HF_PICK_LINK) ? block : block.querySelector(HF_PICK_LINK);
+    if (!link) return null;
+    const parts = hfParts(block);
+    /* On a row, cell 0 repeats everything for a narrow screen, so it is never
+     * asked for a figure — only for the name. A block that is not a row states
+     * its name in the same first piece and nothing twice. */
+    const rest = block.cells ? parts.slice(1) : parts;
+    const values = rest.map(hfValue);
+    const distance = values.find((t) => HF_DISTANCE_VALUE.test(t));
+    const beds = values.map((t) => /^(\d+)\s*\/\s*(\d+)$/.exec(t)).find(Boolean);
+    const tax = values.map((t) => /^(\d[\d.,]*)\s*%$/.exec(t)).find(Boolean);
+    const count = beds ? null : values.find((t) => /^\d+$/.test(t));
+    const label = block.querySelector?.('.label');
+    const said = (label?.textContent || '').trim();
+    return {
+        block,
+        name: ((block.cells ? block.cells[0]?.firstChild?.textContent : null)
+            || parts[0] || '').trim().slice(0, 60),
+        km: distance ? hfNum(distance) : null,
+        free: beds ? Number(beds[1]) : (count ? Number(count) : null),
+        tax: tax ? hfNum(tax[1]) : null,
+        // Yes, no, or the page did not say — and "did not say" is not "no".
+        department: /^(yes|ja)$/i.test(said) ? true : /^(no|nein)$/i.test(said) ? false : null,
+    };
+}
+
+/**
+ * Which one is the best of a list — and it is only ever MARKED.
+ *
+ * Treatment first: a patient who can be treated where he lands is the whole
+ * point, so a hospital with the department wins over a nearer one without. Only
+ * where none of them has it does it become a plain distance case.
+ *
+ * Then the nearest of those. Then, and only then, the swap: if the nearest
+ * charges and there is a free one in the same group, the free one is the pick.
+ * That is a saving rather than a detour, because everything still on screen is
+ * already inside the range the player set.
+ *
+ * NOTHING IS PRESSED, AND THAT IS THE WHOLE DESIGN. The mark says which one
+ * this would have chosen; the click is the player's, on the game's own link.
+ * A destination with no room left is not a candidate, and one whose distance
+ * cannot be read is left out rather than assumed to be near.
+ */
+function hfBest(rows) {
+    const usable = rows.filter((r) => r.km !== null && (r.free === null || r.free > 0));
+    if (!usable.length) return null;
+    const treating = usable.filter((r) => r.department === true);
+    const pool = treating.length ? treating : usable;
+    const byDistance = pool.slice().sort((a, b) => a.km - b.km);
+    const nearest = byDistance[0];
+    const why = (pick, reason) => ({ pick, why: reason, treats: !!treating.length });
+    if (!(nearest.tax > 0)) return why(nearest, 'nearest');
+    const free = byDistance.find((r) => r.tax === 0);
+    return free ? why(free, 'nearest free') : why(nearest, 'nearest');
+}
+
+/**
+ * Put the mark on, and take every other one off.
+ *
+ * GREEN ON THE CELLS, NOT ON THE ROW. Bootstrap's table styling and the game's
+ * dark theme both put a background on `td`, so a colour on the `<tr>` sits
+ * behind them and nothing shows. `.success` is the game's own class for this
+ * and it is defined for both, so it goes on the row AND on every cell — which
+ * also means it follows the theme rather than carrying a colour of YMCA's own.
+ *
+ * And green says nothing on a list of green buttons: a block that is not a row
+ * is marked `active`, Bootstrap's own word for the one that is chosen.
+ */
+function hfMark(blocks, best) {
+    for (const el of blocks) {
+        el.classList.remove('success', 'active');
+        if (el.cells) for (const td of el.cells) td.classList.remove('success');
+        el.removeAttribute('data-ymca-best');
+    }
+    if (!best) return;
+    const el = best.pick.block;
+    if (el.cells) {
+        el.classList.add('success');
+        for (const td of el.cells) td.classList.add('success');
+    } else {
+        el.classList.add('active');
+    }
+    el.setAttribute('data-ymca-best', best.why);
+}
+
 function hfApply(ctx, cfg) {
     const columns = hfColumns();
     /* Nearest first is the ground state, not a choice somebody has to make
@@ -675,9 +781,11 @@ function hfApply(ctx, cfg) {
     let shown = 0;
     let total = 0;
 
+    const marked = [];
     for (const group of hfGroups()) {
         const blocks = group.blocks;
         if (!blocks.length) continue;
+        const visible = [];
         /* "The first ten" is ten per list. Inside a mission window every
          * vehicle carrying a prisoner has a list of its own, and one running
          * count across all of them left the later vehicles with nothing
@@ -716,11 +824,23 @@ function hfApply(ctx, cfg) {
             }
             if (!hide && cfg.limit && shown >= cfg.limit) hide = true;
             el.style.display = hide ? 'none' : '';
-            if (!hide) { shown += 1; total += 1; }
+            if (!hide) { shown += 1; total += 1; visible.push(el); }
         }
+
+        /* THE BEST ONE IS MARKED, NEVER PRESSED. It is judged on what is still
+         * on screen, so the range and the sections the player set are already
+         * in it, and it is redone on every redraw — a mark that stayed put when
+         * the range changed would be pointing at a hospital that is no longer
+         * offered. One per list, because in a mission window each vehicle
+         * carrying a prisoner has a list of its own and the nearest cell for
+         * one of them is the wrong answer for another. */
+        const best = cfg.best === false ? null
+            : hfBest(visible.map(hfRead).filter(Boolean));
+        hfMark(blocks, best);
+        if (best) marked.push(best);
     }
     ctx.log.info('destinations filtered', `${total} shown, by ${cfg.sortBy || 'page order'}`);
-    return total;
+    return { total, marked };
 }
 
 /**
@@ -769,7 +889,7 @@ function hfOnPickPage(ctx) {
     bar.style.margin = '6px 0';
     bar.innerHTML = `
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
-      <b>HighFive</b>
+      <b>Status 5 Helper</b>
       <label style="font-weight:400;margin:0;cursor:pointer">
         <input type="checkbox" id="hf-advance" ${cfg.advance !== false ? 'checked' : ''}>
         Go straight to the next transport</label>
@@ -803,8 +923,12 @@ function hfOnPickPage(ctx) {
         ['alliance', 'The alliance\u2019s only']].map(([v, t]) => `<option value="${v}"${
         v === (cfg.who || 'all') ? ' selected' : ''}>${t}</option>`).join('')}
         </select></label>` : ''}
+      <label style="font-weight:400;margin:0;cursor:pointer">
+        <input type="checkbox" id="hf-best" ${cfg.best !== false ? 'checked' : ''}>
+        Mark the best one</label>
       <span style="opacity:.75" id="hf-count"></span>
-    </div>`;
+    </div>
+    <div style="margin-top:7px" id="hf-best-said"></div>`;
 
     /* Above whatever holds the destinations. `before()` needs a parent, so a
      * table sitting directly in <body> falls back to going in at the top. */
@@ -817,6 +941,7 @@ function hfOnPickPage(ctx) {
         advance: bar.querySelector('#hf-advance').checked,
         sortBy: bar.querySelector('#hf-sort')?.value || '',
         sortDown: !!bar.querySelector('#hf-down')?.checked,
+        best: !!bar.querySelector('#hf-best')?.checked,
         limit: Number(bar.querySelector('#hf-limit').value) || 0,
         max: Number(bar.querySelector('#hf-max')?.value) || 0,
         who: bar.querySelector('#hf-who')?.value || 'all',
@@ -840,9 +965,22 @@ function hfOnPickPage(ctx) {
             max.title = effective ? '' : 'no column in this table reads as a number';
             max.nextElementSibling.textContent = effective ? effective.label : '\u2014';
         }
-        const shown = hfApply(ctx, now);
+        const { total: shown, marked } = hfApply(ctx, now);
         bar.querySelector('#hf-count').textContent = shown < total
             ? `${shown} of ${total} shown` : '';
+        /* WHICH ONE AND WHY, IN WORDS, because a green row on its own is a
+         * recommendation nobody can check. The click stays the player's, so
+         * the reason has to be readable before they make it. */
+        const said = bar.querySelector('#hf-best-said');
+        if (said) {
+            const first = marked[0];
+            said.innerHTML = !first ? ''
+                : `<b>Best: ${esc(first.pick.name)}</b> · ${first.pick.km} away${
+                    first.pick.free !== null ? ` · ${first.pick.free} free` : ''}${
+                    first.treats ? ` · can treat` : ''} <span style="opacity:.75">(${
+                    esc(first.why)}${marked.length > 1
+                        ? `, and one per list in ${marked.length} lists` : ''})</span>`;
+        }
     };
     bar.addEventListener('change', redraw);
     // A number field only fires `change` when it loses focus, and a range you
@@ -983,7 +1121,7 @@ function hfPaintButton(ctx) {
     if (!btn) return;
     const on = hfCfg(ctx).advance !== false;
     btn.className = `btn btn-xs pull-right ${on ? 'btn-success' : 'btn-danger'}`;
-    btn.textContent = `HighFive: ${on ? 'On' : 'Off'}`;
+    btn.textContent = `Status 5: ${on ? 'On' : 'Off'}`;
 }
 
 function hfMountButton(ctx) {
@@ -1009,12 +1147,15 @@ function hfMountButton(ctx) {
 }
 
 YMCA.register({
+    /* The id stays `highfive`: it is the key every stored setting is filed
+     * under, and renaming it would read as a fresh install to anybody who had
+     * already set a range. Only what the player sees changed. */
     id: 'highfive',
-    title: 'HighFive',
+    title: 'Status 5 Helper',
     tagline: 'Click through the transports',
-    description: 'Picks a hospital or a prison for every vehicle in status 5, one after the '
-        + 'next. It does not work yet — the game’s own window has not been seen from '
-        + 'this side.',
+    description: 'Sorts the hospitals and prisons a transporting vehicle can go to, nearest '
+        + 'first, and marks the best one — treatment, then distance, then the free one. '
+        + 'You click it; it then follows the game’s own link to the next transport.',
 
     /* An element tile, so it is never in the launcher: its work happens in the
      * game's own pages, and a tile on the front would open a panel that does

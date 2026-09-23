@@ -68,27 +68,85 @@ function efWireSwitches(root, ctx, after) {
     });
 }
 
+/**
+ * One tile: what it is, what it does in a sentence or three, and its switch.
+ *
+ * THE DESCRIPTION IS THE POINT OF THE PAGE. A tagline of four words tells
+ * somebody which tool this is and nothing about whether they want it, and "do
+ * I want it" is the only question this page exists to answer. So the tile
+ * carries the module's own `description` — the same sentences its own panel
+ * heads itself with, so there is one wording to keep true rather than two.
+ *
+ * A GROUP SAYS WHAT IS IN IT instead, by name. "Switch this off and every one
+ * of them goes" means nothing until the list is on the tile.
+ */
+function efTile(m) {
+    const on = YMCA.isOn(m);
+    const inside = YMCA.inGroup ? YMCA.inGroup(m.id) : [];
+    const holds = inside.length
+        ? `<span class="ymca-dim" style="font-size:12px">Holds ${
+            inside.map((x) => esc(x.title)).join(', ')}</span>`
+        : '';
+    return `<div class="ymca-tile el ${on ? '' : 'off'}" data-el="${esc(m.id)}"
+      role="button" tabindex="0">
+      ${iconFor(m.id)}<b>${esc(m.title)}</b>
+      <span>${esc(m.description || m.tagline || '')}</span>
+      ${holds}
+      ${!inside.length && m.mainTile === false
+        ? '<span class="ymca-dim" style="font-size:12px">Lives in the game’s own pages</span>'
+        : ''}
+      <div class="ymca-foot">
+        <span class="ymca-dim" style="font-size:12px">${m.settings
+        ? 'Open for settings' : 'Nothing to set'}</span>
+        ${efSwitch(m.id, on)}
+      </div>
+    </div>`;
+}
+
+/**
+ * A group's own page of tiles — one renderer, not one per group.
+ *
+ * EagleEye had a copy of this inside it, and the moment EasyEdit wanted the
+ * same page there would have been two copies to keep in step. Any group gets
+ * it by calling this from its `settings`.
+ */
+function efGroupTiles(el, ctx, groupId, lead) {
+    const inside = YMCA.inGroup(groupId);
+    el.innerHTML = `
+    <p class="ymca-lead">${esc(lead)}</p>
+    <div class="ymca-tiles">
+      ${inside.map(efTile).join('')}
+      <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
+        <span>This is where the next ones land.</span></div>
+    </div>`;
+
+    /* A member's settings replace the whole panel, and Back comes here rather
+     * than all the way out to the switchboard. */
+    const panel = el.closest('#ymca-panel') || el;
+    const self = YMCA.modules.find((m) => m.id === groupId);
+    el.querySelectorAll('[data-el]').forEach((tile) => {
+        tile.addEventListener('click', (e) => {
+            if (e.target.closest('.ymca-switch')) return;
+            const mod = YMCA.modules.find((m) => m.id === tile.dataset.el);
+            if (mod) {
+                efOpen(panel, ctx, mod,
+                    () => efOpen(panel, YMCA.contextFor(groupId), self));
+            }
+        });
+    });
+    efWireSwitches(el, ctx, (id, on) => {
+        el.querySelector(`[data-el="${id}"]`)?.classList.toggle('off', !on);
+    });
+}
+
 function efTiles(el, ctx) {
     const mods = efElements();
     el.innerHTML = `
-    <p class="ymca-lead">A switch takes the tool out of the launcher <em>and</em> out of the
-      game's own pages &mdash; nothing of it runs. Open a tile for what it can be set to.</p>
+    <p class="ymca-lead">Everything YMCA is made of, one tile each. A switch takes that part
+      out of the launcher <em>and</em> out of the game's own pages &mdash; nothing of it runs.
+      Open a tile for what it can be set to.</p>
     <div class="ymca-tiles">
-      ${mods.map((m) => {
-        const on = YMCA.isOn(m);
-        return `<div class="ymca-tile el ${on ? '' : 'off'}" data-el="${esc(m.id)}"
-          role="button" tabindex="0">
-          ${iconFor(m.id)}<b>${esc(m.title)}</b><span>${esc(m.tagline || '')}</span>
-          ${m.mainTile === false
-        ? '<span class="ymca-dim" style="font-size:12px">Lives in the game’s own pages</span>'
-        : ''}
-          <div class="ymca-foot">
-            <span class="ymca-dim" style="font-size:12px">${m.settings
-        ? 'Open for settings' : 'Nothing to set'}</span>
-            ${efSwitch(m.id, on)}
-          </div>
-        </div>`;
-    }).join('')}
+      ${mods.map(efTile).join('')}
       <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
         <span>This is where the next elements land.</span></div>
     </div>`;

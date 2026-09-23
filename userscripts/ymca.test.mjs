@@ -1662,12 +1662,29 @@ const elements = await pg.$$eval('.ymca-tile.el', (b) => b.map((x) => x.dataset.
 console.log('elements          :', JSON.stringify(elements));
 await pg.screenshot({ path: '/tmp/ymca-elements.png' });
 assert.deepEqual(elements,
-  ['renamer', 'missionmagician', 'trackops', 'highfive', 'eagleeye'],
-  'every switchable module that is not in a group should have an element tile');
+  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'trackops', 'highfive',
+    'easyedit', 'eagleeye', 'diagnostics'],
+  'every module carries a switch now: the page answers "what have I got" in one look');
+// AND EVERY TILE SAYS WHAT IT IS FOR. A four-word tagline tells you which tool this is and
+// nothing about whether you want it, which is the only question this page exists to answer.
+const blurbs = await pg.$$eval('.ymca-tile.el', (b) => b.map((x) => ({
+  id: x.dataset.el, said: x.querySelector('span')?.textContent.trim() || '' })));
+console.log('tile blurbs       :', JSON.stringify(blurbs.map((x) => x.said.length)));
+for (const { id, said } of blurbs) {
+  assert.ok(said.length > 40 && said.length < 400,
+    `${id} should carry its own description, one to three sentences: got ${said.length} chars`);
+}
+// A group tile says what is inside it, by name \u2014 "switch this off and every one of them
+// goes" means nothing until the list is on the tile.
+const holds = await pg.textContent('.ymca-tile.el[data-el="easyedit"]');
+console.log('easyedit holds    :', /Holds ([^\n]*)/.exec(holds.replace(/\s+/g, ' '))?.[1]);
+assert.match(holds.replace(/\s+/g, ' '), /Holds SwitchDispatchCenter/,
+  'a group tile names its members');
 assert.equal(await pg.locator('.ymca-tile.el[data-el="shuteye"]').count(), 0,
   'a module in a group is listed inside the group, not beside it');
 // Nothing that works is off by default: an update that hides a tool is an update that broke.
-for (const id of ['renamer', 'missionmagician', 'trackops', 'highfive', 'eagleeye']) {
+for (const id of ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'trackops',
+  'highfive', 'easyedit', 'eagleeye', 'diagnostics']) {
   assert.equal(await pg.locator(`.ymca-switch[data-sw="${id}"] input`).isChecked(), true,
     `${id} should be on until somebody says otherwise`);
 }
@@ -1753,11 +1770,11 @@ await pg.evaluate(() => {
 await pg.waitForSelector('#ymca-hf-btn');
 const hfBtn = '.flex-fixed-size #ymca-hf-btn';
 assert.equal(await pg.locator(hfBtn).count(), 1, 'it lands beside the radio, not somewhere else');
-assert.equal((await pg.textContent(hfBtn)).trim(), 'HighFive: On');
+assert.equal((await pg.textContent(hfBtn)).trim(), 'Status 5: On');
 await pg.evaluate((sel) => document.querySelector(sel).click(), hfBtn);
 await pg.waitForTimeout(120);
 console.log('radio row button  :', (await pg.textContent(hfBtn)).trim());
-assert.equal((await pg.textContent(hfBtn)).trim(), 'HighFive: Off', 'and it toggles');
+assert.equal((await pg.textContent(hfBtn)).trim(), 'Status 5: Off', 'and it toggles');
 assert.equal(await pg.evaluate(() =>
   JSON.parse(localStorage.getItem('ymca-highfive-cfg')).advance), false,
 'it is the same setting the transport page carries, not a second one');
@@ -2228,6 +2245,51 @@ await pg.fill('#hf-max', '');
 await pg.waitForTimeout(200);
 assert.equal((await order()).length, 6, 'and an empty box is no ceiling at all');
 
+// ---- the best one is MARKED, and only marked ----
+// Mercy General (12.40, Yes, 0%) and County (7.10, Yes, 5%) both treat; St Anne is nearer at
+// 2.79 and cannot. So County is the nearest that treats, it charges, and Mercy General is the
+// free one in the same group \u2014 that is the swap. The green is on the cells, because the game's
+// dark theme puts a background on every td and a colour on the tr sits behind it.
+assert.equal(await pg.locator('#hf-best').isChecked(), true, 'marking is on by default');
+const best = await pg.evaluate(() => {
+  const row = document.querySelector('#own-hospitals tr[data-ymca-best]');
+  return row && {
+    name: row.cells[0].firstChild.textContent.trim(),
+    why: row.getAttribute('data-ymca-best'),
+    row: row.classList.contains('success'),
+    cells: [...row.cells].every((c) => c.classList.contains('success')),
+    others: document.querySelectorAll('#own-hospitals tr.success').length,
+  };
+});
+console.log('best marked       :', JSON.stringify(best));
+assert.equal(best.name, 'Mercy General',
+  'treatment first, then distance, then the free one over the paying one');
+assert.equal(best.why, 'nearest free', 'and the reason is on the row');
+assert.ok(best.row && best.cells, 'green on the row AND on every cell, or the theme hides it');
+assert.equal(best.others, 1, 'exactly one is marked');
+const saidBest = (await pg.textContent('#hf-best-said')).replace(/\s+/g, ' ').trim();
+console.log('best said         :', saidBest);
+assert.match(saidBest, /Mercy General/, 'and it is said in words, not only in colour');
+assert.match(saidBest, /can treat/, 'with the reason, because a green row cannot be checked');
+// Nothing was pressed and nothing navigated: the mark is the whole of it.
+assert.equal(await pg.evaluate(() => location.pathname), '/vehicles/15079874',
+  'marking the best one never moves the page');
+// And it follows the range: cap it below Mercy General and the mark moves to what is left.
+await pg.fill('#hf-max', '8');
+await pg.waitForTimeout(250);
+assert.equal(await pg.evaluate(() =>
+  document.querySelector('#own-hospitals tr[data-ymca-best]')?.cells[0].firstChild.textContent.trim()),
+'County', 'a mark that stayed put when the range changed would point at a hospital not offered');
+await pg.fill('#hf-max', '');
+await pg.waitForTimeout(250);
+// It can be turned off, and then nothing is marked at all.
+await pg.uncheck('#hf-best');
+await pg.waitForTimeout(250);
+assert.equal(await pg.locator('#own-hospitals tr[data-ymca-best]').count(), 0,
+  'switched off, nothing is marked');
+await pg.check('#hf-best');
+await pg.waitForTimeout(250);
+
 // Clicking a destination arms the jump. HighFive never prevents that click — so the test has
 // to, or the browser really would navigate away to the game's own transport page.
 await pg.evaluate(() => {
@@ -2251,6 +2313,103 @@ await pg.evaluate(() => {
 assert.equal(await pg.evaluate(() => sessionStorage.getItem('ymca-highfive-jump')), null,
   'with advancing off, a pick arms nothing');
 console.log('highfive off      : a pick arms nothing');
+
+// ---- EasyEdit \u2192 SwitchDispatchCenter: the game's own field, moved to the top ----
+// The building page shows which dispatch centre a station answers to at the top, in the
+// navigation row, and lets you change it in a select far down the page. The one place the
+// answer is shown is not the place it can be changed, so a run of stations means scrolling
+// down and back up once each. The control is the game's own, moved \u2014 nothing is built.
+{
+  const bld = await b.newPage({ viewport: { width: 1100, height: 900 } });
+  const bldErrs = [];
+  bld.on('pageerror', (e) => bldErrs.push(e.message));
+  await bld.goto('http://localhost:8777/README.md');
+  await bld.setContent(`<html><body>
+    <div class="btn-group" id="building-navigation-container">
+      <a class="btn btn-xs btn-default" href="/buildings/5677622">Previous building</a>
+      <a class="btn btn-default btn-xs" href="/buildings/5677680">NY</a>
+      <a class="btn btn-xs btn-success" href="/buildings/5677623">Next building</a>
+    </div>
+    <form id="edit_building" action="/buildings/5677640" method="post">
+      <input type="hidden" name="authenticity_token" value="CSRF-XYZ">
+      <input type="text" name="building[caption]" value="FS01">
+      <div class="input-group select optional building_leitstelle_building_id">
+        <label class="input-group-addon" for="building_leitstelle_building_id">Assigned
+          Dispatch Center</label>
+        <select class="select optional form-control" name="building[leitstelle_building_id]"
+          id="building_leitstelle_building_id"><option value=""></option>
+          <option value="5694841">EMSManiacs</option>
+          <option value="5691056">LI</option>
+          <option selected="selected" value="5677680">NY</option></select></div>
+      <input type="submit" name="commit" value="Save">
+    </form></body></html>`);
+  await bld.evaluate(() => {
+    history.replaceState({}, '', '/buildings/5677640');
+    // The submit is caught rather than followed, so the test can read what would be sent.
+    document.getElementById('edit_building').addEventListener('submit', (e) => {
+      e.preventDefault();
+      window.__sent = Object.fromEntries(new FormData(e.target).entries());
+    });
+  });
+  await bld.addScriptTag({ content: script });
+  await bld.waitForSelector('#ymca-sd-pick');
+
+  // It lands straight after the button naming the centre it is in now, so the answer and the
+  // way to change it are in the same place.
+  const where = await bld.evaluate(() => {
+    const box = document.getElementById('ymca-sd-pick');
+    return { after: box.previousElementSibling?.textContent.trim(),
+      before: box.nextElementSibling?.textContent.trim(),
+      inNav: box.parentElement.id };
+  });
+  console.log('dispatch pick     :', JSON.stringify(where));
+  assert.deepEqual(where, { after: 'NY', before: 'Next building',
+    inNav: 'building-navigation-container' },
+  'the dropdown goes between the centre it is in and Next building');
+  // Its options are the game's own, and the game's own selection is what it starts on.
+  const opts = await bld.$$eval('#ymca-sd-pick select option',
+    (o) => o.map((x) => [x.value, x.textContent.trim(), x.selected]));
+  console.log('dispatch options  :', JSON.stringify(opts));
+  assert.equal(opts.length, 4, 'every option the game offers, including its empty one');
+  assert.deepEqual(opts.find((o) => o[2]), ['5677680', 'NY', true],
+    'and it starts on what the game has it set to');
+
+  // NOTHING IS SENT ON A PICK. One slip on a dropdown would otherwise move a station you meant
+  // only to look at, so the pick arms a button that names the move.
+  assert.equal(await bld.locator('#ymca-sd-pick a.btn').isVisible(), false,
+    'nothing to press until something is picked');
+  await bld.selectOption('#ymca-sd-pick select', '5691056');
+  await bld.waitForTimeout(150);
+  const armed = await bld.evaluate(() => {
+    const a = document.querySelector('#ymca-sd-pick a.btn');
+    return { text: a.textContent.trim(), title: a.title, sent: window.__sent || null };
+  });
+  console.log('dispatch armed    :', JSON.stringify(armed));
+  assert.equal(armed.text, 'Move to LI', 'the button says what it will do');
+  assert.match(armed.title, /in NY until you press this/,
+    'and where it is now, which is the undo');
+  assert.equal(armed.sent, null, 'picking alone sends nothing');
+
+  // Pressing it submits THE GAME'S OWN FORM with one field changed, so the CSRF token and
+  // every unrelated setting on the page survive exactly as they were.
+  await bld.click('#ymca-sd-pick a.btn');
+  await bld.waitForFunction(() => !!window.__sent, null, { timeout: 4000 });
+  const sent = await bld.evaluate(() => window.__sent);
+  console.log('dispatch sent     :', JSON.stringify(sent));
+  assert.equal(sent['building[leitstelle_building_id]'], '5691056', 'the one field changed');
+  assert.equal(sent.authenticity_token, 'CSRF-XYZ', 'the CSRF token was lost');
+  assert.equal(sent['building[caption]'], 'FS01', 'an unrelated field was lost');
+
+  // Switched off in ElementFriend, the control is not in the page at all.
+  await bld.evaluate(() => window.YMCA.switchElement('switchdispatch', false));
+  await bld.waitForTimeout(200);
+  assert.equal(await bld.locator('#ymca-sd-pick').count(), 0, 'the switch takes it away');
+  await bld.evaluate(() => window.YMCA.switchElement('switchdispatch', true));
+  await bld.waitForTimeout(300);
+  assert.equal(await bld.locator('#ymca-sd-pick').count(), 1, 'and brings it back, there and then');
+  assert.equal(bldErrs.length, 0);
+  await bld.close();
+}
 
 // ---- a prison list is not a table, and the figures are inside the link ----
 // The page the player pasted: thirty-odd `<a>` side by side in one `div.prison-select`, an

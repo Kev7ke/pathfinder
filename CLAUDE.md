@@ -57,6 +57,8 @@ userscripts/
     mod-trackops.js
     mod-elementfriend.js
     mod-highfive.js
+    mod-easyedit.js
+    mod-switchdispatch.js
     mod-eagleeye.js
     mod-shuteye.js
     mod-stationfascination.js
@@ -115,6 +117,18 @@ rather than once at the top, and **a page a module does not belong on is not a
 job done**: returning truthy there marks it finished, so the panel never appears
 when the player navigates to the page it was waiting for.
 
+**Every tile carries a switch, and every tile says what it is for.** It used to
+be the modules somebody might object to; it is all of them now, because the
+question the page answers is "what have I got and do I want it", and a page that
+lists five of nine tools answers it for five. The tile carries the module's own
+`description` rather than its four-word `tagline` — one to three sentences, the
+same wording its own panel heads itself with, so there is one thing to keep true
+rather than two. **A group tile names what is inside it**: "switch this off and
+every one of them goes with it" means nothing until the list is on the tile.
+
+ElementFriend itself is the one thing with no switch. A switchboard that can
+switch itself off is a switchboard nobody can switch back on.
+
 **A switch means the whole module, not its tile.** The tile leaves the launcher
 *and* `YMCA.inject` refuses to run it, so nothing of it reaches the game's page
 either — a switch that left MissionMagician's mission panel standing would be
@@ -137,6 +151,10 @@ in.** A module may declare `group: '<id>'`, and then it is listed inside that
 group's tile rather than beside it. EagleEye is the first: everything under it
 changes how the game's own pages *look* and nothing under it changes what the
 game *does*.
+
+**A group's page of tiles is `efGroupTiles`, not a copy per group.** EagleEye
+had its own, and the moment EasyEdit wanted the same page there would have been
+two to keep in step.
 
 **The group is a master switch.** `YMCA.isOn` answers false for a member whose
 group is off, so switching EagleEye off takes every layout change with it
@@ -373,6 +391,24 @@ all of them left the later vehicles showing nothing at all.
 requirement table is, which is why the bar is offered there at all. It is found
 as **a destination link, not as a prison** — the same question HighFive asks of
 any page — so a branch nobody here has seen answers it too.
+
+**The best one is marked, and only marked.** Removing the auto-sender took the
+choosing with it, and the choosing was never the problem — pressing was. So it is
+back as a mark: treatment first, then the nearest of those, then the free one
+where the nearest charges and a free one is in the same group. It is judged on
+**what is still on screen**, so the range and the sections the player set are
+already in it, and it is redone on every redraw — a mark that stayed put when
+the range changed would point at a hospital that is no longer offered. One per
+list, because in a mission window each vehicle has a list of its own.
+
+**A green row is a recommendation nobody can check**, so the bar says which and
+why in words — the click is the player's and the reason has to be readable before
+they make it.
+
+**The module is called Status 5 Helper and its id is `highfive`.** The id is the
+key every stored setting is filed under, so renaming it would read as a fresh
+install to anybody who had already set a range. Only what the player sees
+changed.
 
 **A capture button says where it is being pressed, before it is pressed.** The
 first one was taken on the map and came back with 67 building links and no
@@ -759,6 +795,26 @@ wears `Field` on `FieldText` instead, with `color-scheme: light dark`: the pair
 the browser uses for every other dropdown on the machine, always legible against
 itself, and following whatever theme the page is in. That is not a colour of
 YMCA's own.
+
+**The game shows the answer in one place and lets you change it in another.**
+A building page names its dispatch centre at the top, in
+`#building-navigation-container`, between Previous building and Next building;
+it is changed in `select#building_leitstelle_building_id`, in the building's own
+form far down the page. So moving a run of stations is a scroll down and back up
+per station. **SwitchDispatchCenter mirrors the game's own field into that row**
+— after the button naming the current centre, or between Previous and Next where
+the game names none because none is set.
+
+**Nothing is built: the control is the game's own, moved.** The dropdown sets
+the value on the real `<select>`, fires the `change` the game listens for, and
+submits the form it sits in — which is what keeps the CSRF token and every
+unrelated setting on that page intact. Where the select is not in the page there
+is nothing to mirror, so nothing is offered.
+
+**And a dropdown is one slip from moving a station you meant to look at.** The
+pick only arms a button that names the move — "Move to LI" — and states where it
+is now, which is both the confirmation and the undo: the centre it was in is on
+screen until the moment it changes.
 
 **A filter that only hides can be combined with the game's own.** The game's
 station search marks rows with `building-filtered-by-search`; a rule that forced

@@ -385,6 +385,11 @@ const ICONS = {
         + '<path d="M2 29h30"/>',
     elementfriend: '<circle cx="17" cy="17" r="4"/><path d="M17 4v5M17 25v5M4 17h5M25 17h5"/>'
         + '<path d="M8.4 8.4l3.5 3.5M22.1 22.1l3.5 3.5M25.6 8.4l-3.5 3.5M11.9 22.1l-3.5 3.5"/>',
+    easyedit: '<path d="M6 24 L20 10 L24 14 L10 28 H6 Z"/><path d="M19 7 L21 5a2 2 0 0 1 3 0'
+        + ' l3 3a2 2 0 0 1 0 3 l-2 2"/><path d="M20 30 H30"/>',
+    switchdispatch: '<rect x="4" y="13" width="10" height="10" rx="1"/>'
+        + '<rect x="18" y="13" width="10" height="10" rx="1"/>'
+        + '<path d="M11 8 H24 M21 5 L24 8 L21 11"/>',
     highfive: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'
         + '<path d="M19 16v-7a2 2 0 0 1 4 0v12a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7v-6a2 2 0 0 1 4 0"/>',
     default: '<rect x="6" y="6" width="9" height="9"/><rect x="19" y="6" width="9" height="9"/>'
