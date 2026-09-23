@@ -846,6 +846,28 @@ a tab is a *branch* rather than a capability. So `byTab` is reported as branch
 membership and nothing is inferred from it — the per-type flags stay where they
 always were, on a vehicle.
 
+**But the editor's own labels do state some of it, and that is a reading rather
+than a guess.** A flag checkbox is labelled with the words the game uses for it,
+and for a fair number of flags that label *is* a vehicle's name, character for
+character — `Fly-Car`, `K-9 Unit`, `Crew Carrier`, `SWAT SUV`. Where a label
+names a vehicle the game sells, the game has said that vehicle carries that
+flag. And a label that reads `Wrecker or Flatbed Carrier` says it of both, which
+is the same reading an `oneof_…` key already gets.
+
+**It was only written down because it was checked against what had been
+measured.** Both derivations were run over the types whose flags are already
+known from a checkbox: the name match agreed on 8 and the split-on-`or` match on
+11, with one apparent miss each — type 27 BLS Ambulance, whose measured record is
+`['any_rtw']` alone where its sibling type 5 carries five flags, so the
+measurement is the incomplete half. The type names agreed on 59 and differed on
+none. **A derivation that cannot be checked against a measurement does not go
+in**; this one could be, so it did.
+
+It lands in `namedBy`, **never in `capabilities`**, so what a checkbox said and
+what a label said stay tellable apart for ever. `mmKnownTypes` reads the union
+of the two, which took the types a vehicle already at a mission can be judged by
+from 26 of 106 to 41 of 124 — and 15 of those had no flags at all before.
+
 `/api/v1/aaos` answers with the player's own saved orders:
 `id, caption, color, column, hotkey, reset, text_color, automatic_text_color,
 aao_category_id, vehicle_classes`. `vehicle_classes` is the flag list an order

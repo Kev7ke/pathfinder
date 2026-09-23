@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.60';
+export const VERSION = '0.0.61';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -173,6 +173,11 @@ function build() {
              * water and on people, however many reports have come back. */
             if (t.tank) lean.tank = t.tank;
             if (t.crewSeen) lean.crewSeen = t.crewSeen;
+            /* DERIVED, and kept apart from what was measured. The editor labels
+             * each capability checkbox with the vehicle name, so a flag whose
+             * label is a type's name names that type. It is added to what a
+             * checkbox stated, never substituted for it. */
+            if (t.namedBy) lean.namedBy = t.namedBy;
             return [id, lean];
         })));
     const parts = [

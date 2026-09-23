@@ -1,6 +1,6 @@
 {
-  "note": "MissionChief vehicle types, by the id the game uses in vehicle_type_id. Names come from the game's own buy pages, which name every type it sells whether or not the player can afford one. Capabilities are the plain attributes the game puts on a vehicle's checkbox in a mission window, so a type only carries them once one has been seen in a selection table; a type with a name and no capabilities is named but not yet judged, and MissionMagician leaves such a vehicle alone rather than assuming it covers nothing. Nothing here is guessed. `tank` is what a vehicle of the type carries and by how much a tanker lifts the total — {water, foam, bonus} straight off `wasser_amount`, `foam_amount_display` and `water_modifier_raw` on a selection checkbox; a zero is an answer, an absent `tank` is not. `crewSeen` is how many the type actually seats, measured off the at-mission table's Crew column, which is the only place in the game where a type and its crew meet. It is NOT `crew`, which is the buy page's Max. Crew — a cap somebody set, kept because the game states it and never used as a measurement.",
-  "source": "names: the game's own vehicle buy pages, via Diagnostics -> Vehicle types; capabilities: mission-window selection tables, via Diagnostics -> Copy the report; tanks and crewSeen: the player's own mission windows, via Diagnostics -> Copy what is missing; tanks: the player's own mission windows, reported 2026-09-23 (Diagnostics -> Copy the report, tanksByType)",
+  "note": "MissionChief vehicle types, by the id the game uses in vehicle_type_id. Names come from the game's own buy pages, which name every type it sells whether or not the player can afford one. Capabilities are the plain attributes the game puts on a vehicle's checkbox in a mission window, so a type only carries them once one has been seen in a selection table; a type with a name and no capabilities is named but not yet judged, and MissionMagician leaves such a vehicle alone rather than assuming it covers nothing. Nothing here is guessed. `tank` is what a vehicle of the type carries and by how much a tanker lifts the total — {water, foam, bonus} straight off `wasser_amount`, `foam_amount_display` and `water_modifier_raw` on a selection checkbox; a zero is an answer, an absent `tank` is not. `crewSeen` is how many the type actually seats, measured off the at-mission table's Crew column, which is the only place in the game where a type and its crew meet. It is NOT `crew`, which is the buy page's Max. Crew — a cap somebody set, kept because the game states it and never used as a measurement. `namedBy` is DERIVED, never measured: the dispatch-order editor labels each of its capability checkboxes with the vehicle name, so a flag whose label is a type's name — or whose label spells out alternatives with “or”, the way `oneof_…` requirement keys do — names that type. It was checked against every type whose flags the game had actually written on a checkbox: 11 confirmed, 1 apparent miss against a record carrying a single flag where its sibling carries five, i.e. an incomplete measurement rather than a contradiction. It is kept OUT of `capabilities` so a reading and a derivation are never mistaken for each other, and it is only ever added to what was measured, never substituted for it.",
+  "source": "names: the game's own vehicle buy pages, via Diagnostics -> Vehicle types; capabilities: mission-window selection tables, via Diagnostics -> Copy the report; tanks and crewSeen: the player's own mission windows, via Diagnostics -> Copy what is missing; tanks: the player's own mission windows, reported 2026-09-23 (Diagnostics -> Copy the report, tanksByType); namedBy and 18 further type names: derived from the /aaos/new labels, reported 2026-09-23",
   "updated": "2026-09-23",
   "types": {
     "0": {
@@ -39,7 +39,10 @@
         "water": 0,
         "foam": 0,
         "bonus": 0
-      }
+      },
+      "namedBy": [
+        "elw"
+      ]
     },
     "4": {
       "name": "Heavy rescue vehicle",
@@ -60,7 +63,10 @@
         "water": 0,
         "foam": 0,
         "bonus": 0
-      }
+      },
+      "namedBy": [
+        "rtw"
+      ]
     },
     "6": {
       "name": "Mobile air",
@@ -87,7 +93,10 @@
         "water": 3000,
         "foam": 0,
         "bonus": 25
-      }
+      },
+      "namedBy": [
+        "gwl2wasser"
+      ]
     },
     "8": {
       "name": "Utility unit",
@@ -118,7 +127,10 @@
         "water": 0,
         "foam": 0,
         "bonus": 0
-      }
+      },
+      "namedBy": [
+        "fustw_or_police_motorcycle"
+      ]
     },
     "12": {
       "name": "MCV",
@@ -160,11 +172,17 @@
     "15": {
       "name": "Fly-Car",
       "category": "Ambulance",
-      "requiredExtension": "Ambulance Extension"
+      "requiredExtension": "Ambulance Extension",
+      "namedBy": [
+        "fly_car"
+      ]
     },
     "16": {
       "name": "SWAT Armoured Vehicle",
-      "category": "SWAT"
+      "category": "SWAT",
+      "namedBy": [
+        "swat_armored_vehicle"
+      ]
     },
     "17": {
       "name": "Large ARFF Crash Tender",
@@ -201,12 +219,18 @@
     },
     "19": {
       "name": "K-9 Unit",
-      "category": "Police Cars"
+      "category": "Police Cars",
+      "namedBy": [
+        "k9"
+      ]
     },
     "20": {
       "name": "Mass Casualty Unit",
       "category": "Ambulance",
-      "requiredExtension": "Ambulance Extension"
+      "requiredExtension": "Ambulance Extension",
+      "namedBy": [
+        "grtw"
+      ]
     },
     "21": {
       "name": "Heavy Rescue + Light Boat",
@@ -220,11 +244,18 @@
     },
     "23": {
       "name": "Police Motorcycle",
-      "category": "Police Cars"
+      "category": "Police Cars",
+      "namedBy": [
+        "fustw_or_police_motorcycle",
+        "police_motorcycle"
+      ]
     },
     "26": {
       "name": "SWAT SUV",
-      "category": "SWAT"
+      "category": "SWAT",
+      "namedBy": [
+        "swat_suv"
+      ]
     },
     "27": {
       "name": "BLS Ambulance",
@@ -232,7 +263,10 @@
         "any_rtw"
       ],
       "category": "Ambulance",
-      "requiredExtension": "Ambulance Extension"
+      "requiredExtension": "Ambulance Extension",
+      "namedBy": [
+        "ktw"
+      ]
     },
     "28": {
       "name": "EMS Rescue",
@@ -242,7 +276,10 @@
     "29": {
       "name": "EMS Chief",
       "category": "Ambulance",
-      "requiredExtension": "Ambulance Extension"
+      "requiredExtension": "Ambulance Extension",
+      "namedBy": [
+        "kdow_orgl"
+      ]
     },
     "30": {
       "name": "Type 3 engine",
@@ -263,7 +300,10 @@
         "water": 500,
         "foam": 20,
         "bonus": 0
-      }
+      },
+      "namedBy": [
+        "brush_truck_1"
+      ]
     },
     "31": {
       "name": "Type 5 engine",
@@ -280,7 +320,10 @@
         "water": 400,
         "foam": 0,
         "bonus": 0
-      }
+      },
+      "namedBy": [
+        "brush_truck_2"
+      ]
     },
     "32": {
       "name": "Type 7 engine",
@@ -296,7 +339,10 @@
         "water": 50,
         "foam": 0,
         "bonus": 0
-      }
+      },
+      "namedBy": [
+        "brush_truck_3"
+      ]
     },
     "33": {
       "name": "Pumper Tanker",
@@ -319,7 +365,10 @@
     },
     "34": {
       "name": "Crew Carrier",
-      "category": "Other vehicles"
+      "category": "Other vehicles",
+      "namedBy": [
+        "crew_carrier"
+      ]
     },
     "38": {
       "name": "Type 4 engine",
@@ -336,7 +385,10 @@
         "water": 750,
         "foam": 0,
         "bonus": 0
-      }
+      },
+      "namedBy": [
+        "brush_truck_4"
+      ]
     },
     "39": {
       "name": "Type 6 engine",
@@ -352,7 +404,10 @@
         "water": 150,
         "foam": 0,
         "bonus": 0
-      }
+      },
+      "namedBy": [
+        "brush_truck_5"
+      ]
     },
     "40": {
       "name": "Dozer Trailer",
@@ -368,7 +423,10 @@
         "water": 0,
         "foam": 0,
         "bonus": 0
-      }
+      },
+      "namedBy": [
+        "dozer_trailer"
+      ]
     },
     "41": {
       "name": "Crew cab semi",
@@ -377,16 +435,25 @@
     "43": {
       "name": "FBI Investigation Wagon",
       "category": "Federal Police",
-      "requiredExtension": "Federal Police Extension"
+      "requiredExtension": "Federal Police Extension",
+      "namedBy": [
+        "fbi_investigation_unit"
+      ]
     },
     "45": {
       "name": "FBI Bomb Technician Vehicle",
-      "category": "Federal Police"
+      "category": "Federal Police",
+      "namedBy": [
+        "fbi_bomb_tech"
+      ]
     },
     "46": {
       "name": "FBI Surveillance Drone",
       "category": "Federal Police",
-      "requiredExtension": "Federal Police Extension"
+      "requiredExtension": "Federal Police Extension",
+      "namedBy": [
+        "fbi_drone"
+      ]
     },
     "47": {
       "name": "Police Supervisor / Sheriff Unit",
@@ -406,6 +473,22 @@
       "name": "Hazmat Ambulance",
       "category": "Ambulance",
       "requiredExtension": "Ambulance Extension"
+    },
+    "51": {
+      "name": "DEA Unit",
+      "source": "the dispatch-order editor"
+    },
+    "52": {
+      "name": "DEA Clan Lab",
+      "source": "the dispatch-order editor"
+    },
+    "53": {
+      "name": "ATF Unit",
+      "source": "the dispatch-order editor"
+    },
+    "54": {
+      "name": "ATF Lab Vehicle",
+      "source": "the dispatch-order editor"
     },
     "55": {
       "name": "Patrol Boat",
@@ -485,7 +568,10 @@
         "water": 0,
         "foam": 2500,
         "bonus": 0
-      }
+      },
+      "namedBy": [
+        "gwl2wasser"
+      ]
     },
     "65": {
       "name": "Foam Trailer",
@@ -520,6 +606,22 @@
       "category": "Life Guards",
       "requiredExtension": "Lifeguard Extension"
     },
+    "69": {
+      "name": "Small Coastal Boat",
+      "source": "the dispatch-order editor"
+    },
+    "70": {
+      "name": "Large Coastal Boat",
+      "source": "the dispatch-order editor"
+    },
+    "71": {
+      "name": "Coastal Helicopter",
+      "source": "the dispatch-order editor"
+    },
+    "72": {
+      "name": "Coastal Guard Plane",
+      "source": "the dispatch-order editor"
+    },
     "73": {
       "name": "Small Coastal Boat Trailer",
       "category": "Life Guards",
@@ -538,6 +640,14 @@
         "foam": 0,
         "bonus": 0
       }
+    },
+    "75": {
+      "name": "Wildland Lead Plane",
+      "source": "the dispatch-order editor"
+    },
+    "76": {
+      "name": "Smoke Jumper Plane",
+      "source": "the dispatch-order editor"
     },
     "77": {
       "name": "Tanker Semi Truck Trailer",
@@ -594,12 +704,18 @@
     "83": {
       "name": "Riot Police Van",
       "category": "Riot Police",
-      "requiredExtension": "Riot Police Extension"
+      "requiredExtension": "Riot Police Extension",
+      "namedBy": [
+        "riot_police"
+      ]
     },
     "84": {
       "name": "Riot Police Bus",
       "category": "Riot Police",
-      "requiredExtension": "Riot Police Extension"
+      "requiredExtension": "Riot Police Extension",
+      "namedBy": [
+        "riot_police"
+      ]
     },
     "85": {
       "name": "Riot Police Trailer",
@@ -694,6 +810,20 @@
       "category": "Other vehicles",
       "requiredExtension": "Traffic Control Extension"
     },
+    "105": {
+      "name": "Wrecker",
+      "source": "the dispatch-order editor",
+      "namedBy": [
+        "car_carrier"
+      ]
+    },
+    "106": {
+      "name": "Flatbed Carrier",
+      "source": "the dispatch-order editor",
+      "namedBy": [
+        "car_carrier"
+      ]
+    },
     "107": {
       "name": "Fire Wrecker",
       "category": "Tow Trucks",
@@ -727,6 +857,10 @@
       "category": "Water Rescue",
       "requiredExtension": "Police Water Rescue"
     },
+    "113": {
+      "name": "Rotator Truck",
+      "source": "the dispatch-order editor"
+    },
     "116": {
       "name": "Small Fire Equipment Trailer",
       "category": "Trailer"
@@ -746,6 +880,26 @@
     "120": {
       "name": "Large Police Equipment Trailer",
       "category": "Equipment Trailer"
+    },
+    "121": {
+      "name": "Snow Trailer",
+      "source": "the dispatch-order editor"
+    },
+    "122": {
+      "name": "ATV",
+      "source": "the dispatch-order editor"
+    },
+    "123": {
+      "name": "ATV Trailer",
+      "source": "the dispatch-order editor"
+    },
+    "124": {
+      "name": "Mountain Dog",
+      "source": "the dispatch-order editor"
+    },
+    "125": {
+      "name": "Mountain Height Rescue",
+      "source": "the dispatch-order editor"
     },
     "126": {
       "name": "Hooklift Truck",

@@ -570,7 +570,18 @@ function mmKnownTypes() {
      * without capabilities stays unknown here, so a vehicle already at the mission
      * is left alone rather than judged to cover nothing. */
     for (const [id, t] of Object.entries(MM_SHIPPED_TYPES)) {
-        if (Array.isArray(t.capabilities)) known[id] = t.capabilities;
+        /* MEASURED FIRST, DERIVED BESIDE IT. `capabilities` came off a
+         * checkbox; `namedBy` was derived from the dispatch-order editor
+         * labelling its own capability boxes with the vehicle's name. Both are
+         * the game's words, so both count towards what a vehicle at a mission
+         * covers — but a measured set that is thin is filled out by the
+         * derivation rather than replaced by it, which is why they are unioned
+         * rather than one winning. */
+        const both = [...new Set([
+            ...(Array.isArray(t.capabilities) ? t.capabilities : []),
+            ...(Array.isArray(t.namedBy) ? t.namedBy : []),
+        ])];
+        if (both.length) known[id] = both;
     }
     /* What this game taught wins: the player's own server is the truth here.
      *
