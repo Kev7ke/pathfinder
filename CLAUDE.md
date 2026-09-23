@@ -1563,6 +1563,28 @@ not written down has to be asked for again.
 - **Endpoints** that started or stopped answering change the `ENDPOINTS` list in
   Diagnostics.
 
+**A type nothing could read is in no report to be missing from.** Every store the
+gap is worked out of — `ymca-vehicle-types`, `ymca-missionmagician-types`, the
+tanks, the seats — is written by something that has already read a vehicle. So a
+type that has never been read is in none of them, and the difference against the
+repo could only ever be a difference between two things that had been read. The
+Type 1 fire engine is `vehicle_type` **0**, the player owns exactly one, and it
+went through a dozen rounds of exports without appearing in a single one: the
+falsy-`typeId` bug threw it away on the mission-window side, and on the report
+side there was nothing to notice, because nothing was there. Every
+`capabilitiesByType` sent in that time starts at `"1"`.
+
+**Owned and unread is a third state and it says so on its own.** The gap now
+reads the cached `/api/vehicles` as well, so a type this game owns that neither
+the repo nor this install has flags for is named — by name, with how many of
+them — the moment Diagnostics opens, as `ownedUnknown` and in a sentence of its
+own. It is deliberately **not** joined to the "this game has taught YMCA…"
+sentence: what was learnt is worth sending, what could not be read is worth
+pressing **What they can do** about, and one reads as the other if they share a
+full stop. **Nothing about it is filled in from a sibling type**: a Type 1 is not
+a Type 2 with a bigger tank as far as this repo is concerned, and the entry stays
+empty until the game states it.
+
 Each of those carries a `source`, and none of them is inferred from a name.
 A type seen only in the player's localStorage is not in the dataset yet — it is
 in the dataset when it is in `data/`.

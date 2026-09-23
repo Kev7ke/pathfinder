@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.61
+// @version      0.0.62
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.61',
+    version: '0.0.62',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -9259,10 +9259,25 @@ function repoGap() {
     const nameOf = (id) => (learnt[id] && !Array.isArray(learnt[id]) && learnt[id].name)
         || (mm[id] && !Array.isArray(mm[id]) && mm[id].name) || null;
 
+    /* THE FLEET IS THE THIRD ANSWER. Every store here is written by something
+     * that already read a vehicle, so a type this game owns and nothing has
+     * ever managed to read is in none of them — not learnt, not shipped, and
+     * not reported either. That is how one Type 1 fire engine stayed invisible
+     * through a dozen rounds of exports: it was never in a report to be
+     * missing from. Owned-and-unknown is a state of its own and it says so. */
+    let owned = new Map();
+    try {
+        const cached = JSON.parse(localStorage.getItem('ymca-cache-/api/vehicles'));
+        for (const v of (Array.isArray(cached?.value) ? cached.value : [])) {
+            const t = String(v.vehicle_type ?? '');
+            if (t) owned.set(t, (owned.get(t) || 0) + 1);
+        }
+    } catch (e) { owned = new Map(); }
+
     const ids = new Set([...Object.keys(learnt), ...Object.keys(mm),
-        ...Object.keys(tanks), ...Object.keys(crew)]);
+        ...Object.keys(tanks), ...Object.keys(crew), ...owned.keys()]);
     const types = {};
-    const counts = { noEntry: 0, noCapabilities: 0, noTank: 0, noCrew: 0 };
+    const counts = { noEntry: 0, noCapabilities: 0, noTank: 0, noCrew: 0, ownedUnknown: 0 };
     for (const id of [...ids].sort((a, b) => Number(a) - Number(b))) {
         const shipped = SHIPPED_VEHICLE_TYPES[id];
         const caps = capsOf(learnt[id]).length ? capsOf(learnt[id]) : capsOf(mm[id]);
@@ -9287,6 +9302,16 @@ function repoGap() {
             entry.crewSeen = crew[id];
             why.push('the repo has no measured crew for it');
             counts.noCrew += 1;
+        }
+        /* Nothing to send — which is the whole point of saying it. This one is
+         * a job for the sweep, not for a round trip, and until it is named
+         * nobody knows there is a job. */
+        if (owned.has(id) && !caps.length
+            && !(shipped && shipped.capabilities && shipped.capabilities.length)) {
+            entry.youOwn = owned.get(id);
+            entry.name = entry.name || nameOf(id) || shipped?.name || null;
+            why.push('this game has one and nothing here knows what it covers');
+            counts.ownedUnknown += 1;
         }
         if (why.length) types[id] = { ...entry, why };
     }
@@ -9318,7 +9343,16 @@ function repoGapLine(gap) {
     if (c.unmatchedRequirements) {
         bits.push(`${c.unmatchedRequirements} requirement${c.unmatchedRequirements === 1 ? '' : 's'} nothing could match`);
     }
-    return `This game has taught YMCA ${bits.join(', ')} that the repo does not have.`;
+    /* Two sentences, because they ask for different things. What was learnt is
+     * worth sending; what could not be read is worth pressing a button about,
+     * and joining them would make one read as the other. */
+    const taught = bits.length
+        ? `This game has taught YMCA ${bits.join(', ')} that the repo does not have.` : '';
+    const blind = c.ownedUnknown
+        ? `${c.ownedUnknown} vehicle type${c.ownedUnknown === 1 ? '' : 's'} you own `
+          + `${c.ownedUnknown === 1 ? 'is' : 'are'} still unread — What they can do asks the game directly.`
+        : '';
+    return [taught, blind].filter(Boolean).join(' ');
 }
 
 function moduleStore(moduleId) {

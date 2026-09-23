@@ -378,9 +378,39 @@ assert.equal(gap.types['999'].crewSeen, 3, 'and the seats measured off the Crew 
 assert.equal(gap.types['999'].name, 'Something Nobody Ships', 'named, so it can be written down');
 // A type the repo already carries in full is not news.
 assert.ok(!gap.types['13'], 'the Quint is shipped, so it is not in what is missing');
+
+// ---- a type you own that nothing has ever read ----
+// Every store above is written by something that already read a vehicle, so a type nobody could
+// read is in none of them and therefore in no report either. That is how one Type 1 fire engine
+// (vehicle_type 0, and zero is falsy) stayed invisible through a dozen rounds of exports. Owned
+// and unread is a third state and it has to say so on its own.
+await pg.evaluate(() => {
+  localStorage.setItem('ymca-cache-/api/vehicles', JSON.stringify({
+    at: Date.now(),
+    value: [{ id: 1, vehicle_type: 0 }, { id: 2, vehicle_type: 13 }],
+  }));
+});
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="diagnostics"]');
+await pg.waitForSelector('[data-do="gap"]');
+const blindSaid = (await pg.textContent('[data-gap]')).replace(/\s+/g, ' ').trim();
+console.log('owned but unread  :', blindSaid);
+assert.match(blindSaid, /1 vehicle type you own is still unread/,
+  'a type owned and unread says so without anybody pressing anything');
+await pg.click('[data-do="gap"]');
+await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ownedUnknown'));
+const blind = JSON.parse(await pg.inputValue('#ymca-diag-out'));
+console.log('owned but unread  :', JSON.stringify(blind.types['0']));
+assert.equal(blind.counts.ownedUnknown, 1, 'exactly the one nothing can read');
+assert.equal(blind.types['0'].youOwn, 1, 'and it says how many of them this game has');
+assert.match(blind.types['0'].why.join(' '), /nothing here knows what it covers/,
+  'in the words that say what to do about it');
+assert.ok(!blind.types['13'], 'the Quint is read, so it is not blind');
+
 await pg.evaluate(() => {
   localStorage.removeItem('ymca-missionmagician-tanks');
   localStorage.removeItem('ymca-missionmagician-crew-seen');
+  localStorage.removeItem('ymca-cache-/api/vehicles');
 });
 
 // ---- what the game's own dispatch orders know ----
