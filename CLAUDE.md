@@ -819,8 +819,23 @@ this flag itself*. Anything needing a suffix added or a word swapped
 inferring from a name, which every other entry was written to avoid. Forty keys
 stay unmatched and stay listed.
 
-**The whole vocabulary is in `data/vehicle-flags.json`**, with the editor's own
-tab as `branch`. Three of the sixty-five — `wasser_amount`, `foam_amount`,
+**The whole vocabulary is in `data/vehicle-flags.json`**, inlined by the build,
+with the editor's own tab as `branch`.
+
+**Nothing is matched against it that was not matched already.** A requirement is
+still only ever answered by a flag some vehicle *in that table* actually
+carries, because a rule that picks a vehicle nothing in range can be is a rule
+that picks nothing. What the vocabulary is for is **telling two silences apart**
+— they used to read identically as "left alone":
+
+- the game **has** a word for it and nothing in range carries it. The rule is
+  not what is missing, a vehicle is, and that is the player's answer to give:
+  *"Nothing in range can do this: SWAT."*
+- the game names it nowhere. Then YMCA genuinely does not know what answers it,
+  which is ours to fix: *"Left alone: Wobble wagons."* with the button that
+  sends the mission type over.
+
+A file the build does not read is a file nobody reads. Three of the sixty-five — `wasser_amount`, `foam_amount`,
 `water_damage_pump_value` — are **figures the editor filters on rather than
 capabilities**, and are marked `isAmount` so nothing treats them as a flag a
 vehicle either has or has not.

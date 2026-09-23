@@ -537,6 +537,28 @@ const MM_TYPES_KEY = 'ymca-missionmagician-types';
  */
 const MM_SHIPPED_TYPES = __VEHICLE_TYPES__;
 
+/**
+ * Every capability the game has a word for, from its own dispatch-order form.
+ *
+ * NOTHING IS MATCHED AGAINST THIS. A requirement is still only ever answered by
+ * a flag some vehicle in the table actually carries, because a rule that picks
+ * a vehicle nothing in range can be is a rule that picks nothing.
+ *
+ * What it is for is the difference between two silences that read identically:
+ * a key the game HAS a word for, where nothing in range carries it — go and
+ * buy one — and a key YMCA has never heard of, which is a gap in this tool. The
+ * first is the player's answer to give; the second is ours.
+ */
+const MM_GAME_FLAGS = new Set(__VEHICLE_FLAGS__);
+
+/** Is this requirement key a capability the game itself names? */
+function mmGameKnowsFlag(key) {
+    if (MM_GAME_FLAGS.has(key)) return key;
+    const squashed = key.replace(/_/g, '');
+    for (const f of MM_GAME_FLAGS) if (f.replace(/_/g, '') === squashed) return f;
+    return null;
+}
+
 function mmKnownTypes() {
     let learnt = {};
     try {
@@ -1288,7 +1310,14 @@ async function mmPlan(page, ctx, cfg) {
                 }
             }
             if (!rule) {
-                lines.push({ key, label: mmPretty(key), wanted, found: null, unmatched: true });
+                /* Two silences that used to read the same. The game naming
+                 * the capability means the fleet is short of one, not that
+                 * YMCA is short of a rule. */
+                const known = mmGameKnowsFlag(key);
+                lines.push({
+                    key, label: mmPretty(key), wanted, found: null, unmatched: true,
+                    gameFlag: known,
+                });
                 mmRememberUnmatched(key, page.missionType);
                 mmPublishMappedFlags();
                 continue;
@@ -2811,6 +2840,31 @@ async function mmCopyType(ctx, typeId) {
 }
 
 
+/**
+ * The two silences, told apart.
+ *
+ * A requirement with no rule used to read one way: "left alone". But the game
+ * naming that capability on its own dispatch-order form means the rule is not
+ * what is missing — a vehicle is. That is the player's answer to give, and it
+ * is a different sentence from "YMCA has never heard of this", which is ours.
+ */
+function mmUnmatchedNote(unmatched, ctx) {
+    if (!unmatched.length) return '';
+    const theirs = unmatched.filter((l) => l.gameFlag);
+    const ours = unmatched.filter((l) => !l.gameFlag);
+    const names = (list) => list.map((l) => ctx.esc(l.label)).join(', ');
+    return `<div class="alert alert-warning" style="padding:6px 10px">
+      ${theirs.length ? `<div><b>Nothing in range can do this:</b> ${names(theirs)}.
+        ${theirs.length > 1 ? 'They are' : 'It is'} ${theirs.length > 1 ? '' : 'a '}capabilit${
+    theirs.length > 1 ? 'ies' : 'y'} the game has, so what is missing is the vehicle.</div>` : ''}
+      ${ours.length ? `<div${theirs.length ? ' style="margin-top:4px"' : ''}>
+        <b>Left alone:</b> ${names(ours)}. Not a capability the game names, so YMCA does not
+        know what answers ${ours.length > 1 ? 'them' : 'it'}.
+        <button type="button" class="btn btn-xs btn-default" data-do="type">Copy this mission
+          type</button> to have it added.</div>` : ''}
+    </div>`;
+}
+
 function mmGamePanelHtml(plan, cfg, ctx) {
     if (!plan.requirements) {
         return `<div class="panel-body">
@@ -2908,10 +2962,7 @@ function mmGamePanelHtml(plan, cfg, ctx) {
             : 'whose type has not been seen in a selection list yet'}, so what they cover is
         not known` : ''}.</p>` : ''}
 
-      ${unmatched.length ? `<div class="alert alert-warning" style="padding:6px 10px">
-        <b>Left alone:</b> ${unmatched.map((l) => ctx.esc(l.label)).join(', ')}.
-        <button type="button" class="btn btn-xs btn-default" data-do="type">Copy this mission
-          type</button> to have it added.</div>` : ''}
+      ${mmUnmatchedNote(unmatched, ctx)}
 
       <!-- The switches stack on the left and the buttons keep the last line to
            themselves, hard right. They were one row: a fourth switch pushed the

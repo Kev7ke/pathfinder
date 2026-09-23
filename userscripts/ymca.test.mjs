@@ -1130,6 +1130,39 @@ console.log('unmatched keys    :', JSON.stringify(remembered.slice(-3)));
 assert.ok(remembered.includes('hovercraft_wranglers'),
   'and carried into the report so it can be added');
 
+// ---- two silences, told apart ----
+// A requirement with no rule used to read one way: "left alone". But if the game names that
+// capability on its own dispatch-order form, the rule is not what is missing — a vehicle is.
+// That is the player's answer to give; "YMCA has never heard of this" is ours.
+await mission.evaluate(() => {
+  window.__catalogue = [{
+    id: '315', name: 'Two silences', average_credits: 500,
+    requirements: { swat: 1, wobble_wagons: 1 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('vehicle_show_table_body_all').innerHTML = `
+    <tr class="vehicle_select_table_tr" vehicle_id="701" data-distance="1">
+      <td><input type="checkbox" class="vehicle_checkbox" value="701" name="vehicle_ids[]"
+        vehicle_type_id="10" fms="2" fustw="1"></td>
+      <td id="vehicle_sort_701" timevalue="300">5 min.</td></tr>`;
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '315');
+});
+await mission.waitForTimeout(1200);
+const silences = (await mission.textContent('#ymca-mm-panel .alert-warning'))
+  .replace(/\s+/g, ' ').trim();
+console.log('two silences      :', silences.slice(0, 150));
+// `swat` is on the game's own form, and no patrol car carries it.
+assert.match(silences, /Nothing in range can do this: Swat\b/,
+  'a capability the game names means the fleet is short, not the rule');
+assert.match(silences, /what is missing is the vehicle/, 'and it says whose answer that is');
+// `wobble_wagons` is on no form anywhere.
+assert.match(silences, /Left alone: Wobble wagons/, 'a key the game never names stays ours');
+assert.match(silences, /does not know what answers/, 'and says so in as many words');
+// Neither is picked for: nothing is invented either way.
+assert.equal(await mission.evaluate(() =>
+  (document.getElementById('ymca-mm-panel')?.dataset.pick || '')), '',
+'and neither silence picks a vehicle');
+
 // ---- seventeen keys the game named itself ----
 // /aaos/new carries a checkbox per capability the game has — aao[k9], aao[arff], aao[fwk] —
 // and for these the requirement key and the flag are the same word, character for character.
