@@ -1470,13 +1470,28 @@ in `data/vehicle-types.json` may carry a name and no `capabilities`, and that is
 not the same as covering nothing: MissionMagician leaves a vehicle of such a
 type alone rather than judging it.
 
-**A vehicle's own page is the same vehicle without the mission.**
-`/vehicles/<id>` is asked directly by **Diagnostics → What they can do**: one
-vehicle per type owned, and every attribute the game set to `1` on an element
-carrying `vehicle_type_id` is a flag. That is what fills a fleet in one press
-instead of waiting for each type to happen to be in range of an open mission.
-Where a page carries no such element the type is reported as unanswered, with
-the ids and classes that page *did* have, so the next read knows where to look.
+**A vehicle's own page was written down here as the same vehicle without the
+mission, and a real account says it is not.** `/vehicles/<id>` is asked by
+**Diagnostics → What they can do**, one vehicle per type owned — and it came
+back **26 types out of 26** with *no element on that page carries
+`vehicle_type_id`*. The reader that was going to fill a fleet in one press had
+never filled anything, on any install, and the same wrong selector sat in the
+background sweep, which had therefore been backing off for six hours at a time
+and learning nothing. **Every flag any install has ever had came off a mission
+window.**
+
+So the page is asked for a **capability by name** now, on whatever element the
+game happens to have written it, against the sixty-five words off the
+dispatch-order form — `data/vehicle-flags.json` is inlined into Diagnostics for
+exactly that. A type id on the element is no longer what makes a flag findable.
+
+And where that still finds nothing, what comes back is the page's **shape**, not
+a shrug: whether *any* of the sixty-five words is anywhere on it, every attribute
+**name** on `#vehicle_details` and everything inside it, the elements with ids,
+and — because `img#ajax-loader`, `div#load_info` and `div#loading_error` beside
+an empty details panel is what a page that fetches its own content looks like —
+**the paths the page names, with every digit masked**. Names and paths are
+structure; a figure the page is showing would not be.
 
 **The repo ships what it has measured, not only what it has named.** Three
 fields, and each answers a different question:
@@ -1489,6 +1504,14 @@ fields, and each answers a different question:
 
 `crewSeen` is **not** `crew`, which is the buy page's `Max. Crew` — a cap
 somebody set, kept because the game states it and never used as a measurement.
+
+**Ask what a page holds before writing down that it holds it.** The vehicle page
+went into this file as a fact and into two readers as a selector, and nothing
+between the writing and the 26-out-of-26 checked it against a real one. What
+made it visible in the end was the capture saying *why* it found nothing, per
+type, rather than simply returning an empty set — which is the same rule as
+`rowSaidNoType` and `answeredWithNoTank`, and the reason to keep spending a line
+on it.
 
 **A figure with no repo fallback is a figure every install starts blind on.**
 Capabilities were shipped and tanks were not, so four rounds of reports came

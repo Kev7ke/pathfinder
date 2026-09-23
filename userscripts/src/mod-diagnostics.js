@@ -1020,6 +1020,10 @@ function moduleStore(moduleId) {
  * page built differently can be read next time rather than argued about. No
  * captions, no addresses, no building names: attribute and class names only.
  */
+/* Every capability the game has a word for, off its own dispatch-order form.
+ * Here it answers one question: is any of them anywhere on a vehicle's page. */
+const VEHICLE_FLAGS = new Set(__VEHICLE_FLAGS__);
+
 const CAP_NOT_A_FLAG = new Set([
     'fms', 'checked', 'disabled', 'value', 'name', 'type', 'id', 'class',
     'vehicle_type_id', 'direct', 'distance', 'tabindex', 'custom_',
@@ -1055,6 +1059,74 @@ function sweepState() {
                 return at ? new Date(at).toISOString() : null;
             } catch (e) { return null; }
         })(),
+    };
+}
+
+/**
+ * What a vehicle's own page is made of, where it is made of nothing readable.
+ *
+ * `/vehicles/<id>` was written down as the page that states a vehicle's flags.
+ * A real account answered **26 types out of 26** with "no element on that page
+ * carries vehicle_type_id", so it does not state them — and the reader that
+ * was going to fill a fleet in one press had never filled anything.
+ *
+ * So the question this reports changed. Not "which ids does it have" but: is
+ * any word the game has for a capability anywhere on it, under any element;
+ * what attribute names does the details panel carry at all; and where does the
+ * page fetch its own content from, since a loader, an error box and an empty
+ * panel is what a page that fetches looks like. Structure and request paths,
+ * which is what a capture takes — never a figure the page is showing.
+ */
+function vehiclePageShape(doc) {
+    const named = (el) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}`
+        + (typeof el.className === 'string' && el.className.trim()
+            ? `.${el.className.trim().split(/\s+/).join('.')}` : '');
+
+    const flagsAnywhere = [];
+    for (const el of doc.querySelectorAll('*')) {
+        const hit = [...el.attributes].map((a) => a.name.toLowerCase())
+            .filter((n) => VEHICLE_FLAGS.has(n));
+        if (hit.length) flagsAnywhere.push({ el: named(el), flags: hit.slice(0, 20) });
+        if (flagsAnywhere.length >= 10) break;
+    }
+
+    /* Attribute NAMES only, on the details panel and everything inside it. If
+     * the flags are there under names nobody here has heard of, this is where
+     * they show up — and a name is structure, where a value would not be. */
+    const details = doc.querySelector('#vehicle_details') || doc.body;
+    const attributeNames = new Set();
+    if (details) {
+        for (const el of [details, ...details.querySelectorAll('*')]) {
+            for (const a of el.attributes) attributeNames.add(a.name.toLowerCase());
+        }
+    }
+
+    /* Where it goes for the rest of itself. Digits masked, so an id of the
+     * player's never rides along in one. */
+    const paths = new Set();
+    const take = (text) => {
+        for (const m of String(text || '').match(/\/[a-zA-Z0-9_\-/]{3,60}/g) || []) {
+            paths.add(m.replace(/\d+/g, '#'));
+            if (paths.size >= 40) return;
+        }
+    };
+    for (const sc of doc.querySelectorAll('script:not([src])')) take(sc.textContent);
+    for (const el of doc.querySelectorAll('[data-url], [data-src], [data-href]')) {
+        take(el.getAttribute('data-url') || el.getAttribute('data-src')
+            || el.getAttribute('data-href'));
+    }
+
+    return {
+        bodyChars: (doc.body?.textContent || '').length,
+        anyFlagAnywhere: flagsAnywhere.length ? flagsAnywhere : 'none of the 65 words the game has',
+        elementsWithId: [...doc.querySelectorAll('[id]')]
+            .map((el) => `${el.tagName.toLowerCase()}#${el.id}`).slice(0, 40),
+        attributeNamesOnDetails: [...attributeNames].sort().slice(0, 60),
+        formActions: [...doc.querySelectorAll('form')]
+            .map((f) => (f.getAttribute('action') || '').replace(/\d+/g, '#')),
+        tablesAndPanels: [...doc.querySelectorAll('table, .panel, .well')]
+            .map((el) => named(el)).slice(0, 20),
+        pathsThePageNames: [...paths].sort().slice(0, 40),
     };
 }
 
@@ -1094,7 +1166,17 @@ async function vehicleCapabilities(ctx) {
              * this side, so what comes back is reported either way rather than
              * assumed. */
             const tank = {};
-            for (const el of doc.querySelectorAll('[vehicle_type_id]')) {
+            /* The type id is where the flags sat in a mission window, so it is
+             * where they were looked for here. A real account answered 26 types
+             * out of 26 with "no element carries vehicle_type_id", so the page
+             * is asked for a flag by name as well — whatever element the game
+             * happens to have written it on. */
+            let carriers = [...doc.querySelectorAll('[vehicle_type_id]')];
+            if (!carriers.length) {
+                carriers = [...doc.querySelectorAll('*')].filter((el) => [...el.attributes]
+                    .some((a) => VEHICLE_FLAGS.has(a.name.toLowerCase())));
+            }
+            for (const el of carriers) {
                 for (const attr of el.attributes) {
                     const n = attr.name.toLowerCase();
                     if (attr.value === '1') {
@@ -1120,20 +1202,11 @@ async function vehicleCapabilities(ctx) {
             if (flags.size) {
                 found[typeId] = [...flags].sort();
             } else {
-                unanswered.push({ typeId, why: 'no element on that page carries vehicle_type_id' });
+                unanswered.push({ typeId,
+                    why: 'nothing on that page carries a capability the game has a word for' });
                 /* Once only, and structure alone: the ids and classes of what the
                  * page is built from, so the next read knows where to look. */
-                if (!shape) {
-                    shape = {
-                        elementsWithId: [...doc.querySelectorAll('[id]')]
-                            .map((el) => `${el.tagName.toLowerCase()}#${el.id}`).slice(0, 40),
-                        formActions: [...doc.querySelectorAll('form')]
-                            .map((f) => (f.getAttribute('action') || '').replace(/\d+/g, '#')),
-                        tablesAndPanels: [...doc.querySelectorAll('table, .panel, .well')]
-                            .map((el) => `${el.tagName.toLowerCase()}.${el.className}`.trim())
-                            .slice(0, 20),
-                    };
-                }
+                if (!shape) shape = vehiclePageShape(doc);
             }
         } catch (err) {
             unanswered.push({ typeId, why: err.message });
@@ -1264,7 +1337,15 @@ async function learnNewTypes(ctx) {
             if (!res.ok) continue;
             const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
             const flags = new Set();
-            for (const el of doc.querySelectorAll('[vehicle_type_id]')) {
+            /* The same widening as the button's: a vehicle page carries no
+             * `vehicle_type_id` on a real account, so the flags are asked for
+             * by name wherever the game has written them. */
+            let carriers = [...doc.querySelectorAll('[vehicle_type_id]')];
+            if (!carriers.length) {
+                carriers = [...doc.querySelectorAll('*')].filter((el) => [...el.attributes]
+                    .some((a) => VEHICLE_FLAGS.has(a.name.toLowerCase())));
+            }
+            for (const el of carriers) {
                 for (const attr of el.attributes) {
                     if (attr.value !== '1') continue;
                     const n = attr.name.toLowerCase();
