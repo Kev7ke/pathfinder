@@ -1505,6 +1505,18 @@ fields, and each answers a different question:
 `crewSeen` is **not** `crew`, which is the buy page's `Max. Crew` — a cap
 somebody set, kept because the game states it and never used as a measurement.
 
+**A button that never comes back and a button that does nothing look the same.**
+Every press here catches a throw and writes it into the output box, so a failure
+is never silent — but a press that *hangs* writes nothing at all, and "it is
+just empty" is what that looks like from the outside. Two things follow. Every
+sweep over the game's own markup is **bounded**: at most two hundred elements
+carrying a flag, twenty inline scripts, sixty-four thousand characters of each,
+and `exec` in a loop rather than `String.match` with `/g`, which builds every
+match in a megabyte bundle before anything looks at the first one. And the
+status line **counts as it goes** — *Reading type 7 of 26* — because the answer
+to "nothing happened" has to be visible while it is still happening. A fixture
+is never the page that finds this; a real account is.
+
 **Ask what a page holds before writing down that it holds it.** The vehicle page
 went into this file as a fact and into two readers as a selector, and nothing
 between the writing and the 26-out-of-26 checked it against a real one. What

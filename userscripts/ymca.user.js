@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.63
+// @version      0.0.64
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.63',
+    version: '0.0.64',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -9529,6 +9529,26 @@ function sweepState() {
  * panel is what a page that fetches looks like. Structure and request paths,
  * which is what a capture takes — never a figure the page is showing.
  */
+/**
+ * Every element the game wrote a capability on, whatever element that is.
+ *
+ * Bounded at two hundred: a page that answers with more than that is not a
+ * vehicle page, and an unbounded sweep of a real document is how a button
+ * stops coming back.
+ */
+function elementsCarryingAFlag(doc) {
+    const out = [];
+    for (const el of doc.querySelectorAll('*')) {
+        for (const a of el.attributes) {
+            if (!VEHICLE_FLAGS.has(a.name.toLowerCase())) continue;
+            out.push(el);
+            break;
+        }
+        if (out.length >= 200) break;
+    }
+    return out;
+}
+
 function vehiclePageShape(doc) {
     const named = (el) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}`
         + (typeof el.className === 'string' && el.className.trim()
@@ -9536,8 +9556,11 @@ function vehiclePageShape(doc) {
 
     const flagsAnywhere = [];
     for (const el of doc.querySelectorAll('*')) {
-        const hit = [...el.attributes].map((a) => a.name.toLowerCase())
-            .filter((n) => VEHICLE_FLAGS.has(n));
+        const hit = [];
+        for (const a of el.attributes) {
+            const n = a.name.toLowerCase();
+            if (VEHICLE_FLAGS.has(n)) hit.push(n);
+        }
         if (hit.length) flagsAnywhere.push({ el: named(el), flags: hit.slice(0, 20) });
         if (flagsAnywhere.length >= 10) break;
     }
@@ -9554,15 +9577,28 @@ function vehiclePageShape(doc) {
     }
 
     /* Where it goes for the rest of itself. Digits masked, so an id of the
-     * player's never rides along in one. */
+     * player's never rides along in one.
+     *
+     * BOUNDED, because the game's own page is not a fixture. `String.match`
+     * with /g builds the whole array before anything looks at it, and an
+     * inline bundle can be megabytes — which is a button that never comes
+     * back rather than a button that fails, and the two look the same from
+     * the outside. Sixty-four thousand characters per script, twenty scripts,
+     * and `exec` so it stops at forty instead of finding every one first. */
     const paths = new Set();
     const take = (text) => {
-        for (const m of String(text || '').match(/\/[a-zA-Z0-9_\-/]{3,60}/g) || []) {
-            paths.add(m.replace(/\d+/g, '#'));
-            if (paths.size >= 40) return;
+        const s = String(text || '').slice(0, 64000);
+        const re = /\/[a-zA-Z0-9_\-/]{3,60}/g;
+        let m = re.exec(s);
+        while (m && paths.size < 40) {
+            paths.add(m[0].replace(/\d+/g, '#'));
+            m = re.exec(s);
         }
     };
-    for (const sc of doc.querySelectorAll('script:not([src])')) take(sc.textContent);
+    for (const sc of [...doc.querySelectorAll('script:not([src])')].slice(0, 20)) {
+        if (paths.size >= 40) break;
+        take(sc.textContent);
+    }
     for (const el of doc.querySelectorAll('[data-url], [data-src], [data-href]')) {
         take(el.getAttribute('data-url') || el.getAttribute('data-src')
             || el.getAttribute('data-href'));
@@ -9602,7 +9638,13 @@ async function vehicleCapabilities(ctx) {
     const tanks = {};
     const noTank = [];
 
+    let done = 0;
     for (const [typeId, vehicleId] of oneEach) {
+        /* A button that says nothing for half a minute reads as a button that
+         * did nothing, and the answer to "it is just empty" has to be visible
+         * while it is still running. */
+        done += 1;
+        ctx.status(`Reading type ${done} of ${oneEach.size}\u2026`);
         try {
             const res = await fetch(`/vehicles/${vehicleId}`, { credentials: 'same-origin' });
             if (!res.ok) { unanswered.push({ typeId, why: `HTTP ${res.status}` }); continue; }
@@ -9624,10 +9666,7 @@ async function vehicleCapabilities(ctx) {
              * is asked for a flag by name as well — whatever element the game
              * happens to have written it on. */
             let carriers = [...doc.querySelectorAll('[vehicle_type_id]')];
-            if (!carriers.length) {
-                carriers = [...doc.querySelectorAll('*')].filter((el) => [...el.attributes]
-                    .some((a) => VEHICLE_FLAGS.has(a.name.toLowerCase())));
-            }
+            if (!carriers.length) carriers = elementsCarryingAFlag(doc);
             for (const el of carriers) {
                 for (const attr of el.attributes) {
                     const n = attr.name.toLowerCase();
@@ -9793,10 +9832,7 @@ async function learnNewTypes(ctx) {
              * `vehicle_type_id` on a real account, so the flags are asked for
              * by name wherever the game has written them. */
             let carriers = [...doc.querySelectorAll('[vehicle_type_id]')];
-            if (!carriers.length) {
-                carriers = [...doc.querySelectorAll('*')].filter((el) => [...el.attributes]
-                    .some((a) => VEHICLE_FLAGS.has(a.name.toLowerCase())));
-            }
+            if (!carriers.length) carriers = elementsCarryingAFlag(doc);
             for (const el of carriers) {
                 for (const attr of el.attributes) {
                     if (attr.value !== '1') continue;
