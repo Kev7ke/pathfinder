@@ -95,13 +95,25 @@ window.__hired = [];
   /* The credits ledger: amount, description, date, with a dot for thousands.
      One daily task, which must be left out, and two runs of one mission so the
      Paid column has an average to make. */
-  const ledger = `<html><body><table><tbody>
-    <tr><td>+1.450</td><td>Forest fire</td><td>08/11/2026 10:01</td></tr>
-    <tr><td>+1.550</td><td>Forest fire</td><td>08/11/2026 10:44</td></tr>
+  /* THE LEDGER IS PAGED, and on a real account it is 210 pages. The game states the total on
+   * its own pagination and links the next page with rel="next", so both are read rather than
+   * built. Three pages here: enough for "one page is not the history" to be testable. */
+  const ledgerNav = (page, last) => `<ul class="pagination">
+    <li class="${page === 1 ? 'prev disabled' : 'prev'}"><span>&larr; Back</span></li>
+    ${[1, 2, 3].map((n) => (n === page ? `<li class="active"><span>${n}</span></li>`
+    : `<li><a href="/credits?page=${n}">${n}</a></li>`)).join('')}
+    <li><a href="/credits?page=${last}">${last}</a></li>
+    ${page < last ? `<li class="next"><a rel="next" href="/credits?page=${page + 1}"
+      >Next &rarr;</a></li>` : ''}</ul>`;
+  const ledgerPage = (page) => `<html><body><table><tbody>
+    <tr><td>+1.450</td><td>Forest fire</td><td>08/11/2026 10:0${page}</td></tr>
+    <tr><td>+1.550</td><td>Forest fire</td><td>08/11/2026 10:4${page}</td></tr>
+    ${page === 1 ? `
     <tr><td>+13.500</td><td>Completed task "Treat 6 patients"</td><td>08/11/2026 11:00</td></tr>
     <tr><td>+575</td><td>Patient Treatment and Transport</td><td>08/11/2026 11:02</td></tr>
-    <tr><td>-5.000</td><td>Vehicle bought</td><td>08/11/2026 11:05</td></tr>
-  </tbody></table></body></html>`;
+    <tr><td>-5.000</td><td>Vehicle bought</td><td>08/11/2026 11:05</td></tr>` : ''}
+  </tbody></table>${ledgerNav(page, 3)}</body></html>`;
+  const ledger = ledgerPage(1);
 
   const form = (action, field, value) => `<html><body><form action="${action}" method="post">
     <input name="authenticity_token" value="CSRF-XYZ">
@@ -114,6 +126,10 @@ window.__hired = [];
     if (url === '/api/vehicles') return new Response(JSON.stringify(vehicles));
     if (url === '/credits/overview') {
       return new Response(ledger, { headers: { 'content-type': 'text/html' } });
+    }
+    if (/^\/credits\?page=\d+$/.test(url)) {
+      return new Response(ledgerPage(Number(/page=(\d+)/.exec(url)[1])),
+        { headers: { 'content-type': 'text/html' } });
     }
     if (url === '/einsaetze.json') return new Response(JSON.stringify(missions));
     /* The game's own dispatch-order editor, as the question to be answered: does it
@@ -568,6 +584,13 @@ assert.deepEqual(caps.unanswered.map((u) => u.typeId), ['10'],
   'a type no page states says so rather than being reported as covering nothing');
 assert.match(caps.unanswered[0].why.join(' '), /vehiclePage.*vehicleEditPage/,
   'and names every page that was asked, so the next read knows what is already ruled out');
+// AN EMPTY REASON SAYS NOTHING. On a real account 23 of 26 types came back with why: [] once
+// every kind had been given up on — true, useless, and the same as a type nothing was tried for.
+assert.ok(caps.unanswered.every((u) => u.why.length),
+  'every unanswered type says why, including the ones nothing was asked for');
+console.log('caps verdict      :', caps.verdict);
+assert.match(caps.verdict, /3 of 4 types answered, off vehicle/,
+  'and the answer is one line rather than twenty-six entries to count');
 const pageShape = caps.pageShapesWhereNothingWasFound.vehiclePage;
 console.log('page shape        :', JSON.stringify({
   flags: pageShape.anyFlagAnywhere, paths: pageShape.pathsThePageNames }));
@@ -1934,6 +1957,29 @@ const paid = await pg.$$eval('#to-table tbody tr', (rows) => rows.map((r) =>
 console.log('paid column       :', JSON.stringify(paid));
 assert.ok(/1,500/.test(paid[0][4]), 'the ledger averages the two Forest fire lines');
 assert.ok(/2/.test(paid[0][4]), 'and says how many lines that average is made of');
+
+// ---- and the ledger is paged, which every figure above used to ignore ----
+// A real account has 210 pages. Reading one of them and calling the result an average is the
+// same fault this module already withdrew once, so how far back it went is read, followed by
+// the game's own rel="next" link, and said on the panel.
+await pg.selectOption('[data-pages]', '5');
+await pg.click('[data-do="ledger"]');
+await pg.waitForFunction(() => /page/i.test(
+  document.querySelector('#to-ledger-status')?.textContent || ''));
+await pg.waitForFunction(() => !/Reading|Page \d+ of/i.test(
+  document.querySelector('#to-ledger-status')?.textContent || 'Reading'));
+const ledSaid = (await pg.textContent('#to-ledger-status')).replace(/\s+/g, ' ').trim();
+console.log('ledger pages      :', ledSaid);
+assert.match(ledSaid, /3 of 3 pages/, 'it follows the game\'s own next link to the end asked for');
+const howFar = (await pg.textContent('#to-ledger')).replace(/\s+/g, ' ');
+assert.match(howFar, /3 most recent pages of 3/,
+  'and the panel says what the figures under it are actually over');
+// Three pages hold six Forest fire lines, not two: the sample really did grow.
+assert.match(howFar, /Forest fire/, 'the missions are still named');
+const runs = await pg.$$eval('#to-ledger tbody tr', (rows) => rows.map((r) =>
+  [...r.cells].map((c) => c.textContent.trim())));
+console.log('ledger rows       :', JSON.stringify(runs[0]));
+assert.ok(runs[0].some((c) => c === '6'), 'six lines over three pages, not two over one');
 
 // ---- ElementFriend: the switchboard ----
 await pg.click('#ymca-back');

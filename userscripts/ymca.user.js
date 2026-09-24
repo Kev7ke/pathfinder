@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.66
+// @version      0.0.67
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.66',
+    version: '0.0.67',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -5638,6 +5638,14 @@ YMCA.register({
         <p class="ymca-sub" style="margin:4px 0 10px">Read from the game's own credits ledger,
           where every line says what it was for. A mission's payout is the line named after the
           mission; a daily task is named as one and left out.</p>
+        <label class="ymca-dim" style="display:block;margin-bottom:8px">How far back
+          <select data-pages style="margin-left:6px">
+            ${[1, 5, 10, 25, 50, 100, 200].map((n) => `<option value="${n}"${
+    n === (Number(cfg.pages) || 5) ? ' selected' : ''}>${n} page${n === 1 ? '' : 's'}</option>`)
+    .join('')}
+          </select>
+          <span style="margin-left:6px">&mdash; the game pages this, and one page is not an
+            account's history</span></label>
         <button class="ymca-btn primary" data-do="ledger">Read the credits ledger</button>
         <button class="ymca-btn" data-do="ledger-copy">Copy it</button>
         <button class="ymca-btn" data-do="ledger-shape"
@@ -5696,7 +5704,7 @@ YMCA.register({
          * that says "reading\u2026" until somebody presses something is a column
          * nobody reads. The button stays: it is how the ledger's own table and
          * the copy are asked for. */
-        toReadLedger().then(({ rows }) => {
+        toReadLedger(1).then(({ rows }) => {
             toFillPaid(el, ctx, toSummariseLedger(rows));
         }).catch((err) => {
             el.querySelectorAll('[data-paid]').forEach((cell) => {
@@ -5716,6 +5724,11 @@ YMCA.register({
         });
 
         el.addEventListener('change', (e) => {
+            if (e.target.hasAttribute?.('data-pages')) {
+                toWrite(TO_CFG_KEY, Object.assign(toCfg(), { pages: Number(e.target.value) }));
+                ctx.status(`Reading ${e.target.value} page(s) of the ledger.`);
+                return;
+            }
             if (e.target.dataset.cfg !== 'recording') return;
             const next = Object.assign(toCfg(), { recording: e.target.checked });
             toWrite(TO_CFG_KEY, next);
@@ -5730,9 +5743,16 @@ YMCA.register({
                 const copy = !!e.target.closest('[data-do="ledger-copy"]');
                 const status = el.querySelector('#to-ledger-status');
                 status.textContent = 'Reading…';
-                toReadLedger().then(({ path, rows }) => {
+                const want = Number(toCfg().pages) || 5;
+                toReadLedger(want, (done, asked, total) => {
+                    status.textContent = `Page ${done} of ${asked}… (the game has ${total})`;
+                }).then(({ path, rows, pagesRead, pagesTotal, more }) => {
                     const sum = toSummariseLedger(rows);
-                    status.textContent = `${sum.lines} lines from ${path}.`;
+                    sum.pagesRead = pagesRead;
+                    sum.pagesTotal = pagesTotal;
+                    sum.more = more;
+                    status.textContent = `${sum.lines} lines from ${path}, `
+                        + `${pagesRead} of ${pagesTotal} page${pagesTotal === 1 ? '' : 's'}.`;
                     el.querySelector('#to-ledger').innerHTML = toLedgerHtml(sum, ctx);
                     toFillPaid(el, ctx, sum);
                     ctx.log.info('read the credits ledger', `${sum.lines} lines, ${sum.missions.length} kinds`);
@@ -5741,6 +5761,11 @@ YMCA.register({
                             note: 'mission names and credit amounts from the game\'s own ledger',
                             ymca: YMCA.version,
                             lines: sum.lines,
+                            /* HOW FAR BACK THIS READ. An average over one page
+                             * of 210 is a sample, and a sample that does not
+                             * say so reads as a measurement. */
+                            pagesRead: sum.pagesRead,
+                            pagesTheGameHas: sum.pagesTotal,
                             patientIncome: sum.patients,
                             ignoredLines: sum.ignored,
                             /* The wording of every kind of line, figures taken
@@ -5888,10 +5913,20 @@ function toFillPaid(el, ctx, sum) {
 
 /** The ledger, as a table: what each mission paid, and how much it varied. */
 function toLedgerHtml(sum, ctx) {
+    /* SAID ON THE PANEL, not only in the copy: every figure under here is over
+     * the pages that were read and no further, and a reader who is not told
+     * that will take an average of one page for an average of the account. */
+    const howFar = sum.pagesTotal > 1
+        ? `<div class="ymca-note" style="margin-top:8px">Everything below is the
+        <b>${ctx.fmt(sum.pagesRead || 1)}</b> most recent page${(sum.pagesRead || 1) === 1 ? '' : 's'}
+        of ${ctx.fmt(sum.pagesTotal)} the game has. ${sum.more
+        ? 'There is more behind it — raise "How far back" to take it in.' : ''}</div>`
+        : '';
     if (!sum.missions.length && !sum.patients.lines) {
         return '<p class="ymca-dim">The ledger answered, but nothing in it was a mission.</p>';
     }
     return `
+    ${howFar}
     ${sum.patients.lines ? `<p style="margin:10px 0 4px"><b>${ctx.fmt(sum.patients.total)}</b>
       <span class="ymca-dim">from ${sum.patients.lines} patient treatment and transport lines
       &mdash; income the mission list does not carry at all.</span></p>` : ''}
@@ -6089,19 +6124,73 @@ function toLedgerShape(doc) {
     };
 }
 
-async function toReadLedger() {
+/**
+ * THE LEDGER IS 210 PAGES AND THIS READ ONE OF THEM.
+ *
+ * Everything the ledger answered — what a mission paid, how many patient
+ * lines, every kind of line there is — was the most recent page and nothing
+ * else, and it said so nowhere. An average over one page of an account's
+ * history is not the account's average, and a figure that looks measured while
+ * being a sample is exactly what this module already withdrew once.
+ *
+ * So: how far back it actually read is counted and said, the total the game
+ * states is read off its own pagination, and **the next page is followed by
+ * the game's own link** — `a[rel="next"]` — rather than by building
+ * `?page=N`, which is the same rule every other reader here keeps.
+ */
+function toLedgerPages(doc) {
+    const nav = doc.querySelector('ul.pagination');
+    if (!nav) return { next: null, total: 1 };
+    const next = nav.querySelector('li.next > a[rel="next"], a[rel="next"]')
+        ?.getAttribute('href') || null;
+    /* The highest page the game itself links to. It shows an ellipsis in the
+     * middle and the last pages at the end, so the biggest number on it is the
+     * total — read rather than counted. */
+    let total = 1;
+    for (const a of nav.querySelectorAll('a[href*="page="]')) {
+        const n = Number(/[?&]page=(\d+)/.exec(a.getAttribute('href') || '')?.[1]);
+        if (Number.isFinite(n) && n > total) total = n;
+    }
+    return { next, total };
+}
+
+async function toReadLedger(pages = 1, onProgress) {
     let lastError = null;
     let lastShape = null;
     for (const path of TO_LEDGER_PATHS) {
         try {
+            /* eslint-disable no-await-in-loop */
             const res = await fetch(path, { credentials: 'same-origin' });
             if (!res.ok) { lastError = `HTTP ${res.status}`; continue; }
             const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
             const rows = [...doc.querySelectorAll('table tr')]
                 .map(toParseLedgerRow).filter(Boolean);
-            if (rows.length) return { path, rows };
-            lastShape = { path, ...toLedgerShape(doc) };
-            lastError = `${path} answered, but no row in it read as an amount and a description`;
+            if (!rows.length) {
+                lastShape = { path, ...toLedgerShape(doc) };
+                lastError = `${path} answered, but no row in it read as an amount and a description`;
+                continue;
+            }
+
+            const { next: firstNext, total } = toLedgerPages(doc);
+            let next = firstNext;
+            let read = 1;
+            const want = Math.max(1, Math.min(Number(pages) || 1, 200));
+            while (next && read < want) {
+                onProgress?.(read, want, total);
+                const more = await fetch(next, { credentials: 'same-origin' });
+                if (!more.ok) break;
+                const page = new DOMParser().parseFromString(await more.text(), 'text/html');
+                const got = [...page.querySelectorAll('table tr')]
+                    .map(toParseLedgerRow).filter(Boolean);
+                if (!got.length) break;
+                rows.push(...got);
+                next = toLedgerPages(page).next;
+                read += 1;
+                /* A page at a time, unhurried: this is 210 requests if somebody
+                 * asks for all of it, and the game is not owed a stampede. */
+                await new Promise((go) => { setTimeout(go, 200); });
+            }
+            return { path, rows, pagesRead: read, pagesTotal: total, more: !!next };
         } catch (err) {
             lastError = err.message;
         }
@@ -10085,7 +10174,13 @@ async function vehicleCapabilities(ctx) {
         const why = [];
         let answered = false;
         for (const kind of VEHICLE_PAGE_KINDS) {
-            if (answered || gaveUpOn[kind.id]) continue;
+            if (answered) continue;
+            /* AN EMPTY REASON SAYS NOTHING, which is the whole fault it is here
+             * to avoid. Once every kind had been given up on, 23 of 26 types
+             * came back with `why: []` — true, useless, and indistinguishable
+             * from a type nothing was even attempted for. A kind that was
+             * skipped says it was skipped and why. */
+            if (gaveUpOn[kind.id]) { why.push(`${kind.id}: ${gaveUpOn[kind.id]}`); continue; }
             const path = kind.path(vehicle);
             if (!path) continue;
             try {
@@ -10117,7 +10212,9 @@ async function vehicleCapabilities(ctx) {
             }
             await ctx.sleep(150);
         }
-        if (!answered) unanswered.push({ typeId, why });
+        if (!answered) {
+            unanswered.push({ typeId, why: why.length ? why : ['nothing was asked for this type'] });
+        }
     }
 
     /* Into the store every module reads, merged under what a mission window
@@ -10176,6 +10273,15 @@ async function vehicleCapabilities(ctx) {
         /* One per kind of page, and only where that kind found nothing. This is
          * what says why, and it is the reason to press this at all now. */
         pageShapesWhereNothingWasFound: shapes,
+        /* One line rather than twenty-six. A reader that has to count entries
+         * to find out whether anything worked is a reader nobody finishes. */
+        verdict: Object.keys(found).length
+            ? `${Object.keys(found).length} of ${oneEach.size} types answered, off `
+              + `${[...new Set(Object.values(answeredBy))].join(' and ')}`
+            : `no page of a vehicle's states what it can do: ${VEHICLE_PAGE_KINDS.map((k) => k.id)
+                .join(', ')} were all asked and none of them carries one of the `
+              + `${VEHICLE_FLAGS.size} words the game has. The selection checkbox in a mission `
+              + 'window is the only place it writes them.',
     };
 }
 

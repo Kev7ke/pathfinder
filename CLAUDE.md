@@ -487,6 +487,18 @@ is also the only place the **ambulance service's own income** appears —
 "Patient Treatment" and "Patient Treatment and Transport" are not in the mission
 list at all. Amounts use a dot for thousands.
 
+**The ledger is paged, and reading one page of it is a sample, not a total.** A
+real account has **210 pages** of `/credits`, and every figure TrackOps showed
+was the most recent page alone — said nowhere. An average over one page of an
+account's history is exactly the kind of reading this module already withdrew
+once for looking measured while being a guess. So **how far back it read is
+counted and said on the panel**, in those words, beside the figures it applies
+to; the total comes off the game's own `ul.pagination`, where the biggest page
+it links to *is* the total; and the next page is followed by **`a[rel="next"]`
+rather than by building `?page=N`**, which is the rule every other reader here
+keeps. How many pages is the player's, because 210 pages is 210 requests and
+that is their call to make, not a default to be clever about.
+
 **Find a table's columns, do not assume them.** The ledger reader took cell 0 as
 the amount, cell 1 as the description and cell 2 as the date, and dropped any
 row with fewer than three cells — three assumptions about a page nobody here had
@@ -1608,6 +1620,14 @@ match in a megabyte bundle before anything looks at the first one. And the
 status line **counts as it goes** — *Reading type 7 of 26* — because the answer
 to "nothing happened" has to be visible while it is still happening. A fixture
 is never the page that finds this; a real account is.
+
+**An empty reason says nothing, which is the fault it exists to prevent.** Once
+all three page kinds had been given up on, 23 of 26 types came back with
+`why: []` — true, useless, and indistinguishable from a type nothing was even
+attempted for. A kind that was skipped now says it was skipped and why, a type
+nothing was asked for says that, and the result carries a **`verdict`**: one
+line saying whether anything answered and off which page, rather than twenty-six
+entries to count through.
 
 **Ask what a page holds before writing down that it holds it.** The vehicle page
 went into this file as a fact and into two readers as a selector, and nothing

@@ -1259,7 +1259,13 @@ async function vehicleCapabilities(ctx) {
         const why = [];
         let answered = false;
         for (const kind of VEHICLE_PAGE_KINDS) {
-            if (answered || gaveUpOn[kind.id]) continue;
+            if (answered) continue;
+            /* AN EMPTY REASON SAYS NOTHING, which is the whole fault it is here
+             * to avoid. Once every kind had been given up on, 23 of 26 types
+             * came back with `why: []` — true, useless, and indistinguishable
+             * from a type nothing was even attempted for. A kind that was
+             * skipped says it was skipped and why. */
+            if (gaveUpOn[kind.id]) { why.push(`${kind.id}: ${gaveUpOn[kind.id]}`); continue; }
             const path = kind.path(vehicle);
             if (!path) continue;
             try {
@@ -1291,7 +1297,9 @@ async function vehicleCapabilities(ctx) {
             }
             await ctx.sleep(150);
         }
-        if (!answered) unanswered.push({ typeId, why });
+        if (!answered) {
+            unanswered.push({ typeId, why: why.length ? why : ['nothing was asked for this type'] });
+        }
     }
 
     /* Into the store every module reads, merged under what a mission window
@@ -1350,6 +1358,15 @@ async function vehicleCapabilities(ctx) {
         /* One per kind of page, and only where that kind found nothing. This is
          * what says why, and it is the reason to press this at all now. */
         pageShapesWhereNothingWasFound: shapes,
+        /* One line rather than twenty-six. A reader that has to count entries
+         * to find out whether anything worked is a reader nobody finishes. */
+        verdict: Object.keys(found).length
+            ? `${Object.keys(found).length} of ${oneEach.size} types answered, off `
+              + `${[...new Set(Object.values(answeredBy))].join(' and ')}`
+            : `no page of a vehicle's states what it can do: ${VEHICLE_PAGE_KINDS.map((k) => k.id)
+                .join(', ')} were all asked and none of them carries one of the `
+              + `${VEHICLE_FLAGS.size} words the game has. The selection checkbox in a mission `
+              + 'window is the only place it writes them.',
     };
 }
 
