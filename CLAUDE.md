@@ -1042,21 +1042,46 @@ wants to see — so the warm ramp runs on past green into a deeper one.
 
 **The count is a badge, not a stroked figure.** An outline in black kept the
 number legible and made it ugly, and on a busy tile it was still hard work. It
-is a white disc with a ring in the shade that count earned and the figure in the
-same shade **darkened until it clears 4.5:1 against the white** — measured, the
-way ΔE was, so the ramp's own yellow is never a number nobody can read. The
-colour is still the reading; the badge is only what makes it legible over a map
-already full of things.
+is a white disc with a ring and the figure in the same shade **darkened until it
+clears 4.5:1 against the white** — measured, the way ΔE was, so the ramp's own
+yellow is never a number nobody can read. The colour is still the reading; the
+badge is only what makes it legible over a map already full of things.
 
-**The tick boxes belong on the map.** Choosing which vehicles to look at from
-inside a lightbox, two clicks from where the answer is drawn, is the same fault
-as a tool you have to open a window to reach. The button turns the mode on and
-the lists come up beside it, in `.leaflet-bar` — the game's own control styling,
-for the same reason the button borrows it. **Closing the lists is not switching
-the cover off**: somebody who has finished choosing still wants to see what they
-chose, so the × takes only the lists and the button takes both.
+**The shade is the ground's, not the station's own count.** A badge coloured off
+`n / peak` said red while the wash under it said green — the figure and the
+colour disagreeing about the same spot. One appliance at a station with three
+others around it is not thin cover; the cover there is what the map is already
+drawing, so each badge **reads the heat where it stands**. The mask keeps its
+intensity before the colouring pass writes over it, and the badge samples that,
+which means the two can never disagree again.
 
-**Every pointer event stops at the panel's edge.** Leaflet reads pointer and
+**The tick boxes belong on the map, and folded.** Choosing which vehicles to
+look at from inside a lightbox, two clicks from where the answer is drawn, is
+the same fault as a tool you have to open a window to reach — but a column of
+forty checkboxes hung off the corner control covers the map it is there to
+explain. **The game already has the control for this**: a `.btn-group` with a
+`.dropdown-toggle` and a `.dropdown-menu`, shown on the class `.open` rather
+than by any script of Bootstrap's, which is the route SwitchDispatchCenter
+already takes. So it is three buttons on one line at the **top edge of the map**
+— centres, vehicles, look — each opening the list it names.
+
+**A button says what it has before it is opened.** "Vehicles 6 of 9" is the
+state without a click, which is the whole reason a folded list can replace an
+open one.
+
+**Which menu is open survives the redraw.** Ticking a box redraws the bar, and a
+menu that shut itself on every tick is one nobody can use.
+
+**The game already groups the vehicles, and it is a count rather than a
+mapping.** `/api/buildings` states `building_type` per station, so a type's
+group is **where its vehicles actually stand**. A type parked at two kinds of
+building goes under the one holding most of them, so every type is offered
+exactly once and a group's tick means what it says. The names come from the
+**Renamer's** own store and built-in table, which is the one place in YMCA a
+building type's name is learnt from the game — a second copy here would drift
+the first time one was corrected.
+
+**Every pointer event stops at the bar's edge.** Leaflet reads pointer and
 wheel events off the map container, so without that a tick dragged the map
 underneath it. And the browser test's fixture carries Leaflet's own control
 rules — `.leaflet-top` at `z-index: 1000`, `.leaflet-control` with

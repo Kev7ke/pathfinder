@@ -191,7 +191,7 @@ function hmPeak(stations, radius, focus) {
  */
 function hmHeat(g, w, h, pts, opts) {
     const { peak, steps, opacity, rPx, focus } = opts;
-    if (!pts.length || !(rPx > 0) || !(w > 0) || !(h > 0)) return;
+    if (!pts.length || !(rPx > 0) || !(w > 0) || !(h > 0)) return () => 0;
 
     const s = 1 / 3;
     const mw = Math.max(1, Math.ceil(w * s));
@@ -227,6 +227,13 @@ function hmHeat(g, w, h, pts, opts) {
     const img = mg.getImageData(0, 0, mw, mh);
     const d = img.data;
     const lut = hmRamp(steps);
+    /* WHAT WAS DRAWN IS ALSO THE READING, so it is kept before the colouring
+     * pass writes over it. A station's badge takes the shade of the ground it
+     * stands on rather than of its own count: one appliance at a station
+     * surrounded by three others is not thin cover, and colouring it red for
+     * owning one said the opposite of what the map underneath was saying. */
+    const inten = new Uint8ClampedArray(mw * mh);
+    for (let i = 0, j = 0; i < d.length; i += 4, j += 1) inten[j] = d[i + 3];
     for (let i = 0; i < d.length; i += 4) {
         const v = d[i + 3];
         if (!v) { d[i] = 0; d[i + 1] = 0; d[i + 2] = 0; continue; }
@@ -243,22 +250,34 @@ function hmHeat(g, w, h, pts, opts) {
     g.imageSmoothingEnabled = true;
     g.imageSmoothingQuality = 'high';
     g.drawImage(mask, 0, 0, mw, mh, 0, 0, w, h);
+
+    return (x, y) => {
+        const cx = Math.max(0, Math.min(mw - 1, Math.round(x * s)));
+        const cy = Math.max(0, Math.min(mh - 1, Math.round(y * s)));
+        return inten[cy * mw + cx] / 255;
+    };
 }
 
 /**
  * The station and what it counted, in a badge that reads over any tile.
  *
- * White fill, a ring in the shade that count earned, and the figure in the same
- * shade darkened until it clears 4.5:1 against the white. The colour is still
- * the reading; the badge is only what makes it legible over a map that is
+ * White fill, a ring in the shade of the cover THERE, and the figure in the
+ * same shade darkened until it clears 4.5:1 against the white. The colour is
+ * still the reading; the badge is only what makes it legible over a map that is
  * already full of things.
+ *
+ * THE SHADE IS THE GROUND'S, NOT THE STATION'S OWN COUNT. One appliance at a
+ * station with three others around it is not thin cover, and a badge coloured
+ * off `n / peak` said red while the wash under it said green — the figure and
+ * the colour disagreeing about the same spot. Each badge reads the heat where
+ * it stands, which is the same number the map is already showing.
  */
-function hmBadges(g, pts, lut, peak) {
+function hmBadges(g, pts, lut) {
     g.font = 'bold 12px "Helvetica Neue", Helvetica, Arial';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     for (const p of pts) {
-        const colour = hmAt(lut, Math.min(1, p.n / peak));
+        const colour = hmAt(lut, Math.max(0, Math.min(1, p.t)));
         const label = String(p.n);
         const r = Math.max(9, g.measureText(label).width / 2 + 6);
         g.beginPath();
@@ -338,7 +357,62 @@ function hmChoices(buildings, vehicles) {
         centres.push({ id: '', name: '— not assigned —' });
     }
     const countOf = (t) => placed.reduce((n, s) => n + (s.byType.get(t) || 0), 0);
-    return { placed, noPlace, types, centres, nameOf, countOf };
+    return {
+        placed, noPlace, types, centres, nameOf, countOf,
+        groups: hmGroups(buildings, placed, types, nameOf),
+    };
+}
+
+/**
+ * The vehicle types, under the kind of building they actually stand in.
+ *
+ * A flat list of forty types is a list nobody reads, and the game already
+ * groups them for you: `/api/buildings` states `building_type` per station, so
+ * a type's group is **where its vehicles are**, counted rather than assumed. A
+ * type parked at two kinds of building goes under the one holding most of them,
+ * so every type is offered exactly once and a group's tick means what it says.
+ *
+ * The names are the Renamer's, which is the one place in YMCA a building type's
+ * name is learnt from the game and kept — a second copy here would drift the
+ * first time one was corrected. A kind nothing has named is its own id, which
+ * is what the game calls it.
+ */
+function hmGroups(buildings, placed, types, nameOf) {
+    const kindOf = new Map();
+    for (const b of buildings || []) kindOf.set(String(b.id), String(b.building_type ?? ''));
+
+    let learnt = {};
+    try { learnt = JSON.parse(localStorage.getItem('ymca-renamer-stationTypes')) || {}; } catch (e) { /* none */ }
+    const builtin = typeof BUILTIN_STATION_TYPES === 'object' ? BUILTIN_STATION_TYPES : {};
+    const kindName = (id) => learnt[id] || builtin[id] || `Building type ${id || '\u2014'}`;
+
+    /* How many of each type stand at each kind of building. */
+    const tally = new Map();
+    for (const s of placed) {
+        const kind = kindOf.get(s.id) ?? '';
+        for (const [t, n] of s.byType) {
+            if (!tally.has(t)) tally.set(t, new Map());
+            const at = tally.get(t);
+            at.set(kind, (at.get(kind) || 0) + n);
+        }
+    }
+
+    const byKind = new Map();
+    for (const t of types) {
+        const at = tally.get(t) || new Map();
+        let best = '';
+        let most = -1;
+        for (const [kind, n] of at) if (n > most) { best = kind; most = n; }
+        if (!byKind.has(best)) byKind.set(best, []);
+        byKind.get(best).push(t);
+    }
+    return [...byKind.entries()]
+        .map(([id, list]) => ({
+            id,
+            label: kindName(id),
+            types: list.sort((a, b) => String(nameOf(a)).localeCompare(String(nameOf(b)))),
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /** The settings both faces read, with every default in one place. */
@@ -377,7 +451,9 @@ YMCA.register({
         const [buildings, vehicles] = await Promise.all([
             ctx.game('/api/buildings'), ctx.game('/api/vehicles'),
         ]);
-        const { placed, noPlace, types, centres, nameOf, countOf } = hmChoices(buildings, vehicles);
+        const {
+            placed, noPlace, types, centres, nameOf, countOf, groups,
+        } = hmChoices(buildings, vehicles);
         if (!placed.length) {
             el.innerHTML = `<div class="ymca-note">No station of yours carries both a vehicle and
         a position, so there is nothing to draw yet.${noPlace.length
@@ -412,9 +488,16 @@ YMCA.register({
           <button class="ymca-btn" data-all="types">All of them</button>
           <button class="ymca-btn" data-none="types">None</button>
         </div>
-        <div class="ymca-pick">${types.map((t) => `<label><input type="checkbox"
-          data-type="${ctx.esc(t)}"${on.has(t) ? ' checked' : ''}> ${ctx.esc(String(nameOf(t)))}
-          <span class="ymca-dim">${countOf(t)}</span></label>`).join('')}</div>
+        ${groups.map((gr) => `<div style="margin-bottom:6px">
+          <div style="margin:6px 0 2px"><b>${ctx.esc(gr.label)}</b>
+            <button class="ymca-btn" data-all="group" data-group="${ctx.esc(gr.id)}">all</button>
+            <button class="ymca-btn" data-none="group" data-group="${ctx.esc(gr.id)}">none</button>
+          </div>
+          <div class="ymca-pick">${gr.types.map((t) => `<label><input type="checkbox"
+            data-type="${ctx.esc(t)}" data-group="${ctx.esc(gr.id)}"${on.has(t) ? ' checked' : ''}>
+            ${ctx.esc(String(nameOf(t)))}
+            <span class="ymca-dim">${countOf(t)}</span></label>`).join('')}</div>
+        </div>`).join('')}
       </div>
 
       ${centres.length ? `
@@ -528,8 +611,10 @@ YMCA.register({
             const peak = hmPeak(shown, r, focus);
             /* `k` is pixels per degree of latitude, and a degree of latitude is
              * 111.32 km wherever you stand. */
-            hmHeat(g, w, h, pts, { peak, steps, opacity: 0.85, rPx: (r * k) / 111.32, focus });
-            hmBadges(g, pts, hmRamp(steps), peak);
+            const heatAt = hmHeat(g, w, h, pts, {
+                peak, steps, opacity: 0.85, rPx: (r * k) / 111.32, focus,
+            });
+            hmBadges(g, pts.map((q) => ({ ...q, t: heatAt(q.x, q.y) })), hmRamp(steps));
 
             const total = shown.reduce((n, s) => n + s.n, 0);
             legend.innerHTML = `<span class="ymca-dim" style="font-size:12px">thin</span>
@@ -561,12 +646,16 @@ YMCA.register({
             const all = e.target.closest('[data-all]');
             const none = e.target.closest('[data-none]');
             if (!all && !none) return;
-            const what = (all || none).dataset.all || (all || none).dataset.none;
-            const sel = what === 'types' ? '[data-type]' : '[data-centre]';
+            const btn = all || none;
+            const what = btn.dataset.all || btn.dataset.none;
+            /* A group is the same tick, narrowed: which kind of building the
+             * vehicles stand at, so a whole branch goes on or off at once. */
+            const sel = what === 'group'
+                ? `[data-type][data-group="${CSS.escape(btn.dataset.group)}"]`
+                : (what === 'types' ? '[data-type]' : '[data-centre]');
             for (const box of el.querySelectorAll(sel)) box.checked = !!all;
-            save(what === 'types'
-                ? { types: all ? types : [] }
-                : { centres: all ? centres.map((c) => c.id) : [] });
+            if (what === 'centres') save({ centres: all ? centres.map((c) => c.id) : [] });
+            else save({ types: [...el.querySelectorAll('[data-type]:checked')].map((b) => b.dataset.type) });
             draw();
         });
 
@@ -727,7 +816,7 @@ function hmPaint(state) {
     const pts = state.stations.map((s) => ({ ...place(s), n: s.n }));
     if (!pts.length) return;
 
-    hmHeat(g, w, h, pts, {
+    const heatAt = hmHeat(g, w, h, pts, {
         peak: state.peak,
         steps: state.steps,
         opacity: state.opacity,
@@ -736,13 +825,14 @@ function hmPaint(state) {
     });
     /* THE NUMBER CARRIES THE COLOUR TOO, in a badge that reads over any tile:
      * the game's own markers stay where they are, and this adds what it counted
-     * beside each station in the shade that count earned. */
+     * beside each station in the shade of the cover there. The heat is read at
+     * the station and the badge is drawn above it, so the figure sits clear of
+     * the game's own marker without taking its colour from empty ground. */
     hmBadges(
         g,
         pts.filter((s) => s.x > -40 && s.x < w + 40 && s.y > -40 && s.y < h + 40)
-            .map((s) => ({ ...s, y: s.y - 14 })),
+            .map((s) => ({ ...s, t: heatAt(s.x, s.y), y: s.y - 14 })),
         hmRamp(state.steps),
-        state.peak,
     );
 }
 
@@ -781,115 +871,170 @@ function hmState(buildings, vehicles, cfg) {
 }
 
 /**
- * The tick boxes, on the map, in the game's own kind of box.
+ * The tick boxes, along the top edge of the map, as the game's own dropdowns.
  *
- * It borrows `.leaflet-bar`, which is the game's own control styling, for the
- * same reason the button does: a panel that invented a look of its own would be
- * the one thing on that map that did not belong to it. Every pointer event is
- * stopped at its edge — without that, ticking a box drags the map underneath.
+ * A column of forty checkboxes hung off the corner control covered the map it
+ * was there to explain. THE GAME ALREADY HAS THE CONTROL FOR THIS: a
+ * `.btn-group` with a `.dropdown-toggle` and a `.dropdown-menu` under it, shown
+ * on the class `.open` rather than by any script of Bootstrap's — which is the
+ * same route SwitchDispatchCenter takes, for the same reason. So the bar is
+ * three buttons on one line at the top of the map, each opening the list it
+ * names, and nothing is on screen that is not being read.
+ *
+ * Each button says what it has: "Vehicles 6 of 9" is the state without opening
+ * anything. The vehicle list is grouped by the kind of building its vehicles
+ * stand at, and a group's own tick takes the whole branch with it.
+ *
+ * Every pointer event stops at the bar's edge. Leaflet reads pointer and wheel
+ * events off the map container, so without that a tick dragged the map beneath.
  */
-function hmMapPanel(ctx, corner, choices, repaint) {
+function hmMapBar(ctx, map, choices, repaint) {
     document.getElementById(HM_PANEL_ID)?.remove();
-    const { types, centres, nameOf, countOf } = choices;
-    const cfg = ctx.store.read('cfg', {});
-    const set = hmSettings(cfg);
-    const on = new Set(Array.isArray(cfg.types) && cfg.types.length ? cfg.types : types);
-    const centresOn = new Set(Array.isArray(cfg.centres) && cfg.centres.length
-        ? cfg.centres : centres.map((c) => c.id));
+    const { types, centres, nameOf, countOf, groups } = choices;
 
-    const box = document.createElement('div');
-    box.id = HM_PANEL_ID;
-    box.className = 'leaflet-bar leaflet-control';
-    box.style.cssText = 'background:#fff;color:#333;width:232px;max-height:62vh;overflow:auto;'
-        + 'padding:8px 10px;margin-top:6px;font:12px/1.4 "Helvetica Neue",Helvetica,Arial;'
-        + 'pointer-events:auto;cursor:default';
-    const list = (items) => items.map((i) => `<label style="display:block;margin:2px 0">
-      <input type="checkbox" data-${i.what}="${ctx.esc(i.id)}"${i.on ? ' checked' : ''}
-        style="margin-right:5px;vertical-align:-1px">${ctx.esc(i.label)}${i.n === undefined ? ''
-    : ` <span style="opacity:.55">${i.n}</span>`}</label>`).join('');
+    const bar = document.createElement('div');
+    bar.id = HM_PANEL_ID;
+    /* Top edge, clear of the game's own controls in either corner. */
+    bar.style.cssText = 'position:absolute;top:8px;left:50%;transform:translateX(-50%);'
+        + 'z-index:1000;pointer-events:auto;display:flex;gap:6px;flex-wrap:wrap;'
+        + 'justify-content:center;max-width:calc(100% - 120px)';
 
-    box.innerHTML = `
-    <div style="display:flex;align-items:center;margin:0 0 6px">
-      <b style="flex:1">Cover</b>
-      <a href="#" data-close style="color:#333;text-decoration:none;font-size:15px;
-        line-height:1;padding:0 2px" title="Close this, leave the cover on">&times;</a>
-    </div>
-    <div style="font-weight:bold;margin:6px 0 2px">Which vehicles
-      <a href="#" data-all="types" style="font-weight:normal;margin-left:4px">all</a>
-      <a href="#" data-none="types" style="font-weight:normal;margin-left:4px">none</a></div>
-    ${list(types.map((t) => ({
-        what: 'type', id: t, label: String(nameOf(t)), n: countOf(t), on: on.has(t),
-    })))}
-    ${centres.length ? `<div style="font-weight:bold;margin:8px 0 2px">Which dispatch centres
-      <a href="#" data-all="centres" style="font-weight:normal;margin-left:4px">all</a>
-      <a href="#" data-none="centres" style="font-weight:normal;margin-left:4px">none</a></div>
-    ${list(centres.map((c) => ({
-        what: 'centre', id: c.id, label: c.name, on: centresOn.has(c.id),
-    })))}` : ''}
-    <div style="margin:8px 0 0">
-      <label style="display:block;margin:3px 0">Reach
-        <select data-radius style="float:right;width:88px">${[2, 4, 6, 8, 12, 20, 35]
-        .map((n) => `<option value="${n}"${n === set.radius ? ' selected' : ''}>${n} km</option>`)
-        .join('')}</select></label>
-      <label style="display:block;margin:3px 0;clear:both">Focus
-        <select data-focus style="float:right;width:88px">${Object.entries(HM_FOCUS)
-        .map(([k, f]) => `<option value="${k}"${k === set.focus ? ' selected' : ''}>${
-            f.label.split(',')[0]}</option>`).join('')}</select></label>
-      <label style="display:block;margin:3px 0;clear:both">Strength
-        <select data-opacity style="float:right;width:88px">${[0.25, 0.4, 0.55, 0.7, 0.85]
-        .map((n) => `<option value="${n}"${n === set.opacity ? ' selected' : ''}>${
-            Math.round(n * 100)}%</option>`).join('')}</select></label>
-      <label style="display:block;margin:3px 0;clear:both">Scale
-        <select data-mapscale style="float:right;width:88px">${Object.entries(HM_SCALES)
-        .map(([k, s]) => `<option value="${k}"${k === set.mapScale ? ' selected' : ''}>${
-            k === 'warm' ? 'Red to green' : 'One hue'}</option>`).join('')}</select></label>
-    </div>
-    <div style="clear:both;height:1px"></div>`;
+    const menu = (id, label, body) => `
+    <div class="btn-group" data-menu="${id}">
+      <button type="button" class="btn btn-default btn-xs dropdown-toggle" data-open="${id}">
+        <span data-label="${id}">${label}</span> <span class="caret"></span></button>
+      <div class="dropdown-menu" style="display:none;max-height:56vh;overflow:auto;
+        min-width:220px;padding:6px 10px;text-align:left">${body}</div>
+    </div>`;
 
-    /* THE MAP IS UNDERNEATH. Leaflet reads pointer and wheel events off the
-     * container, so a tick that reached it would drag or zoom the map while the
-     * box was being used. Stopped at the box's own edge, before anything else
-     * on it runs — stopping propagation does not stop the handlers below. */
+    const box = (what, id, text, n, on) => `<label style="display:block;margin:2px 0;
+      font-weight:normal;white-space:nowrap">
+      <input type="checkbox" data-${what}="${ctx.esc(id)}"${on ? ' checked' : ''}
+        style="margin-right:5px;vertical-align:-1px">${ctx.esc(text)}${
+    n === undefined ? '' : ` <span style="opacity:.55">${n}</span>`}</label>`;
+
+    const draw = () => {
+        const cfg = ctx.store.read('cfg', {});
+        const set = hmSettings(cfg);
+        const on = new Set(Array.isArray(cfg.types) && cfg.types.length ? cfg.types : types);
+        const centresOn = new Set(Array.isArray(cfg.centres) && cfg.centres.length
+            ? cfg.centres : centres.map((c) => c.id));
+
+        const vehicleBody = `
+      <div style="margin-bottom:4px"><a href="#" data-all="types">all</a>
+        &middot; <a href="#" data-none="types">none</a></div>
+      ${groups.map((gr) => `<div style="margin:6px 0 0">
+        <div style="font-weight:bold">${ctx.esc(gr.label)}
+          <a href="#" data-all="group" data-group="${ctx.esc(gr.id)}"
+            style="font-weight:normal">all</a>
+          <a href="#" data-none="group" data-group="${ctx.esc(gr.id)}"
+            style="font-weight:normal">none</a></div>
+        ${gr.types.map((t) => box('type', t, String(nameOf(t)), countOf(t), on.has(t))).join('')}
+      </div>`).join('')}`;
+
+        const centreBody = `
+      <div style="margin-bottom:4px"><a href="#" data-all="centres">all</a>
+        &middot; <a href="#" data-none="centres">none</a></div>
+      ${centres.map((c) => box('centre', c.id, c.name, undefined, centresOn.has(c.id))).join('')}`;
+
+        const pick = (attr, options, now) => `<select data-${attr}
+      style="width:100%;margin:2px 0 6px">${options.map(([v, text]) => `<option value="${v}"${
+    String(v) === String(now) ? ' selected' : ''}>${text}</option>`).join('')}</select>`;
+        const lookBody = `
+      <b>How far a vehicle counts for</b>
+      ${pick('radius', [2, 4, 6, 8, 12, 20, 35].map((n) => [n, `${n} km`]), set.radius)}
+      <b>How tightly it hugs the station</b>
+      ${pick('focus', Object.entries(HM_FOCUS).map(([k, f]) => [k, f.label]), set.focus)}
+      <b>How strong</b>
+      ${pick('opacity', [0.25, 0.4, 0.55, 0.7, 0.85].map((n) => [n, `${Math.round(n * 100)}%`]),
+        set.opacity)}
+      <b>Scale</b>
+      ${pick('mapscale', Object.entries(HM_SCALES).map(([k, x]) => [k, x.label]), set.mapScale)}`;
+
+        bar.innerHTML = [
+            centres.length
+                ? menu('centres', `Centres ${centresOn.size} of ${centres.length}`, centreBody)
+                : '',
+            menu('types', `Vehicles ${[...on].filter((t) => types.includes(t)).length} of ${types.length}`,
+                vehicleBody),
+            menu('look', 'Look', lookBody),
+        ].join('');
+    };
+
+    /* Which menu is open survives a redraw, because ticking a box redraws the
+     * bar and a menu that shut itself on every tick is one you cannot use. */
+    let open = '';
+    const show = () => {
+        for (const group of bar.querySelectorAll('[data-menu]')) {
+            const is = group.dataset.menu === open;
+            group.classList.toggle('open', is);
+            const m = group.querySelector('.dropdown-menu');
+            /* Bootstrap shows it on `.open` alone; the display is set as well so
+             * it still opens where a stylesheet is built differently. */
+            if (m) m.style.display = is ? 'block' : 'none';
+        }
+    };
+    const redraw = () => { draw(); show(); };
+
     for (const kind of ['mousedown', 'pointerdown', 'touchstart', 'dblclick', 'wheel', 'click']) {
-        box.addEventListener(kind, (e) => e.stopPropagation());
+        bar.addEventListener(kind, (e) => e.stopPropagation());
     }
 
     const save = (patch) => {
         ctx.store.write('cfg', { ...ctx.store.read('cfg', {}), ...patch });
         repaint();
+        redraw();
     };
-    const ticked = (sel) => [...box.querySelectorAll(`${sel}:checked`)]
-        .map((b) => b.getAttribute(sel.slice(1, -1)));
+    const ticked = () => [...bar.querySelectorAll('[data-type]:checked')]
+        .map((b) => b.getAttribute('data-type'));
 
-    box.addEventListener('change', (e) => {
+    bar.addEventListener('change', (e) => {
         const d = e.target.dataset;
         if (d.radius !== undefined) save({ radius: Number(e.target.value) });
         else if (d.focus !== undefined) save({ focus: e.target.value });
         else if (d.opacity !== undefined) save({ opacity: Number(e.target.value) });
         else if (d.mapscale !== undefined) save({ mapScale: e.target.value });
-        else if (d.type !== undefined) save({ types: ticked('[data-type]') });
-        else if (d.centre !== undefined) save({ centres: ticked('[data-centre]') });
+        else if (d.type !== undefined) save({ types: ticked() });
+        else if (d.centre !== undefined) {
+            save({
+                centres: [...bar.querySelectorAll('[data-centre]:checked')]
+                    .map((b) => b.getAttribute('data-centre')),
+            });
+        }
     });
 
-    box.addEventListener('click', (e) => {
-        const close = e.target.closest('[data-close]');
+    bar.addEventListener('click', (e) => {
+        const toggle = e.target.closest('[data-open]');
+        if (toggle) {
+            e.preventDefault();
+            open = open === toggle.dataset.open ? '' : toggle.dataset.open;
+            show();
+            return;
+        }
         const all = e.target.closest('[data-all]');
         const none = e.target.closest('[data-none]');
-        if (!close && !all && !none) return;
+        if (!all && !none) return;
         e.preventDefault();
-        /* CLOSING THE LISTS IS NOT SWITCHING THE COVER OFF. Somebody who has
-         * finished choosing still wants to see what they chose. */
-        if (close) { box.remove(); return; }
-        const what = (all || none).dataset.all || (all || none).dataset.none;
-        const sel = what === 'types' ? '[data-type]' : '[data-centre]';
-        for (const b of box.querySelectorAll(sel)) b.checked = !!all;
-        save(what === 'types'
-            ? { types: all ? types : [] }
-            : { centres: all ? centres.map((c) => c.id) : [] });
+        const btn = all || none;
+        const what = btn.dataset.all || btn.dataset.none;
+        /* A group's list is the choices', not the markup's: the boxes are
+         * redrawn on every change, so the ids come off what was worked out once
+         * rather than off whatever happens to be on screen this second. */
+        if (what === 'group') {
+            const group = groups.find((gr) => gr.id === btn.dataset.group);
+            const now = new Set(ticked());
+            for (const t of group?.types || []) { if (all) now.add(t); else now.delete(t); }
+            save({ types: [...now] });
+        } else if (what === 'centres') {
+            save({ centres: all ? centres.map((c) => c.id) : [] });
+        } else {
+            save({ types: all ? types.slice() : [] });
+        }
     });
 
-    corner.append(box);
-    return box;
+    redraw();
+    map.append(bar);
+    return bar;
 }
 
 YMCA.inject('heatmap', (ctx) => {
@@ -927,9 +1072,12 @@ YMCA.inject('heatmap', (ctx) => {
             ctx.game('/api/buildings'), ctx.game('/api/vehicles'),
         ]);
         run(buildings, vehicles);
-        /* The tick boxes come up with the mode, so the choosing happens where
-         * the answer is drawn rather than two clicks away in a lightbox. */
-        hmMapPanel(ctx, corner, hmChoices(buildings, vehicles), () => run(buildings, vehicles));
+        /* The tick boxes come up with the mode, along the map's own top edge, so
+         * the choosing happens where the answer is drawn rather than two clicks
+         * away in a lightbox — and folded into dropdowns, so a list of forty
+         * vehicle types is not covering the map it is there to explain. */
+        hmMapBar(ctx, document.getElementById('map'), hmChoices(buildings, vehicles),
+            () => run(buildings, vehicles));
     };
 
     bar.addEventListener('click', (e) => {

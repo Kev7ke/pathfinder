@@ -2124,47 +2124,75 @@ const heatWhere = await pg.evaluate(() => {
 console.log('station lands at  :', JSON.stringify(heatWhere), '(from the tile, not from a global)');
 assert.ok(Number.isFinite(heatWhere.x) && Number.isFinite(heatWhere.y),
   'a tile alone fixes where a latitude and longitude lands on screen');
-// ---- and the tick boxes came up with it, on the map ----
+// ---- and the tick boxes came up with it, along the map's top edge ----
 // Choosing which vehicles to look at from inside a lightbox, two clicks away from the map the
-// answer is drawn on, is the same fault as a tool you have to open a window to reach.
-const panel = await pg.$eval('#ymca-heat-panel', (b) => ({
-  className: b.className,
+// answer is drawn on, is the same fault as a tool you have to open a window to reach. A column
+// of forty checkboxes covers the map it explains, so they are the game's own dropdowns.
+const heatBar = await pg.$eval('#ymca-heat-panel', (b) => ({
   events: getComputedStyle(b).pointerEvents,
-  types: [...b.querySelectorAll('[data-type]')].map((x) => x.dataset.type),
-  centres: [...b.querySelectorAll('[data-centre]')].map((x) => x.dataset.centre),
-  selects: [...b.querySelectorAll('select')].map((x) => Object.keys(x.dataset)[0]),
+  top: Math.round(b.getBoundingClientRect().top - b.parentElement.getBoundingClientRect().top),
+  menus: [...b.querySelectorAll('[data-menu]')].map((x) => x.dataset.menu),
+  toggles: [...b.querySelectorAll('.dropdown-toggle')].map(
+    (x) => x.textContent.replace(/\s+/g, ' ').trim()),
+  shown: [...b.querySelectorAll('.dropdown-menu')].map((x) => getComputedStyle(x).display),
 }));
-console.log('map tick boxes    :', JSON.stringify(panel));
-assert.match(panel.className, /leaflet-bar/,
-  'it borrows the game\'s own control styling rather than inventing a look');
-assert.equal(panel.events, 'auto', 'and unlike the canvas it does take a click, or it is inert');
-assert.ok(panel.types.includes('13') && panel.types.includes('10'),
+console.log('map dropdowns     :', JSON.stringify(heatBar));
+assert.deepEqual(heatBar.menus, ['centres', 'types', 'look'],
+  'one for the dispatch centres, one for the vehicles, one for how it is drawn');
+assert.equal(heatBar.events, 'auto', 'unlike the canvas the bar does take a click, or it is inert');
+assert.ok(heatBar.top < 40, 'it sits at the top edge of the map, not over the middle of it');
+assert.match(heatBar.toggles[1], /^Vehicles \d+ of \d+/,
+  'the button says what is ticked without anything having to be opened');
+assert.deepEqual(heatBar.shown, ['none', 'none', 'none'], 'and nothing is open until it is asked');
+// Bootstrap shows a menu on `.open`, a class rather than a script, which is why none of the
+// game's own JavaScript is needed for this to behave like the game's own dropdowns.
+await pg.click('#ymca-heat-panel [data-open="types"]');
+await pg.waitForTimeout(150);
+const opened = await pg.$eval('#ymca-heat-panel [data-menu="types"]', (m) => ({
+  open: m.classList.contains('open'),
+  display: getComputedStyle(m.querySelector('.dropdown-menu')).display,
+  groups: [...m.querySelectorAll('[data-all="group"]')].map(
+    (a) => a.parentElement.textContent.replace(/\s+/g, ' ').replace(/ all none/, '').trim()),
+  types: [...m.querySelectorAll('[data-type]')].map((x) => x.dataset.type),
+}));
+console.log('vehicles opened   :', JSON.stringify(opened));
+assert.ok(opened.open && opened.display === 'block', 'the toggle opens it, on a class');
+assert.ok(opened.types.includes('13') && opened.types.includes('10'),
   'every type the fleet holds is offered on the map too');
-assert.deepEqual(panel.centres, ['90', ''], 'and the dispatch centres, none-of-them included');
-assert.deepEqual(panel.selects, ['radius', 'focus', 'opacity', 'mapscale'],
-  'with the reach, the focus, the strength and the scale beside them');
-// A tick on the map is the same setting the window writes, and it redraws there and then.
-await pg.click('#ymca-heat-panel [data-none="types"]');
+// THE GAME ALREADY GROUPS THEM: /api/buildings states building_type per station, so a type's
+// group is where its vehicles actually stand, counted rather than assumed.
+assert.ok(opened.groups.includes('Fire Station') && opened.groups.includes('Ambulance Station'),
+  'sub-categorised by the kind of building the vehicles stand at, by the game\'s own names');
+// A group's own tick takes that whole branch and leaves the rest alone.
+await pg.click('#ymca-heat-panel [data-none="group"][data-group="0"]');
 await pg.waitForTimeout(400);
-const afterNone = await pg.evaluate(() =>
+const afterGroup = await pg.evaluate(() =>
   JSON.parse(localStorage.getItem('ymca-heatmap-cfg') || '{}').types);
-console.log('map tick writes   :', JSON.stringify(afterNone));
-assert.deepEqual(afterNone, [], 'the map\'s tick boxes write the same settings the window reads');
+console.log('group untick      :', JSON.stringify(afterGroup));
+assert.ok(!afterGroup.includes('13') && afterGroup.includes('5'),
+  'the fire station\'s types go and the ambulance station\'s stay');
 await pg.click('#ymca-heat-panel [data-all="types"]');
 await pg.waitForTimeout(400);
-// CLOSING THE LISTS IS NOT SWITCHING THE COVER OFF: somebody who has finished choosing still
-// wants to see what they chose.
-await pg.click('#ymca-heat-panel [data-close]');
-await pg.waitForTimeout(200);
-assert.equal(await pg.locator('#ymca-heat-panel').count(), 0, 'the \u00d7 closes the lists');
+const afterAll = await pg.evaluate(() =>
+  JSON.parse(localStorage.getItem('ymca-heatmap-cfg') || '{}').types);
+assert.ok(afterAll.includes('13'), 'and all of them comes back');
+// A tick redraws the bar, so a menu that shut itself on every tick would be one you cannot use.
+assert.equal(
+  await pg.$eval('#ymca-heat-panel [data-menu="types"]', (m) => m.classList.contains('open')),
+  true, 'the open menu survives its own redraw');
+await pg.click('#ymca-heat-panel [data-open="types"]');
+await pg.waitForTimeout(150);
+assert.equal(
+  await pg.$eval('#ymca-heat-panel [data-menu="types"]', (m) => m.classList.contains('open')),
+  false, 'and the toggle shuts it again');
 assert.equal(await pg.locator('#ymca-heat-canvas').count(), 1,
-  'and leaves the cover on, because closing the lists is not switching it off');
+  'closing a list is not switching the cover off');
 
-// Pressing again takes it away entirely — the lists with it.
+// Pressing again takes it away entirely — the bar with it.
 await pg.click('#ymca-heat-btn');
 await pg.waitForTimeout(200);
 assert.equal(await pg.locator('#ymca-heat-canvas').count(), 0, 'off means gone, not hidden');
-assert.equal(await pg.locator('#ymca-heat-panel').count(), 0, 'and the lists go with the mode');
+assert.equal(await pg.locator('#ymca-heat-panel').count(), 0, 'and the bar goes with the mode');
 // Back into the window and into a tool, which is where the map block stepped out from.
 await pg.click('#ymca-nav');
 await pg.waitForSelector('#ymca-window');
