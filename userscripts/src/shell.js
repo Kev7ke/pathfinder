@@ -392,6 +392,9 @@ const ICONS = {
         + '<path d="M11 8 H24 M21 5 L24 8 L21 11"/>',
     highfive: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'
         + '<path d="M19 16v-7a2 2 0 0 1 4 0v12a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7v-6a2 2 0 0 1 4 0"/>',
+    simpleaao: '<rect x="4" y="6" width="26" height="8" rx="2"/>'
+        + '<rect x="4" y="20" width="14" height="8" rx="2"/>'
+        + '<path d="M23 24h7 M26.5 20.5v7"/>',
     default: '<rect x="6" y="6" width="9" height="9"/><rect x="19" y="6" width="9" height="9"/>'
         + '<rect x="6" y="19" width="9" height="9"/><rect x="19" y="19" width="9" height="9"/>',
 };

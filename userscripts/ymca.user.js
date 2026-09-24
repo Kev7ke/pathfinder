@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.65
+// @version      0.0.66
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.65',
+    version: '0.0.66',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -1074,6 +1074,9 @@ const ICONS = {
         + '<path d="M11 8 H24 M21 5 L24 8 L21 11"/>',
     highfive: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'
         + '<path d="M19 16v-7a2 2 0 0 1 4 0v12a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7v-6a2 2 0 0 1 4 0"/>',
+    simpleaao: '<rect x="4" y="6" width="26" height="8" rx="2"/>'
+        + '<rect x="4" y="20" width="14" height="8" rx="2"/>'
+        + '<path d="M23 24h7 M26.5 20.5v7"/>',
     default: '<rect x="6" y="6" width="9" height="9"/><rect x="19" y="6" width="9" height="9"/>'
         + '<rect x="6" y="19" width="9" height="9"/><rect x="19" y="19" width="9" height="9"/>',
 };
@@ -5066,32 +5069,44 @@ function mmGamePanelHtml(plan, cfg, ctx) {
  * length, confirm. Across fourteen stations that is the whole evening, and it
  * is the same four clicks every time.
  *
- * THIS ONE WRITES, AND WHAT IT WRITES CANNOT BE UNDONE. Credits spent on
- * personnel do not come back. That is the one place YMCA departs from "where
- * there can be no undo, do not write at all", and it is deliberate: the player
- * asked for it after tab-per-station proved worse than the clicking it
- * replaced. What guards it instead is a preview that names every station and
- * what it will cost, and a confirmation that has to be given before anything is
- * sent. Nothing is ever recruited without both.
+ * IT USED TO DO THE PRESSING, AND THAT WAS THE WRONG SIDE OF THE LINE. It was
+ * the one exception to "where there can be no undo, do not write at all", and
+ * the exception did not hold: a tool that spends credits at fourteen stations
+ * off one press is doing the playing, which is the same objection that took
+ * MissionMagician Auto and HighFive Auto out in 0.0.51. What was actually
+ * wanted was never the sending — it was not having to open fourteen buildings
+ * to find the four clicks.
  *
- * It follows the game's own link — `hire_do` is a plain GET, the same request
- * the button in the page makes — rather than posting a form of its own.
+ * So it lays the choice out and presses nothing. Each station's row carries the
+ * game's own hire links, one per length, and the player clicks the one they
+ * want. One click instead of four, no credits spent by anything here, and no
+ * preview to stand in for an undo that never existed.
  *
  * Where the numbers come from, all of it the game's own:
  *   /api/buildings                  the stations, their type and their name
- *   /buildings/<id>                 "16 Employees", and the station's artwork
+ *   /buildings/<id>                 "16 Employees", the artwork, the countdown
  *   /buildings/<id>/hire            where the game's own recruit buttons live
  *   /buildings/<id>/hire_do/1|2|3   recruit for one, two or three days
  *
  * The personnel count is not in /api/buildings, so it is read from each
  * station's own page — once, kept for the page load, and only for the stations
  * actually being shown.
+ *
+ * WHAT IS STILL OPEN: which element states a recruitment already running.
+ * `data-end-time` is the game's own countdown attribute — it is on
+ * `span#extension_countdown_<id>` — but whether personnel gets one, and under
+ * what id, has never been seen from this side. So every countdown on the page
+ * is read, one whose id names hiring is shown as Days left, and where none
+ * does the column says so rather than showing a number off the wrong clock.
  * -------------------------------------------------------------------------- */
 
 const RR_CACHE = new Map();
 
 /** Buildings that employ people. A dispatch center has none to hire. */
 const RR_NO_STAFF = new Set([1]);
+
+/** An id that names hiring rather than an extension being built. */
+const RR_HIRING_ID = /personnel|personal|staff|hire|schooling|recruit/i;
 
 /**
  * What a station's page says about it.
@@ -5100,6 +5115,11 @@ const RR_NO_STAFF = new Set([1]);
  * Employees" — so the number is taken from the pair rather than from a position
  * in the list, which moves as the game adds rows. The station's artwork is the
  * `img.pull-right` the page heads itself with.
+ *
+ * A countdown is `data-end-time`, which is the game's own attribute and not one
+ * invented here. Every one on the page is collected with the id it sits on, so
+ * a page that names its hiring countdown something nobody here has heard of can
+ * still be read next time rather than argued about.
  */
 async function rrRead(buildingId) {
     if (RR_CACHE.has(buildingId)) return RR_CACHE.get(buildingId);
@@ -5119,13 +5139,20 @@ async function rrRead(buildingId) {
         // The game only offers the link when the station can actually hire.
         const canHire = !!doc.querySelector(`a[href$="/buildings/${buildingId}/hire"]`)
             || !!doc.querySelector('a[href*="/hire"]');
-        return { staff, art, canHire };
-    })().catch((err) => ({ staff: null, art: null, canHire: true, why: err.message }));
+
+        const clocks = [];
+        for (const el of doc.querySelectorAll('[data-end-time]')) {
+            clocks.push({ id: el.id || null, endsAt: el.getAttribute('data-end-time') });
+        }
+        const hiring = clocks.find((c) => c.id && RR_HIRING_ID.test(c.id)) || null;
+        return { staff, art, canHire, clocks, hiring };
+    })().catch((err) => ({ staff: null, art: null, canHire: true, clocks: [], hiring: null,
+        why: err.message }));
     RR_CACHE.set(buildingId, load);
     return load;
 }
 
-/** The lengths the game sells for credits, as it words them. */
+/** The lengths the game sells for credits, as its own links word them. */
 const RR_DAYS = [
     { days: 1, label: '1 day' },
     { days: 2, label: '2 days' },
@@ -5133,19 +5160,18 @@ const RR_DAYS = [
 ];
 
 /**
- * Recruit at one station, by following the game's own link.
+ * Days left on a countdown the game stated, or null.
  *
- * `/buildings/<id>/hire_do/<days>` is what the button in the page points at,
- * and it is a plain GET — so this is the same request the game would make,
- * not a form built here.
+ * `data-end-time` has only ever been seen as milliseconds since the epoch, so
+ * anything that does not read as a time in the future is left as no answer
+ * rather than turned into a number.
  */
-async function rrHire(buildingId, days) {
-    const res = await fetch(`/buildings/${buildingId}/hire_do/${days}`, {
-        credentials: 'same-origin',
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return true;
+function rrDaysLeft(endsAt) {
+    const at = Number(endsAt);
+    if (!Number.isFinite(at)) return null;
+    const ms = at - Date.now();
+    if (ms <= 0) return null;
+    return Math.ceil(ms / 86400000);
 }
 
 YMCA.register({
@@ -5156,8 +5182,8 @@ YMCA.register({
     tagline: 'Hiring, every station at once',
 
     description: 'Every station that employs people, with its crew count and the game’s own '
-        + 'recruit buttons side by side. It does not hire for you — spent credits do not come '
-        + 'back, so the button that costs money stays yours to press.',
+        + 'recruit links for one, two or three days side by side. It does not hire for you — '
+        + 'spent credits do not come back, so the link that costs money stays yours to click.',
 
     async mount(el, ctx) {
         const buildings = await ctx.game('/api/buildings');
@@ -5177,8 +5203,8 @@ YMCA.register({
       <div class="ymca-card">
         <b>${stations.length} station${stations.length === 1 ? '' : 's'}</b>
         <p class="ymca-sub" style="margin:4px 0 10px">Crew counts come from each station's own
-          page. Recruiting spends credits and cannot be undone, so it says what it is about
-          to do and waits to be told yes.</p>
+          page. The recruit links are the game's own &mdash; one click instead of four, and
+          <b>nothing here spends a credit until you click one</b>.</p>
         ${centres.length ? `<label class="ymca-dim">Dispatch center
           <select data-cfg="area" style="margin-left:6px">
             <option value="">Everything you own</option>
@@ -5189,96 +5215,41 @@ YMCA.register({
 
       <div class="ymca-card">
         <table id="rr-table" style="margin-top:4px">
-          <thead><tr><th style="width:1%"><input type="checkbox" id="rr-all"
-              title="all of them"></th><th style="width:1%"></th><th>Station</th>
-            <th class="ymca-num">Crew</th><th></th></tr></thead>
+          <thead><tr><th style="width:1%"></th><th>Station</th>
+            <th class="ymca-num">Crew</th>
+            <th class="ymca-num" title="From the game's own countdown, where it states one"
+              >Days left</th>
+            <th>Recruit for</th></tr></thead>
           <tbody>${stations.map((b) => `
             <tr data-station="${b.id}">
-              <td><input type="checkbox" class="rr-pick" value="${b.id}"></td>
               <td class="rr-art"></td>
               <td><a href="/buildings/${b.id}" target="_blank" rel="noopener"
                 >${ctx.esc(b.caption || `Building ${b.id}`)}</a></td>
               <td class="ymca-num rr-staff"><span class="ymca-dim">&hellip;</span></td>
-              <td class="rr-said"></td>
+              <td class="ymca-num rr-left"><span class="ymca-dim">&hellip;</span></td>
+              <td class="rr-do">${RR_DAYS.map((d) => `<a class="ymca-btn"
+                href="/buildings/${b.id}/hire_do/${d.days}" target="_blank" rel="noopener"
+                >${d.label}</a>`).join(' ')}</td>
             </tr>`).join('')}
           </tbody>
         </table>
         ${stations.length ? '' : '<p class="ymca-dim">No station in this dispatch center hires.</p>'}
       </div>
 
-      ${stations.length ? `
-      <div class="ymca-card">
-        <b>Recruit at the ticked stations</b>
-        <p class="ymca-sub" style="margin:4px 0 10px">It says what it is about to do and waits to
-          be told yes. <b>Credits spent on people do not come back</b>, so there is no undo
-          afterwards &mdash; the preview is the only check there is.</p>
-        ${RR_DAYS.map((d) => `<button class="ymca-btn primary" data-hire="${d.days}"
-          >Recruit ${d.label}</button>`).join(' ')}
-        <span class="ymca-status" id="rr-status"></span>
-      </div>` : ''}`;
+      <div class="ymca-note">Each link is the game's own <code>hire_do</code>, opened in a new
+        tab. <b>Credits spent on people do not come back</b>, and nothing here clicks one for
+        you &mdash; that is the whole reason this is a layout rather than a queue.</div>`;
 
         el.addEventListener('change', (e) => {
-            if (e.target.id === 'rr-all') {
-                for (const box of el.querySelectorAll('.rr-pick')) box.checked = e.target.checked;
-                return;
-            }
             if (e.target.dataset.cfg !== 'area') return;
             ctx.store.write('cfg', Object.assign(ctx.store.read('cfg', {}), { area: e.target.value }));
             YMCA.modules.find((m) => m.id === 'recruitroom').mount(el, ctx);
         });
 
-        const say = (text) => {
-            const at = el.querySelector('#rr-status');
-            if (at) at.textContent = text;
-            ctx.status(text);
-        };
-
-        el.addEventListener('click', async (e) => {
-            const go = e.target.closest('[data-hire]');
-            if (!go) return;
-            const days = Number(go.dataset.hire);
-            const picked = [...el.querySelectorAll('.rr-pick:checked')].map((b) => b.value);
-            if (!picked.length) { say('Tick the stations first.'); return; }
-
-            /* The preview is the whole safeguard: what it will do, where, and
-             * that it cannot be taken back. Nothing is sent before the yes. */
-            const named = picked.map((id) => {
-                const b = stations.find((x) => String(x.id) === String(id));
-                return `· ${b?.caption || `Building ${id}`}`;
-            }).join('\n');
-            const ok = confirm(`Recruit one person for ${days} day${days > 1 ? 's' : ''} at `
-                + `${picked.length} station${picked.length > 1 ? 's' : ''}:\n\n${named}\n\n`
-                + 'This spends credits and cannot be undone.');
-            if (!ok) return;
-
-            for (const box of el.querySelectorAll('[data-hire]')) box.disabled = true;
-            let done = 0;
-            let failed = 0;
-            for (const id of picked) {
-                const row = el.querySelector(`tr[data-station="${id}"] .rr-said`);
-                /* eslint-disable no-await-in-loop */
-                try {
-                    await rrHire(id, days);
-                    done += 1;
-                    if (row) row.innerHTML = '<span class="ymca-accent">recruited</span>';
-                } catch (err) {
-                    failed += 1;
-                    if (row) row.innerHTML = `<span class="ymca-bad">${ctx.esc(err.message)}</span>`;
-                    ctx.log.warn('recruit failed', `${id}: ${err.message}`);
-                }
-                say(`${done} of ${picked.length}…`);
-                // The crew count this browser holds is a page old now.
-                RR_CACHE.delete(Number(id));
-                RR_CACHE.delete(id);
-                await ctx.sleep(250);
-            }
-            ctx.log.info('recruited', `${done} stations, ${days} day(s), ${failed} failed`);
-            say(`Recruited at ${done}${failed ? `, ${failed} failed` : ''}. Reading the counts again…`);
-            YMCA.modules.find((m) => m.id === 'recruitroom').mount(el, ctx);
-        });
-
         /* One station at a time, so a big alliance of stations does not arrive
          * as fourteen requests at once. Each row fills itself in as it lands. */
+        let noClock = 0;
+        const clockIds = new Set();
         for (const b of stations) {
             const row = el.querySelector(`tr[data-station="${b.id}"]`);
             if (!row) continue;
@@ -5290,6 +5261,15 @@ YMCA.register({
                     ? '<span class="ymca-dim">&ndash;</span>'
                     : `<b>${ctx.fmt(info.staff)}</b>`;
             }
+            const left = row.querySelector('.rr-left');
+            if (left) {
+                const days = info.hiring ? rrDaysLeft(info.hiring.endsAt) : null;
+                left.innerHTML = days === null
+                    ? '<span class="ymca-dim" title="this page states no hiring countdown">&ndash;</span>'
+                    : `<b>${ctx.fmt(days)}</b>`;
+                if (days === null) noClock += 1;
+            }
+            for (const c of info.clocks || []) if (c.id) clockIds.add(c.id.replace(/\d+/g, '#'));
             const art = row.querySelector('.rr-art');
             if (art && info.art) {
                 art.innerHTML = `<img src="${ctx.esc(info.art)}" width="24" height="24" alt=""
@@ -5297,7 +5277,241 @@ YMCA.register({
             }
             await ctx.sleep(80);
         }
+        /* Whether a station page states a hiring countdown at all has never been
+         * seen from this side, so what the pages did carry is written down for
+         * the next read rather than left as a column of dashes nobody can act on. */
+        ctx.store.write('clocks', { at: Date.now(), noCountdown: noClock,
+            countdownIds: [...clockIds].sort() });
         ctx.status(`${stations.length} stations.`);
+    },
+});
+
+/* --------------------------------------------------------------------------
+ * SimpleAAO — the dispatch orders you would have built by hand.
+ *
+ * A dispatch order is a filter the game builds in its own editor: "send three
+ * fire engines", "send one K-9 unit". Building one is a page of seventy-odd
+ * fields where two of them matter, and then you do it again for two engines,
+ * and again for four. Nobody builds the twenty orders they actually want.
+ *
+ * THE FORM SAYS HOW, AND NOTHING HERE IS GUESSED AT. `/aaos/new` carries one
+ * field per capability the game has a word for, and each one is
+ * `<input type="number" name="aao[fire]">` — so an order is a **count** per
+ * capability, not a tick. That is the whole feature: pick the class the game
+ * names, pick how many, and the order is the form the game would have posted.
+ *
+ * Every word on this page is the game's own. The groups are the editor's own
+ * tabs (Fire, Rescue, Police, FBI, Water Rescue, Brush, Tow Trucks, Mountain
+ * Rescue); the rows are its own labels — "Police Motorcycle", "Utility Truck",
+ * "Fire Engine". Nothing is translated and no list of classes is kept here, so
+ * a capability the game adds next month turns up on its own.
+ *
+ * IT WRITES, AND IT CAN BE UNDONE — which is why it may write at all. A
+ * dispatch order is a thing the game lets you delete; credits and an alarm are
+ * not. So the rule is met the way the rule asks: a preview that names exactly
+ * what is about to be created, a confirmation before anything is sent, and
+ * every order it made written down here with the game's own link to it, so
+ * removing one is a click rather than a hunt.
+ *
+ * NOTHING IS HAND-BUILT. The FormData comes out of the real form fetched from
+ * `/aaos/new`, and two fields are replaced — the caption and the one count. The
+ * CSRF token, the category, the colours and every other setting go back exactly
+ * as the game wrote them. That is the route SwitchDispatchCenter and the
+ * Renamer already take.
+ * -------------------------------------------------------------------------- */
+
+/** The editor, fetched once for the page load: the form is the vocabulary. */
+let SA_FORM = null;
+
+async function saEditor() {
+    if (SA_FORM) return SA_FORM;
+    SA_FORM = (async () => {
+        const res = await fetch('/aaos/new', { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`the dispatch-order editor answered HTTP ${res.status}`);
+        const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+        const form = doc.querySelector('form[action*="aao"], form');
+        if (!form) throw new Error('the dispatch-order editor carried no form');
+
+        /* A DOMParser leaves `form.action` empty where the page had none, which
+         * has cost this repo a release once already. The attribute is read, and
+         * where the game states none the form is posted back to where it came
+         * from rather than to a path made up here. */
+        const action = form.getAttribute('action') || '/aaos/new';
+
+        /* The tabs ARE the groups, named by the game. `#tabs` links point at the
+         * panels by id, so the two are paired without naming either. */
+        const tabName = new Map();
+        for (const a of doc.querySelectorAll('a[href^="#"][data-toggle="tab"]')) {
+            tabName.set(a.getAttribute('href').slice(1), a.textContent.trim());
+        }
+
+        const groups = [];
+        for (const panel of doc.querySelectorAll('.tab-pane[id]')) {
+            const rows = [];
+            for (const input of panel.querySelectorAll('input[type="number"][name^="aao["]')) {
+                const key = /^aao\[(.+)\]$/.exec(input.getAttribute('name'))?.[1];
+                if (!key) continue;
+                const label = panel.querySelector(`label[for="${input.id}"]`)?.textContent.trim();
+                rows.push({ key, label: label || key, field: input.getAttribute('name') });
+            }
+            if (rows.length) {
+                groups.push({ id: panel.id, name: tabName.get(panel.id) || panel.id, rows });
+            }
+        }
+        if (!groups.length) throw new Error('the editor named no vehicle class at all');
+        return { doc, form, action, groups };
+    })().catch((err) => { SA_FORM = null; throw err; });
+    return SA_FORM;
+}
+
+/**
+ * Create one order, out of the game's own form.
+ *
+ * Two fields are replaced and nothing else is touched, so whatever the editor
+ * would have sent by default is what gets sent.
+ */
+async function saCreate(editor, field, count, caption) {
+    const data = new FormData(editor.form);
+    data.set('aao[caption]', caption);
+    data.set(field, String(count));
+    const res = await fetch(editor.action, {
+        method: (editor.form.getAttribute('method') || 'post').toUpperCase(),
+        credentials: 'same-origin',
+        body: data,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    /* Where the game redirected to is its own page for what it just made, so
+     * the way back to delete it is a reading rather than a path invented here. */
+    return res.url || null;
+}
+
+YMCA.register({
+    id: 'simpleaao',
+    optional: true,
+    defaultOn: true,
+    title: 'SimpleAAO',
+    tagline: 'Dispatch orders, one click each',
+
+    description: 'The dispatch orders you would otherwise build one seventy-field page at a '
+        + 'time. Pick a vehicle class the game names and how many of it, and the order is '
+        + 'created from the game’s own editor. Every one it makes is listed here with the link '
+        + 'to delete it again.',
+
+    async mount(el, ctx) {
+        el.innerHTML = '<p class="ymca-dim">Reading the game’s dispatch-order editor…</p>';
+        let editor;
+        try {
+            editor = await saEditor();
+        } catch (err) {
+            el.innerHTML = `<div class="ymca-note bad">${ctx.esc(err.message)}. Nothing can be
+        offered here until it does &mdash; every class and every group on this page is read off
+        that form rather than kept in a list.</div>`;
+            return;
+        }
+
+        const cfg = ctx.store.read('cfg', {});
+        const open = editor.groups.some((g) => g.id === cfg.group) ? cfg.group : editor.groups[0].id;
+        const made = ctx.store.read('made', []);
+
+        const group = editor.groups.find((g) => g.id === open);
+        const counts = [1, 2, 3, 4, 5];
+
+        el.innerHTML = `
+      <div class="ymca-card">
+        <b>${editor.groups.length} groups, ${editor.groups.reduce((n, g) => n + g.rows.length, 0)}
+          vehicle classes</b>
+        <p class="ymca-sub" style="margin:4px 0 10px">All of it read off the game's own editor,
+          groups and names alike. A number is how many of that class the order sends, which is
+          what the editor's own field counts.</p>
+        <div>${editor.groups.map((g) => `<button class="ymca-btn${g.id === open ? ' primary' : ''}"
+          data-group="${ctx.esc(g.id)}">${ctx.esc(g.name)}</button>`).join(' ')}</div>
+      </div>
+
+      <div class="ymca-card">
+        <table>
+          <thead><tr><th>Vehicle class</th><th>Create an order for</th></tr></thead>
+          <tbody>${group.rows.map((r) => `
+            <tr>
+              <td>${ctx.esc(r.label)} <small class="ymca-dim">${ctx.esc(r.key)}</small></td>
+              <td>${counts.map((n) => `<button class="ymca-btn" data-make="${ctx.esc(r.field)}"
+                data-n="${n}" data-label="${ctx.esc(r.label)}">${n}</button>`).join(' ')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        <p class="ymca-sub" style="margin:10px 0 0">Each button says what it is about to create
+          and waits to be told yes. An order <b>can</b> be deleted again &mdash; that is why this
+          one may write at all.</p>
+        <span class="ymca-status" id="sa-status"></span>
+      </div>
+
+      <div class="ymca-card">
+        <b>Made from here</b>
+        <p class="ymca-sub" style="margin:4px 0 8px">Every order this made, with the game's own
+          link to it. Deleting one is the game's own page, not a button here.</p>
+        <div id="sa-made">${made.length ? `<table><tbody>${made.map((m) => `
+          <tr><td>${ctx.esc(m.caption)}</td>
+            <td class="ymca-dim">${ctx.esc(m.field)} = ${ctx.esc(String(m.count))}</td>
+            <td>${m.url ? `<a href="${ctx.esc(m.url)}" target="_blank" rel="noopener"
+              >open it</a>` : '<span class="ymca-dim">no link came back</span>'}</td></tr>`)
+            .join('')}</tbody></table>`
+            : '<span class="ymca-dim">Nothing yet.</span>'}</div>
+        ${made.length ? '<button class="ymca-btn" data-forget>Clear this list</button>' : ''}
+      </div>`;
+
+        const say = (text) => {
+            const at = el.querySelector('#sa-status');
+            if (at) at.textContent = text;
+            ctx.status(text);
+        };
+
+        el.addEventListener('click', async (e) => {
+            const tab = e.target.closest('[data-group]');
+            if (tab) {
+                ctx.store.write('cfg', Object.assign(ctx.store.read('cfg', {}),
+                    { group: tab.dataset.group }));
+                YMCA.modules.find((m) => m.id === 'simpleaao').mount(el, ctx);
+                return;
+            }
+            if (e.target.closest('[data-forget]')) {
+                /* The list, not the orders: nothing here deletes anything in the
+                 * game, and a button that cleared both would be lying about one. */
+                ctx.store.write('made', []);
+                YMCA.modules.find((m) => m.id === 'simpleaao').mount(el, ctx);
+                return;
+            }
+
+            const go = e.target.closest('[data-make]');
+            if (!go) return;
+            const field = go.dataset.make;
+            const count = Number(go.dataset.n);
+            const caption = `${go.dataset.label} ${count}`;
+
+            /* The preview names exactly what is about to exist, and the yes is
+             * the player's. Nothing is sent before it. */
+            const ok = confirm(`Create a dispatch order in your game:\n\n`
+                + `  Name:  ${caption}\n  Sends: ${count} × ${go.dataset.label}\n\n`
+                + 'Everything else comes from the game’s own editor unchanged. '
+                + 'You can delete it again in the game.');
+            if (!ok) return;
+
+            go.disabled = true;
+            say(`Creating ${caption}…`);
+            try {
+                const url = await saCreate(editor, field, count, caption);
+                const kept = ctx.store.read('made', []);
+                kept.unshift({ caption, field, count, url, at: Date.now() });
+                ctx.store.write('made', kept.slice(0, 200));
+                ctx.log.info('dispatch order created', `${field}=${count}`);
+                say(`${caption} created.`);
+                YMCA.modules.find((m) => m.id === 'simpleaao').mount(el, ctx);
+            } catch (err) {
+                go.disabled = false;
+                ctx.log.warn('dispatch order failed', err.message);
+                say(`It was refused: ${err.message}`);
+            }
+        });
+
+        ctx.status(`${group.rows.length} classes in ${group.name}.`);
     },
 });
 
@@ -5529,6 +5743,10 @@ YMCA.register({
                             lines: sum.lines,
                             patientIncome: sum.patients,
                             ignoredLines: sum.ignored,
+                            /* The wording of every kind of line, figures taken
+                             * out: what a transport, prisoner or alliance count
+                             * has to be built on before it can be built. */
+                            lineKinds: sum.kinds,
                             byMission: sum.missions.map((m) => ({
                                 name: m.name, runs: m.runs, average: m.average,
                                 low: m.low, high: m.high,
@@ -5686,6 +5904,19 @@ function toLedgerHtml(sum, ctx) {
         <td class="ymca-num ymca-dim">${ctx.fmt(m.low)}</td>
         <td class="ymca-num ymca-dim">${ctx.fmt(m.high)}</td></tr>`).join('')}</tbody>
     </table>
+    ${sum.kinds?.length ? `<details style="margin-top:10px"><summary class="ymca-dim"
+      >Every kind of line in the ledger (${sum.kinds.length})</summary>
+      <table style="margin-top:6px"><thead><tr><th>As the game words it</th>
+        <th class="ymca-num">Lines</th><th class="ymca-num">In</th>
+        <th class="ymca-num">Out</th></tr></thead>
+      <tbody>${sum.kinds.slice(0, 80).map((k) => `<tr>
+        <td>${ctx.esc(k.kind)}</td><td class="ymca-num">${ctx.fmt(k.lines)}</td>
+        <td class="ymca-num">${k.paid ? ctx.fmt(k.paid) : ''}</td>
+        <td class="ymca-num">${k.spent ? ctx.fmt(k.spent) : ''}</td></tr>`).join('')}</tbody>
+      </table>
+      <p class="ymca-dim" style="margin:6px 0 0;font-size:12px">Figures inside the wording are
+        taken out, so this is what the game calls things and nothing of yours. It is what a
+        count of transports, prisoners or alliance shares has to be built on.</p></details>` : ''}
     <p class="ymca-sub" style="margin-top:8px">${sum.ignored} lines left out as not a mission.
       This is one page of the ledger &mdash; the game keeps many.</p>`;
 }
@@ -5933,10 +6164,29 @@ function toNameKey(name) {
 function toSummariseLedger(rows) {
     const missions = new Map();
     const patients = { lines: 0, total: 0 };
+    const kinds = new Map();
     let ignored = 0;
     let spent = 0;
 
+    /* WHAT IS THROWN AWAY IS WHAT THE STATS ARE MADE OF. Everything this counts
+     * as "not a mission" — a prisoner delivered, an alliance share, a daily
+     * task, a course — is a thing the player wants counted, and the only reason
+     * it is not counted yet is that nobody here knows the words the game writes
+     * for it. So each one is tallied by its own description with the figures
+     * taken out: digits masked and anything quoted emptied, which leaves the
+     * game's own wording and no mission, task or building of the player's in
+     * it. That is the vocabulary the next version is built from. */
+    const kindOf = (what) => String(what).replace(/"[^"]*"/g, '"…"')
+        .replace(/\d[\d.,]*/g, '#').replace(/\s+/g, ' ').trim()
+        .slice(0, 80);
+
     for (const row of rows) {
+        const kind = kindOf(row.what);
+        const tally = kinds.get(kind) || { kind, lines: 0, paid: 0, spent: 0 };
+        tally.lines += 1;
+        if (row.amount < 0) tally.spent += -row.amount; else tally.paid += row.amount;
+        kinds.set(kind, tally);
+
         if (row.amount < 0) { spent += -row.amount; continue; }
         if (TO_PATIENT_LINES.test(row.what)) {
             patients.lines += 1;
@@ -5960,6 +6210,11 @@ function toSummariseLedger(rows) {
         ignored,
         spent,
         lines: rows.length,
+        /* Every kind of line the ledger holds, by the game's own wording, with
+         * every figure in the text taken out. Missions are in here too, because
+         * telling a mission name from a payout kind by looking at it is exactly
+         * the guess that has to stop. */
+        kinds: [...kinds.values()].sort((a, b) => b.lines - a.lines),
     };
 }
 
@@ -8086,16 +8341,100 @@ function seCfg(ctx) {
  * The address is a second sentence inside the name and goes by default — it is
  * what made the name unreadable in the space left.
  */
+/**
+ * WHAT THE CALL IS LISTED AT, ON THE PANEL ITSELF.
+ *
+ * A panel carries `mission_type_id` as a plain attribute, and that is the key
+ * straight into `/einsaetze.json`, where `average_credits` is the game's own
+ * figure. So the number is a reading rather than anything measured here — it
+ * is what TrackOps calls **Listed**, and it is marked `≈` on the panel for
+ * exactly that reason.
+ *
+ * IT IS STILL A STYLESHEET. The game redraws a panel's insides constantly, so
+ * writing the figure into the markup would mean writing it again every few
+ * seconds. The panel element itself survives those redraws, so the figure goes
+ * on the panel as an attribute and a `::after` rule shows it: one rule, and
+ * the redraw underneath cannot take it off. Only a panel the game has newly
+ * added needs stamping, which is what the observer is for and all it does.
+ */
+const SE_CREDITS_ATTR = 'data-ymca-credits';
+let SE_LISTED = null;
+let SE_WATCHER = null;
+
+async function seListed(ctx) {
+    if (SE_LISTED) return SE_LISTED;
+    SE_LISTED = (async () => {
+        const list = await ctx.game('/einsaetze.json');
+        const by = {};
+        for (const m of Array.isArray(list) ? list : []) {
+            const paid = Number(m.average_credits);
+            if (Number.isFinite(paid) && paid > 0) by[String(m.id)] = paid;
+        }
+        return by;
+    })().catch(() => ({}));
+    return SE_LISTED;
+}
+
+/** Stamp whatever the game has drawn and nothing else knows about yet. */
+function seStamp(ctx, listed) {
+    for (const panel of document.querySelectorAll('.panel[id^="mission_panel_"]')) {
+        if (panel.hasAttribute(SE_CREDITS_ATTR)) continue;
+        /* A plain attribute, not `data-` — the game writes it that way. */
+        const type = panel.getAttribute('mission_type_id');
+        const paid = type === null ? undefined : listed[String(type)];
+        /* A mission type the catalogue does not carry gets no figure rather
+         * than a nought: `/einsaetze.json` lists only what this player can
+         * generate, so an alliance call from somebody else's building is
+         * simply absent and inventing a zero would read as "pays nothing". */
+        panel.setAttribute(SE_CREDITS_ATTR, paid ? `\u2248\u2009${ctx.fmt(paid)}` : '');
+    }
+}
+
+/** Take back what was written, because an attribute outlives a stylesheet. */
+function seUnstamp() {
+    SE_WATCHER?.disconnect();
+    SE_WATCHER = null;
+    for (const panel of document.querySelectorAll(`[${SE_CREDITS_ATTR}]`)) {
+        panel.removeAttribute(SE_CREDITS_ATTR);
+    }
+}
+
+async function seWatch(ctx) {
+    const listed = await seListed(ctx);
+    seStamp(ctx, listed);
+    if (SE_WATCHER) return;
+    const list = document.getElementById('mission_list') || document.body;
+    if (!list) return;
+    let due = null;
+    SE_WATCHER = new MutationObserver(() => {
+        /* The socket redraws these panels several times a second, so the sweep
+         * is debounced to the next frame's worth rather than run per mutation. */
+        if (due) return;
+        due = setTimeout(() => { due = null; seStamp(ctx, listed); }, 250);
+    });
+    SE_WATCHER.observe(list, { childList: true, subtree: true });
+}
+
 function seCss(cfg, looks) {
     const P = '.panel[id^="mission_panel_"]';
     const col = `${P} .panel-body .col-xs-11`;
     const bar = `${col} > div[id^="mission_bar_outer_"]`;
     const back = SE_PARTS.filter((p) => cfg[p.key]).map((p) => `${col} > div[id^="${p.prefix}"]`);
 
+    const count = `${col} > div[id^="mission_overview_countdown_"]`;
     const rules = [
         `${col} > *{display:none !important}`,
         `${[bar, ...back].join(',')}{display:block !important}`,
     ];
+
+    /* GREEN IS THE ONE STATE WHERE THE CLOCK IS THE WHOLE STORY. Every vehicle
+     * is there, nothing is missing to read, and what is left to know is how
+     * long it still runs. So the countdown comes back on a green panel whatever
+     * it is set to elsewhere — one rule, and it follows a panel into green and
+     * out again without anything here watching for it. */
+    if (cfg.greenClock !== false) {
+        rules.push(`${P}.mission_panel_green ${count}{display:inline-block !important}`);
+    }
     if (!cfg.address) rules.push(`${P} small[id^="mission_address_"]{display:none}`);
 
     if (cfg.line !== false) {
@@ -8109,8 +8448,21 @@ function seCss(cfg, looks) {
             `${P} span[id^="mission_participant"]{order:3;flex:none}`,
             `${P} a[id^="mission_caption_"]{order:4;flex:1 1 40px;min-width:0;`
             + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-            `${bar}{order:5;flex:0 0 ${width}%;margin:0;height:14px}`);
+            `${bar}{order:6;flex:0 0 ${width}%;margin:0;height:14px}`);
         if (back.length) rules.push(`${back.join(',')}{flex:1 1 100%;order:10}`);
+        /* The figure sits between the name and the bar, where the eye already
+         * is. It is only drawn where there is one: an empty attribute is no
+         * figure, and `content` of nothing draws nothing. */
+        if (cfg.credits !== false) {
+            rules.push(`${P}[${SE_CREDITS_ATTR}]::after{content:attr(${SE_CREDITS_ATTR});`
+                + 'order:5;flex:none;opacity:.75;font-size:12px;white-space:nowrap}');
+        }
+        /* On one line the countdown is a word beside the bar rather than a row
+         * of its own, so it goes after it rather than under it. */
+        if (cfg.greenClock !== false) {
+            rules.push(`${P}.mission_panel_green ${count}{order:7;flex:none;`
+                + 'font-size:12px;white-space:nowrap}');
+        }
 
         /* The heading's own look, put back on the panel now that the heading
          * has no box of its own to wear it. */
@@ -8134,6 +8486,15 @@ function seApply(ctx) {
      * second, so switching it off takes the button with it. */
     const available = YMCA.isOn('shuteye');
     const folded = available && cfg.on !== false;
+
+    /* An attribute cannot be un-written by a stylesheet going away, so the two
+     * edges are both handled here: stamped while it is folded, taken off when
+     * it is not. */
+    if (folded && cfg.credits !== false) {
+        seWatch(ctx).catch((err) => ctx.log.warn('shuteye credits', err.message));
+    } else {
+        seUnstamp();
+    }
 
     let style = document.getElementById(SE_STYLE_ID);
     if (!folded) style?.remove();
@@ -8246,6 +8607,19 @@ YMCA.register({
           ${SE_PARTS.map((p) => `<label><input type="checkbox" data-part="${ctx.esc(p.key)}"
             ${cfg[p.key] ? 'checked' : ''}> ${ctx.esc(p.label)}</label>`).join('')}
         </div>
+      </div>
+
+      <div class="ymca-card">
+        <b>On the line itself</b>
+        <label style="display:block;margin-top:7px"><input type="checkbox" data-part="credits"
+          ${cfg.credits !== false ? 'checked' : ''}> What the call is worth</label>
+        <label style="display:block;margin-top:7px"><input type="checkbox" data-part="greenClock"
+          ${cfg.greenClock !== false ? 'checked' : ''}> The countdown once every vehicle is
+          there</label>
+        <p class="ymca-dim" style="margin:8px 0 0;font-size:12px">The figure is the game's own
+          average for that kind of call, marked &#8776; because it is what the catalogue lists
+          rather than what this one paid. A call the catalogue does not carry &mdash; an alliance
+          call from somebody else's building &mdash; simply has none.</p>
       </div>`;
         el.addEventListener('change', (e) => {
             const width = e.target.closest('[data-width]');

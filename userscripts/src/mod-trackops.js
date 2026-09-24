@@ -226,6 +226,10 @@ YMCA.register({
                             lines: sum.lines,
                             patientIncome: sum.patients,
                             ignoredLines: sum.ignored,
+                            /* The wording of every kind of line, figures taken
+                             * out: what a transport, prisoner or alliance count
+                             * has to be built on before it can be built. */
+                            lineKinds: sum.kinds,
                             byMission: sum.missions.map((m) => ({
                                 name: m.name, runs: m.runs, average: m.average,
                                 low: m.low, high: m.high,
@@ -383,6 +387,19 @@ function toLedgerHtml(sum, ctx) {
         <td class="ymca-num ymca-dim">${ctx.fmt(m.low)}</td>
         <td class="ymca-num ymca-dim">${ctx.fmt(m.high)}</td></tr>`).join('')}</tbody>
     </table>
+    ${sum.kinds?.length ? `<details style="margin-top:10px"><summary class="ymca-dim"
+      >Every kind of line in the ledger (${sum.kinds.length})</summary>
+      <table style="margin-top:6px"><thead><tr><th>As the game words it</th>
+        <th class="ymca-num">Lines</th><th class="ymca-num">In</th>
+        <th class="ymca-num">Out</th></tr></thead>
+      <tbody>${sum.kinds.slice(0, 80).map((k) => `<tr>
+        <td>${ctx.esc(k.kind)}</td><td class="ymca-num">${ctx.fmt(k.lines)}</td>
+        <td class="ymca-num">${k.paid ? ctx.fmt(k.paid) : ''}</td>
+        <td class="ymca-num">${k.spent ? ctx.fmt(k.spent) : ''}</td></tr>`).join('')}</tbody>
+      </table>
+      <p class="ymca-dim" style="margin:6px 0 0;font-size:12px">Figures inside the wording are
+        taken out, so this is what the game calls things and nothing of yours. It is what a
+        count of transports, prisoners or alliance shares has to be built on.</p></details>` : ''}
     <p class="ymca-sub" style="margin-top:8px">${sum.ignored} lines left out as not a mission.
       This is one page of the ledger &mdash; the game keeps many.</p>`;
 }
@@ -630,10 +647,29 @@ function toNameKey(name) {
 function toSummariseLedger(rows) {
     const missions = new Map();
     const patients = { lines: 0, total: 0 };
+    const kinds = new Map();
     let ignored = 0;
     let spent = 0;
 
+    /* WHAT IS THROWN AWAY IS WHAT THE STATS ARE MADE OF. Everything this counts
+     * as "not a mission" — a prisoner delivered, an alliance share, a daily
+     * task, a course — is a thing the player wants counted, and the only reason
+     * it is not counted yet is that nobody here knows the words the game writes
+     * for it. So each one is tallied by its own description with the figures
+     * taken out: digits masked and anything quoted emptied, which leaves the
+     * game's own wording and no mission, task or building of the player's in
+     * it. That is the vocabulary the next version is built from. */
+    const kindOf = (what) => String(what).replace(/"[^"]*"/g, '"…"')
+        .replace(/\d[\d.,]*/g, '#').replace(/\s+/g, ' ').trim()
+        .slice(0, 80);
+
     for (const row of rows) {
+        const kind = kindOf(row.what);
+        const tally = kinds.get(kind) || { kind, lines: 0, paid: 0, spent: 0 };
+        tally.lines += 1;
+        if (row.amount < 0) tally.spent += -row.amount; else tally.paid += row.amount;
+        kinds.set(kind, tally);
+
         if (row.amount < 0) { spent += -row.amount; continue; }
         if (TO_PATIENT_LINES.test(row.what)) {
             patients.lines += 1;
@@ -657,6 +693,11 @@ function toSummariseLedger(rows) {
         ignored,
         spent,
         lines: rows.length,
+        /* Every kind of line the ledger holds, by the game's own wording, with
+         * every figure in the text taken out. Missions are in here too, because
+         * telling a mission name from a payout kind by looking at it is exactly
+         * the guess that has to stop. */
+        kinds: [...kinds.values()].sort((a, b) => b.lines - a.lines),
     };
 }
 

@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.65';
+export const VERSION = '0.0.66';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -201,6 +201,7 @@ function build() {
             .replace('__VEHICLE_TYPES__', vehicleTypes)
             .replace('__VEHICLE_FLAGS__', vehicleFlags),
         read('userscripts/src/mod-recruitroom.js'),
+        read('userscripts/src/mod-simpleaao.js'),
         read('userscripts/src/mod-trackops.js'),
         /* ElementFriend is the switchboard and HighFive is its first
          * element-only tile, so both come after everything they switch: the

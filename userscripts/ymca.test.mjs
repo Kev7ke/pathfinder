@@ -38,6 +38,7 @@ await pg.setContent(`<html><head><style>
 
 await pg.evaluate(() => {
 window.__hired = [];
+  window.__aaoPosts = [];
     window.__posts = [];
   window.confirm = () => true;
   window.GM_registerMenuCommand = () => {};
@@ -118,30 +119,52 @@ window.__hired = [];
     /* The game's own dispatch-order editor, as the question to be answered: does it
      * state the flags per vehicle type, for types nobody owns as well? */
     if (url === '/aaos/new') {
-      /* The real form, as the game writes it: a checkbox per capability the game has,
-       * and one per type it sells — the type id in the FIELD NAME, never an attribute. */
+      /* THE REAL FORM, AS THE GAME WRITES IT. Every capability is an
+       * <input type="number"> — an order is a COUNT per class, not a tick — with the game's
+       * own label beside it, in a tab the game itself names. The types it sells sit beside
+       * them with the id in the FIELD NAME, never in an attribute. */
       return new Response(`<html><body><form id="new_aao" action="/aaos" method="post">
-        <input name="utf8"><input name="authenticity_token" value="X">
+        <input name="utf8" value="&#10003;"><input name="authenticity_token" value="CSRF-XYZ">
         <input id="aao_caption" name="aao[caption]"><input name="aao[color]">
-        <select name="aao[category_id]"></select><select name="aao[building_ids][]"></select>
+        <select name="aao[category_id]"><option value="7" selected>Fire</option></select>
+        <select name="aao[building_ids][]" multiple></select>
         <input name="aao[reset]">
-        <ul id="tabs"><li>Fire</li><li>Police</li></ul>
+        <ul id="tabs">
+          <li><a href="#fire" data-toggle="tab">Fire</a></li>
+          <li><a href="#polizei" data-toggle="tab">Police</a></li>
+        </ul>
         <div id="tab_panels">
-          <div id="fire">
-            <input type="checkbox" id="aao_fire" name="aao[fire]">
-            <input type="checkbox" id="aao_dlk" name="aao[dlk]">
-            <input type="checkbox" id="aao_rw" name="aao[rw]">
-            <input type="checkbox" id="aao_gwgefahrgut" name="aao[gwgefahrgut]">
-            <input type="checkbox" id="aao_crew_carrier" name="aao[crew_carrier]">
-            <input type="checkbox" id="vehicle_type_ids_0" name="vehicle_type_ids[0]">
-            <input type="checkbox" id="vehicle_type_ids_4" name="vehicle_type_ids[4]">
-            <input type="checkbox" id="vehicle_type_ids_91" name="vehicle_type_ids[91]">
+          <div class="tab-pane" id="fire">
+            <label for="aao_fire">Fire Engine</label>
+            <input type="number" step="1" value="0" id="aao_fire" name="aao[fire]">
+            <label for="aao_dlk">Platform Truck</label>
+            <input type="number" step="1" value="0" id="aao_dlk" name="aao[dlk]">
+            <label for="aao_rw">Heavy Rescue Vehicle</label>
+            <input type="number" step="1" value="0" id="aao_rw" name="aao[rw]">
+            <label for="aao_gwgefahrgut">HazMat</label>
+            <input type="number" step="1" value="0" id="aao_gwgefahrgut" name="aao[gwgefahrgut]">
+            <label for="aao_crew_carrier">Crew Carrier</label>
+            <input type="number" step="1" value="0" id="aao_crew_carrier" name="aao[crew_carrier]">
+            <input type="number" id="vehicle_type_ids_0" name="vehicle_type_ids[0]" value="0">
+            <input type="number" id="vehicle_type_ids_4" name="vehicle_type_ids[4]" value="0">
+            <input type="number" id="vehicle_type_ids_91" name="vehicle_type_ids[91]" value="0">
           </div>
-          <div id="polizei">
-            <input type="checkbox" id="aao_fustw" name="aao[fustw]">
-            <input type="checkbox" id="vehicle_type_ids_10" name="vehicle_type_ids[10]">
+          <div class="tab-pane" id="polizei">
+            <label for="aao_fustw">Patrol Car</label>
+            <input type="number" step="1" value="0" id="aao_fustw" name="aao[fustw]">
+            <input type="number" id="vehicle_type_ids_10" name="vehicle_type_ids[10]" value="0">
           </div>
         </div></form></body></html>`, { headers: { 'content-type': 'text/html' } });
+    }
+    /* Creating one: the game's own form, posted back to its own action. */
+    if (url === '/aaos' && (opts?.method || '').toUpperCase() === 'POST') {
+      const body = {};
+      for (const [k, v] of opts.body.entries()) body[k] = v;
+      window.__aaoPosts.push({ url, body });
+      // Response.url is a read-only getter, so a fake redirect has to be defined, not assigned.
+      const res = new Response('ok');
+      Object.defineProperty(res, 'url', { value: '/aaos/99' });
+      return res;
     }
     if (url === '/api/v1/aaos') {
       return new Response(JSON.stringify([{ id: 1, caption: 'x', vehicle_classes: ['fire'] }]),
@@ -271,8 +294,8 @@ await pg.waitForSelector('#ymca-window');
 const tiles = await pg.$$eval('.ymca-tile[data-mod]', (b) => b.map((x) => x.dataset.mod));
 console.log('tiles             :', JSON.stringify(tiles));
 assert.deepEqual(tiles,
-  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'trackops', 'elementfriend',
-    'diagnostics']);
+  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao', 'trackops',
+    'elementfriend', 'diagnostics']);
 // HighFive is an element tile: it lives in ElementFriend and never in the launcher.
 assert.equal(await pg.locator('.ymca-tile[data-mod="highfive"]').count(), 0,
   'an element-only tile should not be in the launcher');
@@ -1778,7 +1801,10 @@ assert.ok(wet.includes('65'), 'the tanker goes even though it is the furthest th
 assert.ok(wet.length <= 3,
   'and three vehicles cover 6,000 gallons — not five engines chosen for being close');
 
-// ---- RecruitDude: every station's hiring on one screen ----
+// ---- RecruitDude: every station's hiring on one screen, and it presses none of it ----
+// IT USED TO DO THE PRESSING and that was the wrong side of the line: a tool that spends
+// credits at fourteen stations off one press is doing the playing. What was wanted was never
+// the sending, it was not opening fourteen buildings to find the same four clicks.
 await pg.click('#ymca-back');
 await pg.click('.ymca-tile[data-mod="recruitroom"]');
 await pg.waitForSelector('#rr-table');
@@ -1786,11 +1812,13 @@ await pg.waitForSelector('#rr-table');
 await pg.waitForFunction(() => [...document.querySelectorAll('#rr-table .rr-staff')]
   .every((c) => !c.textContent.includes('\u2026')));
 const rooms = await pg.$$eval('#rr-table tbody tr', (trs) => trs.map((tr) => ({
-  name: tr.cells[2].textContent.trim(),
-  crew: tr.cells[3].textContent.trim(),
+  name: tr.cells[1].textContent.trim(),
+  crew: tr.cells[2].textContent.trim(),
+  left: tr.cells[3].textContent.trim(),
+  links: [...tr.cells[4].querySelectorAll('a')].map((a) => a.getAttribute('href')),
   art: !!tr.querySelector('img'),
 })));
-console.log('recruitroom       :', JSON.stringify(rooms.map((r) => [r.name, r.crew, r.art])));
+console.log('recruitroom       :', JSON.stringify(rooms.map((r) => [r.name, r.crew, r.left])));
 assert.ok(!rooms.some((r) => /Central Dispatch/.test(r.name)),
   'a dispatch center employs nobody, so it is not a row here');
 assert.ok(rooms.every((r) => r.art), 'each station carries the artwork its own page heads with');
@@ -1798,30 +1826,69 @@ assert.equal(rooms.find((r) => /FS01/.test(r.name)).crew, '16',
   'the crew count is read from the station page, not guessed at');
 assert.equal(rooms.find((r) => /AS01/.test(r.name)).crew, '\u2013',
   'a page that does not state one reads as unknown, never as zero');
-// Recruiting spends credits and cannot be undone, so it asks first — and a no sends nothing.
-await pg.evaluate(() => { window.confirm = () => false; });
-await pg.click('#rr-all');
-await pg.click('[data-hire="2"]');
-await pg.waitForTimeout(300);
+// One click instead of four, and every one of them is the game's own href.
+console.log('recruit links     :', JSON.stringify(rooms[0].links));
+assert.deepEqual(rooms[0].links.map((h) => h.replace(/\d+/g, '#')),
+  ['/buildings/#/hire_do/#', '/buildings/#/hire_do/#', '/buildings/#/hire_do/#'],
+  'one of the game\'s own hire links per length, so the length is chosen per station');
+assert.ok(rooms[0].links.some((h) => h.endsWith('/1')) && rooms[0].links.some((h) => h.endsWith('/3')),
+  'and they are the three lengths the game sells');
+// NOTHING HERE SPENDS A CREDIT. There is no button that hires, so there is nothing to confirm.
+assert.equal(await pg.locator('[data-hire]').count(), 0,
+  'the sender is gone, not switched off');
 assert.deepEqual(await pg.evaluate(() => window.__hired), [],
-  'a preview answered no must send nothing at all');
+  'and opening the panel must not have hired anywhere');
+// A station whose page states no hiring countdown says so rather than showing somebody else's.
+console.log('days left         :', JSON.stringify(rooms.map((r) => r.left)));
+assert.ok(rooms.every((r) => r.left === '\u2013' || /^\d+$/.test(r.left)),
+  'days left is a number the game stated or nothing at all');
 
-let asked = null;
+// ---- SimpleAAO: the dispatch orders you would have built by hand ----
+// The editor's capability fields are <input type="number">, so an order is a COUNT per class.
+// That is the whole feature, and it is read off the game's own form rather than listed here.
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="simpleaao"]');
+await pg.waitForSelector('[data-make]');
+const groups = await pg.$$eval('[data-group]', (b) => b.map((x) => x.textContent.trim()));
+console.log('aao groups        :', JSON.stringify(groups));
+assert.deepEqual(groups, ['Fire', 'Police'],
+  'the groups are the editor\'s own tabs, named as the game names them');
+const saRows = await pg.$$eval('[data-make]', (b) => b.map((x) => x.dataset.make));
+console.log('aao rows          :', JSON.stringify([...new Set(saRows)]));
+assert.ok([...new Set(saRows)].includes('aao[fire]'),
+  'and the rows are its own number fields');
+assert.equal(saRows.filter((f) => f === 'aao[fire]').length, 5,
+  'one button per count, so making the order is one click');
+// It writes, so it asks first — and a no sends nothing.
+await pg.evaluate(() => { window.__aaoPosts = []; window.confirm = () => false; });
+await pg.click('[data-make="aao[fire]"][data-n="3"]');
+await pg.waitForTimeout(200);
+assert.deepEqual(await pg.evaluate(() => window.__aaoPosts), [],
+  'a preview answered no must create nothing');
+// A yes posts the game's own form with two fields replaced and everything else untouched.
 await pg.evaluate(() => {
   window.__asked = null;
-  window.confirm = (text) => { window.__asked = text; return true; };
+  window.confirm = (t) => { window.__asked = t; return true; };
 });
-await pg.click('[data-hire="2"]');
-await pg.waitForFunction(() => window.__hired.length >= 4);
-asked = await pg.evaluate(() => window.__asked);
-console.log('recruit preview   :', JSON.stringify(asked.replace(/\s+/g, ' ').slice(0, 120)));
-assert.ok(/cannot be undone/.test(asked), 'the preview has to say there is no taking it back');
-assert.ok(/FS01/.test(asked) && /AS01/.test(asked),
-  'and name every station it is about to spend credits at');
-const hired = await pg.evaluate(() => window.__hired);
-console.log('recruited         :', JSON.stringify(hired));
-assert.equal(hired.length, 4, 'one request per ticked station');
-assert.ok(hired.every((h) => h.endsWith('/2')), 'and the length that was pressed, at each');
+await pg.click('[data-make="aao[fire]"][data-n="3"]');
+await pg.waitForFunction(() => window.__aaoPosts.length > 0);
+const asked = await pg.evaluate(() => window.__asked);
+console.log('aao preview       :', JSON.stringify(asked.replace(/\s+/g, ' ')));
+assert.ok(/3/.test(asked) && /delete it again/.test(asked),
+  'the preview names what it creates and that it can be taken back');
+const posted = (await pg.evaluate(() => window.__aaoPosts))[0];
+console.log('aao posted        :', JSON.stringify(posted));
+assert.equal(posted.url, '/aaos', 'it posts to the form\'s own action');
+assert.equal(posted.body['aao[fire]'], '3', 'the one count it was asked for');
+assert.equal(posted.body['aao[caption]'], 'Fire Engine 3', 'named after the game\'s own label');
+assert.equal(posted.body.authenticity_token, 'CSRF-XYZ',
+  'and the CSRF token rides back exactly as the game wrote it');
+assert.equal(posted.body['aao[category_id]'], '7',
+  'as does every setting nobody here touched');
+// What it made is listed, with the game's own link, because that is the undo.
+await pg.waitForSelector('#sa-made a');
+assert.equal(await pg.getAttribute('#sa-made a', 'href'), '/aaos/99',
+  'where the game redirected to is the way back to delete it');
 
 // ---- whose mission was it, and when ----
 // missionDelete says a mission ended, not that you were in it. An alliance call somebody else
@@ -1876,7 +1943,7 @@ const elements = await pg.$$eval('.ymca-tile.el', (b) => b.map((x) => x.dataset.
 console.log('elements          :', JSON.stringify(elements));
 await pg.screenshot({ path: '/tmp/ymca-elements.png' });
 assert.deepEqual(elements,
-  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'trackops', 'highfive',
+  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao', 'trackops', 'highfive',
     'easyedit', 'eagleeye', 'diagnostics'],
   'every module carries a switch now: the page answers "what have I got" in one look');
 // AND EVERY TILE SAYS WHAT IT IS FOR. A four-word tagline tells you which tool this is and
@@ -1897,8 +1964,8 @@ assert.match(holds.replace(/\s+/g, ' '), /Holds SwitchDispatchCenter/,
 assert.equal(await pg.locator('.ymca-tile.el[data-el="shuteye"]').count(), 0,
   'a module in a group is listed inside the group, not beside it');
 // Nothing that works is off by default: an update that hides a tool is an update that broke.
-for (const id of ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'trackops',
-  'highfive', 'easyedit', 'eagleeye', 'diagnostics']) {
+for (const id of ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao',
+  'trackops', 'highfive', 'easyedit', 'eagleeye', 'diagnostics']) {
   assert.equal(await pg.locator(`.ymca-switch[data-sw="${id}"] input`).isChecked(), true,
     `${id} should be on until somebody says otherwise`);
 }

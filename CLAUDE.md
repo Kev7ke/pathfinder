@@ -54,6 +54,7 @@ userscripts/
     mod-renamer.js
     mod-missionmagician.js
     mod-recruitroom.js
+    mod-simpleaao.js
     mod-trackops.js
     mod-elementfriend.js
     mod-highfive.js
@@ -751,6 +752,29 @@ itself. A state that is not on screen is simply not sampled this time and what
 was learnt before is remembered, so after a few page loads all three are known
 and a game update repaints them without anybody editing a hex.
 
+**What a call is worth goes on the panel as an attribute, not as text.** A panel
+carries `mission_type_id` as a plain attribute, which is the key into
+`/einsaetze.json` where `average_credits` is the game's own figure — what
+TrackOps calls **Listed**, so it is marked `≈` and never mistaken for what this
+one paid. Writing the figure into the markup would mean writing it again every
+few seconds, because the socket redraws a panel's insides constantly; the panel
+element itself survives those redraws, so the figure goes on **it** as
+`data-ymca-credits` and a `::after` rule shows it. One rule, and the redraw
+underneath cannot take it off. Only a newly drawn panel needs stamping, which is
+all the observer does — and because an attribute outlives a stylesheet, the
+switch takes them off again on the way out.
+
+**A mission type the catalogue does not carry gets no figure rather than a
+nought.** `/einsaetze.json` lists only what this player can generate, so an
+alliance call from somebody else's building is simply absent, and a zero there
+would read as "this pays nothing".
+
+**Green is the one state where the clock is the whole story.** Every vehicle is
+there, nothing is missing to read, and what is left to know is how long it still
+runs — so the countdown comes back on `.mission_panel_green` whatever it is set
+to elsewhere. It is one rule, so a panel going green and back again needs
+nothing watching it.
+
 **A switch that was flicked off and on again means "do it again".** The shell
 used to refuse to re-run a finished injection, which left the switch looking
 dead on the very page it was flicked: what the module had placed was taken away
@@ -801,6 +825,19 @@ has a word for, including ones no vehicle on this account carries**, which is
 exactly what a requirement key is matched against: a wider vocabulary is a
 shorter `unmatched` list. Beside them sit `vehicle_type_ids[<id>]`, one per type
 the game sells.
+
+**A capability field is a `number`, not a tick, and that is the whole of
+SimpleAAO.** Every one of them is
+`<input class="numeric integer optional" type="number" step="1" value="0"
+name="aao[fire]">`, so an order says **how many** of a class to send rather than
+whether to include it. Beside each sits the game's own label — "Fire Engine",
+"Police Motorcycle", "Utility Truck" — and the panels are its own tabs. So
+SimpleAAO keeps no list of its own: the groups, the classes and their names are
+read off `/aaos/new` every time, and a capability the game adds next month turns
+up without anybody editing anything. Making an order is `new FormData(form)`
+with **two** fields replaced, the caption and the one count, so the CSRF token,
+the category, the colours and every other setting go back as the game wrote
+them.
 
 **The type id is in the field name, not in an attribute**, and the first read
 got that wrong: it looked for `vehicle_type_id="4"`, found nothing, and reported
@@ -1368,6 +1405,16 @@ the log without a module having to remember to log it.
   TrackOps shows it per row as **Paid**, beside the game's own **Listed**
   figure, with the number of lines the average is made of — and it still goes no
   further than TrackOps until asked.
+- **What the ledger throws away is what the statistics are made of.** TrackOps
+  counts a line as a mission or discards it as "not a mission", and everything
+  discarded — a prisoner delivered, an alliance share, a daily task, a course —
+  is a thing worth counting. The only reason it is not counted is that nobody
+  here knows the words the game writes for it, and **guessing an English string
+  is the same mistake as guessing a selector**. So every kind of line is now
+  tallied by its own wording with the figures taken out — digits masked, quoted
+  text emptied — which leaves the game's vocabulary and nothing of the player's,
+  on screen and in the copy as `lineKinds`. A count of transports, prisoners or
+  alliance earnings gets built on that reading, not before it.
 - **Do not tell the player about a setting they chose.** The vehicle range in a
   mission window is theirs and starts at its widest; "not enough in range, widen
   it" is a tool second-guessing a deliberate choice.
@@ -1394,12 +1441,25 @@ the log without a module having to remember to log it.
   still written down above, in the reading half of the module it belongs to.
   **Do not put either back without being asked**, and if asked, say what is
   above first.
-- **RecruitRoom is the one exception, and it was asked for.** Opening a tab per
-  station was worse than the clicking it replaced, so it recruits at every ticked
-  station itself. Credits spent on people do not come back, so what stands in for
-  the backup is a preview naming every station and saying plainly that it cannot
-  be undone, and a confirmation that has to be given before anything is sent.
-  An exception is a thing somebody decided, not a precedent.
+- **RecruitRoom was the one exception, and the exception is withdrawn.** It
+  recruited at every ticked station itself, guarded by a preview and a
+  confirmation standing in for an undo that never existed. That is the same
+  objection that took MissionMagician Auto and HighFive Auto out: a tool that
+  spends credits at fourteen stations off one press is doing the playing. **What
+  was ever wanted was not the sending** — it was not opening fourteen buildings
+  to find the same four clicks. So RecruitDude lays the choice out and presses
+  nothing: each station's row carries the game's own `hire_do` links, one per
+  length, and the player clicks the one they want. One click instead of four, no
+  preview standing in for anything, and **no exception left to be cited as a
+  precedent**.
+- **SimpleAAO writes, and that is allowed because a dispatch order can be
+  deleted.** The rule is "where there can be no undo, do not write at all", and
+  an order is the one thing so far that *has* an undo in the game itself. So it
+  is written the way the rule asks: a preview naming exactly what will exist, a
+  confirmation before anything is sent, and every order it made listed with the
+  game's own link to it — the link being where the game redirected to, read
+  rather than guessed. An alarm and a credit stay off-limits; this is not a
+  widening of that line but the far side of it.
 - Never post a hand-built form to the game. Fetch the object's own edit page,
   build `FormData` from the real form, replace one field. That is what keeps the
   CSRF token and every unrelated setting intact.
@@ -1500,6 +1560,20 @@ everything inside it being one of `class`, `href`, `id`, `title`. It is not a
 shell waiting to fill. **`/vehicles/<id>` simply does not carry what a vehicle
 can do**, and asking it again, in any way, answers the same. That question is
 closed.
+
+**Three kinds were asked and all three answered nothing, so this is settled.**
+The vehicle page (22,459 characters, attributes `class`/`href`/`id`/`title`
+only), its **edit form** (whose field names are `vehicle[caption]`,
+`vehicle[personal_max]`, `vehicle[start_delay]`, `vehicle[ignore_aao]`,
+`vehicle[working_hour_start|end]`, `vehicle[vehicle_type_caption]` — settings,
+no capabilities) and the **station page**, whose `#vehicle_table` rows do carry
+`vehicle_type_id`, `vehicle_graphic_id` and `sortvalue` but **not one of the
+sixty-five words**. So a type id is readable over HTTP and a capability is not:
+**the selection checkbox in a mission window is the only place the game writes
+them**, and the dispatch-order editor's labels are the only second source.
+`data/vehicle-types.json` is therefore not a head start that a sweep will
+overtake — it is the whole of what a fresh install knows until a mission window
+happens to hold the type.
 
 **So the question became which page does — and that is asked all at once rather
 than one release per try.** A vehicle has more than one page: its own, the
