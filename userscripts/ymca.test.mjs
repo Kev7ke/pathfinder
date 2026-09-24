@@ -331,7 +331,7 @@ await pg.waitForSelector('#ymca-window');
 const tiles = await pg.$$eval('.ymca-tile[data-mod]', (b) => b.map((x) => x.dataset.mod));
 console.log('tiles             :', JSON.stringify(tiles));
 assert.deepEqual(tiles,
-  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao', 'heatmap', 'trackops',
+  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao', 'heatmap', 'trackops', 'statboard',
     'elementfriend', 'diagnostics']);
 // HighFive is an element tile: it lives in ElementFriend and never in the launcher.
 assert.equal(await pg.locator('.ymca-tile[data-mod="highfive"]').count(), 0,
@@ -2151,8 +2151,9 @@ await pg.waitForTimeout(150);
 const opened = await pg.$eval('#ymca-heat-panel [data-menu="types"]', (m) => ({
   open: m.classList.contains('open'),
   display: getComputedStyle(m.querySelector('.dropdown-menu')).display,
-  groups: [...m.querySelectorAll('[data-all="group"]')].map(
-    (a) => a.parentElement.textContent.replace(/\s+/g, ' ').replace(/ all none/, '').trim()),
+  groups: [...m.querySelectorAll('[data-group]')].map(
+    (b) => b.parentElement.textContent.replace(/\s+/g, ' ').replace(/ \u2014 all \d+$/, '').trim()),
+  indeterminate: [...m.querySelectorAll('[data-group]')].map((b) => b.indeterminate),
   types: [...m.querySelectorAll('[data-type]')].map((x) => x.dataset.type),
 }));
 console.log('vehicles opened   :', JSON.stringify(opened));
@@ -2163,19 +2164,35 @@ assert.ok(opened.types.includes('13') && opened.types.includes('10'),
 // group is where its vehicles actually stand, counted rather than assumed.
 assert.ok(opened.groups.includes('Fire Station') && opened.groups.includes('Ambulance Station'),
   'sub-categorised by the kind of building the vehicles stand at, by the game\'s own names');
-// A group's own tick takes that whole branch and leaves the rest alone.
-await pg.click('#ymca-heat-panel [data-none="group"][data-group="0"]');
+// EVERY CONTROL IN HERE IS A LABELLED CHECKBOX: the all/none links were two more things to
+// understand beside the boxes they act on. A group's own box takes that branch and leaves the
+// rest alone, and shows indeterminate rather than lying when only some of it is on.
+await pg.uncheck('#ymca-heat-panel [data-group="0"]');
 await pg.waitForTimeout(400);
 const afterGroup = await pg.evaluate(() =>
   JSON.parse(localStorage.getItem('ymca-heatmap-cfg') || '{}').types);
 console.log('group untick      :', JSON.stringify(afterGroup));
 assert.ok(!afterGroup.includes('13') && afterGroup.includes('5'),
   'the fire station\'s types go and the ambulance station\'s stay');
-await pg.click('#ymca-heat-panel [data-all="types"]');
+const partly = await pg.$eval('#ymca-heat-panel [data-every="types"]', (b) => b.indeterminate);
+console.log('partly ticked    :', partly, '(the every-box shows indeterminate, not off)');
+assert.equal(partly, true, 'some on and some off is a third answer, not a plain unticked box');
+await pg.check('#ymca-heat-panel [data-every="types"]');
 await pg.waitForTimeout(400);
 const afterAll = await pg.evaluate(() =>
   JSON.parse(localStorage.getItem('ymca-heatmap-cfg') || '{}').types);
-assert.ok(afterAll.includes('13'), 'and all of them comes back');
+assert.ok(afterAll.includes('13'), 'and Every vehicle brings all of them back');
+// THE MENU HAS TO BE READABLE: Bootstrap paints .dropdown-menu white and the game's dark theme
+// paints the text white with it, which is the white-on-white the probe already found on
+// .btn-default. The system's own pair is the answer, as it was for the dispatch select.
+const menuInk = await pg.$eval('#ymca-heat-panel [data-menu="types"] .dropdown-menu', (m) => {
+  const s = getComputedStyle(m);
+  return { colour: s.color, background: s.backgroundColor, scheme: s.colorScheme };
+});
+console.log('menu colours      :', JSON.stringify(menuInk));
+assert.notEqual(menuInk.colour, menuInk.background, 'the menu is never its own colour on itself');
+assert.match(menuInk.scheme, /light dark/,
+  'it follows the machine\'s own theme rather than carrying a colour of YMCA\'s own');
 // A tick redraws the bar, so a menu that shut itself on every tick would be one you cannot use.
 assert.equal(
   await pg.$eval('#ymca-heat-panel [data-menu="types"]', (m) => m.classList.contains('open')),
@@ -2198,6 +2215,96 @@ await pg.click('#ymca-nav');
 await pg.waitForSelector('#ymca-window');
 await pg.click('.ymca-tile[data-mod="heatmap"]');
 await pg.waitForSelector('#hm-canvas');
+
+// ---- StatBoard: four pages over what this game actually is ----
+// Every figure says which of three it is — the game stated it, its ledger stated it, or no page
+// states it yet — because a board that quietly draws a nought for the third is the fault
+// TrackOps' payouts were withdrawn for.
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="statboard"]');
+await pg.waitForSelector('.sb-root');
+const wide = await pg.$eval('#ymca-window', (w) => w.classList.contains('ymca-wide'));
+console.log('board width       :', wide ? 'the shell window is twice the size' : 'unchanged');
+assert.equal(wide, true, 'a board needs the room, and it is the shell\'s own window that grows');
+const dots = await pg.$$eval('.sb-dot', (b) => b.map((x) => x.dataset.board));
+console.log('board nav         :', JSON.stringify(dots));
+assert.deepEqual(dots, ['buildings', 'vehicles', 'missions', 'credits'],
+  'one round icon per page, along the bottom');
+assert.equal(await pg.$eval('.sb-dot-on', (b) => b.dataset.board), 'buildings',
+  'and the one you are on is the one filled in');
+const sbTiles = await pg.$$eval('.sb-stats .sb-tile', (t) => t.map((x) => ({
+  label: x.querySelector('h3').textContent.trim(),
+  source: x.querySelector('.sb-src').textContent.trim(),
+})));
+console.log('building tiles    :', JSON.stringify(sbTiles));
+assert.equal(sbTiles.length, 3, 'three figures on the left, stacked');
+assert.equal(sbTiles[0].source, 'read from the game', 'the station count is the API stating it');
+assert.match(sbTiles[1].source, /no page states this yet/,
+  'a level nothing states is said in words, never drawn as a nought');
+// The count animates up to what was measured rather than appearing.
+await pg.waitForFunction(() => {
+  const b = document.querySelector('.sb-big b');
+  return b && b.textContent.trim() === '4';
+}, null, { timeout: 4000 });
+console.log('counted up to     : 4 stations');
+// The donut is part-to-whole with its slices named beside it, so colour is never the only thing.
+const sbKeys = await pg.$$eval('.sb-keys li span', (n) => n.map((x) => x.textContent.trim()));
+console.log('donut keys        :', JSON.stringify(sbKeys));
+assert.ok(sbKeys.includes('Fire Station') && sbKeys.includes('Police Station'),
+  'every slice carries its name, so the colour is the second encoding and never the only one');
+// The table names each station and every row carries the way into it.
+const sbStations = await pg.$$eval('.sb-table tbody a', (a) => a.map((x) => x.textContent.trim()));
+console.log('board stations    :', JSON.stringify(sbStations));
+assert.ok(sbStations.includes('FS01') && sbStations.includes('AS01'), 'the list beside the figures');
+// Clicking a station opens the GAME'S OWN page for it inside the board — never a new tab, which
+// is a place with no way back to what you were reading.
+await pg.click('.sb-table tbody a');
+await pg.waitForSelector('.sb-frame');
+const sbFrame = await pg.$eval('.sb-frame', (f) => f.getAttribute('src'));
+console.log('drilled into      :', sbFrame);
+assert.match(sbFrame, /^\/buildings\/\d+$/, 'the building\'s own page, in a frame in the board');
+await pg.click('[data-back]');
+await pg.waitForSelector('.sb-table');
+// The stat button beside a row is that one station on its own.
+await pg.click('.sb-statbtn');
+await pg.waitForSelector('.sb-stats-wide');
+const sbOwn = await pg.$$eval('.sb-stats-wide h3', (h) => h.map((x) => x.textContent.trim()));
+console.log('one station says  :', JSON.stringify(sbOwn));
+assert.ok(sbOwn.includes('Extensions') && sbOwn.includes('Its fleet'),
+  'where the count of stations was, the extensions are');
+await pg.click('[data-back]');
+// Missions and Credits are the ledger, and the board says so rather than showing an empty chart.
+await pg.click('.sb-dot[data-board="credits"]');
+await pg.waitForSelector('[data-read="ledger"]');
+console.log('credits unread    : it asks how far back to read before reading anything');
+await pg.selectOption('[data-pages]', '5');
+await pg.click('[data-read="ledger"]');
+await pg.waitForSelector('.sb-spans', { timeout: 15000 });
+const creditTiles = await pg.$$eval('.sb-stats .sb-tile .sb-big b', (b) => b.map((x) => x.dataset.count));
+console.log('credits tiles     :', JSON.stringify(creditTiles));
+assert.equal(creditTiles.length, 3, 'in, out and what is left');
+assert.ok(Number(creditTiles[0]) > 0, 'and the in is what the ledger says it paid');
+// A span is a filter over the same lines, not a second read.
+const sbSpans = await pg.$$eval('[data-span]', (b) => b.map((x) => x.dataset.span));
+assert.deepEqual(sbSpans, ['today', 'yesterday', 'week', 'month', 'all'],
+  'today, yesterday, seven days, thirty, and everything that was read');
+await pg.click('.sb-dot[data-board="missions"]');
+await pg.waitForSelector('.sb-table');
+const missionRows = await pg.$$eval('.sb-table tbody tr td:first-child',
+  (t) => t.map((x) => x.textContent.trim()));
+console.log('mission rows      :', JSON.stringify(missionRows.slice(0, 4)));
+assert.ok(missionRows.some((r) => /Forest fire/.test(r)),
+  'a line the game named after a mission is a mission');
+assert.ok(!missionRows.some((r) => /Vehicle bought|Patient Treatment/.test(r)),
+  'and a line it named after something else is not');
+// Leaving the board gives the window its ordinary size back.
+await pg.click('#ymca-back');
+await pg.waitForFunction(() => !document.getElementById('ymca-window')
+  ?.classList.contains('ymca-wide'));
+console.log('board left        : the window is its ordinary size again');
+// Back into a tool, which is where every block here steps out from.
+await pg.click('.ymca-tile[data-mod="statboard"]');
+await pg.waitForSelector('.sb-root');
 
 // ---- SimpleAAO: the dispatch orders you would have built by hand ----
 // The editor's capability fields are <input type="number">, so an order is a COUNT per class.
@@ -2322,7 +2429,7 @@ const elements = await pg.$$eval('.ymca-tile.el', (b) => b.map((x) => x.dataset.
 console.log('elements          :', JSON.stringify(elements));
 await pg.screenshot({ path: '/tmp/ymca-elements.png' });
 assert.deepEqual(elements,
-  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao', 'heatmap', 'trackops',
+  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao', 'heatmap', 'trackops', 'statboard',
     'highfive', 'easyedit', 'eagleeye', 'diagnostics'],
   'every module carries a switch now: the page answers "what have I got" in one look');
 // AND EVERY TILE SAYS WHAT IT IS FOR. A four-word tagline tells you which tool this is and

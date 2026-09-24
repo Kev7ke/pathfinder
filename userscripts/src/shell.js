@@ -356,6 +356,107 @@ function styles() {
 #${WINDOW_ID} .ymca-warn{color:#f0ad4e}
 #${WINDOW_ID} .ymca-bad{color:#e88a86}
 #${WINDOW_ID} .ymca-num{font-variant-numeric:tabular-nums}
+
+/* ---- StatBoard ----------------------------------------------------------
+ * A BOARD NEEDS THE ROOM AND THE WINDOW IS THE SHELL'S OWN. Twice the width
+ * while a board is open, rather than a second lightbox over the first: Escape
+ * has to go on stepping back the way it does everywhere else.
+ *
+ * THE CARD IS #333 AND THAT IS A MEASUREMENT. The categorical slots the board
+ * draws with come off the documented palette's dark column, and on the game's
+ * own #505050 every one of them came back under 3:1 against it — which is what
+ * makes a chart unreadable rather than merely plain. On #333 all six pass. It
+ * is a darker step of the game's own neutral, not a colour of YMCA's own. */
+#${WINDOW_ID}.ymca-wide .ymca-sheet{width:min(1780px,98vw);height:94vh;max-height:94vh}
+#${WINDOW_ID} .sb-root{display:flex;flex-direction:column;height:100%;min-height:520px;gap:12px}
+#${WINDOW_ID} .sb-body{flex:1;display:flex;gap:14px;min-height:0}
+#${WINDOW_ID} .sb-left{flex:1 1 32%;min-width:290px;display:flex;flex-direction:column;gap:12px;
+  overflow:auto}
+#${WINDOW_ID} .sb-right{flex:1 1 68%;min-width:0;display:flex}
+#${WINDOW_ID} .sb-stats{display:flex;flex-direction:column;gap:12px}
+#${WINDOW_ID} .sb-stats-wide{flex-direction:row;flex-wrap:wrap;align-items:flex-start}
+#${WINDOW_ID} .sb-stats-wide .sb-tile{flex:1 1 300px}
+#${WINDOW_ID} .sb-tile{background:#333;border:1px solid #1d1d1d;border-radius:4px;
+  padding:14px 16px 16px}
+#${WINDOW_ID} .sb-tile header{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
+#${WINDOW_ID} .sb-tile h3{margin:0;font-size:13px;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;opacity:.82}
+#${WINDOW_ID} .sb-src{margin-left:auto;font-size:10px;letter-spacing:.03em;padding:2px 6px;
+  border-radius:2px;background:rgba(255,255,255,.09);opacity:.75;white-space:nowrap}
+#${WINDOW_ID} .sb-src-unread{background:rgba(217,89,38,.2)}
+#${WINDOW_ID} .sb-tile-unread{border-color:#5a3a2a}
+#${WINDOW_ID} .sb-big{margin:6px 0 0;font-size:40px;line-height:1.05;font-weight:300;
+  font-variant-numeric:tabular-nums}
+#${WINDOW_ID} .sb-big small{font-size:14px;font-weight:400;opacity:.7;margin-left:7px}
+#${WINDOW_ID} .sb-sub{margin:3px 0 0;font-size:12px;opacity:.72}
+#${WINDOW_ID} .sb-note{margin:10px 0 0;font-size:11.5px;line-height:1.5;opacity:.72}
+#${WINDOW_ID} .sb-note code{font-size:11px;background:rgba(0,0,0,.3);padding:1px 4px;
+  border-radius:2px}
+#${WINDOW_ID} .sb-dim{opacity:.55}
+#${WINDOW_ID} .sb-donut{display:flex;gap:14px;align-items:center;margin-top:12px;flex-wrap:wrap}
+#${WINDOW_ID} .sb-seg{animation:sb-grow .7s cubic-bezier(.3,1,.4,1) both}
+@keyframes sb-grow{from{stroke-dasharray:0 9999}}
+#${WINDOW_ID} .sb-donut-n{fill:#fff;font-size:21px;text-anchor:middle;
+  font-variant-numeric:tabular-nums}
+#${WINDOW_ID} .sb-donut-l{fill:#fff;opacity:.6;font-size:10px;text-anchor:middle;
+  letter-spacing:.06em}
+#${WINDOW_ID} .sb-keys{list-style:none;margin:0;padding:0;flex:1 1 130px;font-size:11.5px}
+#${WINDOW_ID} .sb-keys li{display:flex;align-items:center;gap:6px;padding:1px 0}
+#${WINDOW_ID} .sb-keys i{width:9px;height:9px;border-radius:2px;flex:none}
+#${WINDOW_ID} .sb-keys span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#${WINDOW_ID} .sb-keys b{font-variant-numeric:tabular-nums;opacity:.85}
+#${WINDOW_ID} .sb-bars{list-style:none;margin:12px 0 0;padding:0;font-size:11.5px}
+#${WINDOW_ID} .sb-bars li{display:flex;align-items:center;gap:8px;padding:2px 0}
+#${WINDOW_ID} .sb-bar-l{flex:0 0 40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#${WINDOW_ID} .sb-bar-t{flex:1;height:8px;background:rgba(255,255,255,.08);border-radius:4px}
+#${WINDOW_ID} .sb-bar-t i{display:block;height:100%;border-radius:4px;
+  animation:sb-wide .6s cubic-bezier(.3,1,.4,1) both}
+@keyframes sb-wide{from{width:0 !important}}
+#${WINDOW_ID} .sb-bars b{font-variant-numeric:tabular-nums;opacity:.85}
+#${WINDOW_ID} .sb-list{list-style:none;margin:10px 0 0;padding:0;font-size:11.5px}
+#${WINDOW_ID} .sb-list li{display:flex;gap:8px;padding:2px 0;border-top:1px solid rgba(255,255,255,.07)}
+#${WINDOW_ID} .sb-list span{flex:1;opacity:.78}
+#${WINDOW_ID} .sb-ok{color:#199e70}
+#${WINDOW_ID} .sb-wait{color:#c98500}
+#${WINDOW_ID} .sb-filter,#${WINDOW_ID} .sb-spans{display:flex;gap:8px;align-items:center;
+  flex-wrap:wrap;font-size:12px}
+#${WINDOW_ID} .sb-filter select{background:Field;color:FieldText;color-scheme:light dark;
+  border:1px solid rgba(128,128,128,.6);border-radius:3px;padding:3px 6px}
+#${WINDOW_ID} .sb-table{flex:1;overflow:auto;background:#333;border:1px solid #1d1d1d;
+  border-radius:4px}
+#${WINDOW_ID} .sb-table table{font-size:12px}
+#${WINDOW_ID} .sb-table thead th{position:sticky;top:0;background:#2b2b2b;cursor:pointer;
+  white-space:nowrap;text-align:left;padding:8px 10px;font-weight:600;letter-spacing:.03em}
+#${WINDOW_ID} .sb-table thead th.sb-on{color:#8ab4f8}
+#${WINDOW_ID} .sb-table thead th.sb-on::after{content:" \\2191"}
+#${WINDOW_ID} .sb-table thead th.sb-desc::after{content:" \\2193"}
+#${WINDOW_ID} .sb-table td{padding:6px 10px;border-top:1px solid rgba(255,255,255,.07);
+  font-variant-numeric:tabular-nums}
+#${WINDOW_ID} .sb-table tbody tr:hover td{background:rgba(255,255,255,.05)}
+#${WINDOW_ID} .sb-table a{color:#8ab4f8;text-decoration:none}
+#${WINDOW_ID} .sb-table a:hover{text-decoration:underline}
+#${WINDOW_ID} .sb-statcell{width:34px;text-align:center}
+#${WINDOW_ID} .sb-statbtn{background:#fff;border:2px solid #3987e5;color:#256abf;width:24px;
+  height:24px;border-radius:50%;cursor:pointer;display:inline-flex;align-items:center;
+  justify-content:center;padding:0}
+#${WINDOW_ID} .sb-statbtn:hover{background:#3987e5;color:#fff}
+#${WINDOW_ID} .sb-drill{flex:1;display:flex;flex-direction:column;gap:10px;min-height:0}
+#${WINDOW_ID} .sb-drill-bar{display:flex;gap:10px;align-items:center;font-size:12px}
+#${WINDOW_ID} .sb-frame{flex:1;width:100%;border:1px solid #1d1d1d;border-radius:4px;
+  background:#fff;min-height:420px}
+#${WINDOW_ID} .sb-nav{display:flex;justify-content:center;gap:14px;flex:none;
+  padding:6px 0 2px;border-top:1px solid rgba(255,255,255,.12)}
+#${WINDOW_ID} .sb-dot{display:flex;flex-direction:column;align-items:center;gap:4px;
+  background:none;border:0;cursor:pointer;color:#fff;font:600 10px/1 inherit;
+  letter-spacing:.05em;opacity:.62;padding:6px 4px 2px}
+#${WINDOW_ID} .sb-dot svg{background:#fff;color:var(--sb-dot);border:2px solid var(--sb-dot);
+  border-radius:50%;padding:6px;width:34px;height:34px;transition:background .18s,color .18s}
+#${WINDOW_ID} .sb-dot:hover{opacity:.9}
+#${WINDOW_ID} .sb-dot-on{opacity:1}
+#${WINDOW_ID} .sb-dot-on svg{background:var(--sb-dot);color:#fff}
+@media (prefers-reduced-motion:reduce){
+  #${WINDOW_ID} .sb-seg,#${WINDOW_ID} .sb-bar-t i{animation:none}
+}
 #ymca-fab{position:fixed;right:14px;bottom:14px;z-index:2147482000;padding:9px 15px;
   border-radius:3px;border:1px solid #003a78;cursor:pointer;background:#004997;color:#fff;
   font:700 12px/1 "Helvetica Neue",Helvetica,Arial,sans-serif;letter-spacing:.06em;
@@ -368,6 +469,8 @@ function styles() {
 
 /** Small, flat icons. A module may bring its own; these are the fallbacks. */
 const ICONS = {
+    statboard: '<path d="M5 27 V15"/><path d="M13 27 V7"/><path d="M21 27 V19"/>'
+        + '<path d="M29 27 V11"/><path d="M3 31 H31"/>',
     stepops: '<path d="M4 29 H10 V23 H16 V17 H22 V11 H28 V5"/><path d="M4 29 H30"/>',
     renamer: '<path d="M6 22 L20 8 L26 14 L12 28 H6 Z"/><path d="M6 30 H30"/>',
     diagnostics: '<circle cx="15" cy="15" r="9"/><path d="M22 22 L30 30"/>',

@@ -553,6 +553,21 @@ const TO_PATIENT_LINES = /^patient (treatment|transport)/i;
  * Amounts use a dot for thousands, so every character that is not a digit is
  * dropped and the sign is read separately.
  */
+/**
+ * Does this cell say nothing but when?
+ *
+ * A date is a day, a month named in letters and a clock, and nothing else —
+ * `23 Sep 23:21`, `Sep 23, 2026 23:21`, `2026-09-23 23:21`. A mission's name
+ * has a word in it that is not a month, so the test is: take the digits, the
+ * separators and one month name away, and see whether anything is left.
+ */
+function toLooksLikeDate(text) {
+    const months = /jan|feb|mar|apr|may|jun|jul|aug|sep|okt|oct|nov|dez|dec|m\u00e4r|mai|dez/gi;
+    const left = text.replace(months, ' ').replace(/[\d:.,\-/]+/g, ' ')
+        .replace(/\b(am|pm|uhr|at|um)\b/gi, ' ').replace(/\s+/g, '').trim();
+    return left === '' && /\d/.test(text);
+}
+
 function toParseLedgerRow(tr) {
     const cells = [...(tr.cells || tr.querySelectorAll('td, th'))];
     if (cells.length < 2) return null;
@@ -571,13 +586,22 @@ function toParseLedgerRow(tr) {
     }
     if (amount === null) return null;
 
-    /* The description is the wordiest cell that is not the amount. A date has
-     * digits and separators; a mission name has letters. */
+    /* The description is the wordiest cell that is not the amount and is not a
+     * date.
+     *
+     * A DATE HAS THREE LETTERS IN IT TOO, and that is what went wrong: "23 Sep
+     * 23:21" clears a test for three letters, so every row whose description
+     * cell was empty fell back to its own date and was counted as a mission.
+     * A real account came back with 180 such lines and 236,108 credits filed
+     * under a mission called `# Sep #:#`. A cell that reads as a date is never
+     * the description — day, month name and a clock, in whatever order the
+     * game writes them, with nothing else in it. */
     let what = '';
     for (let i = 0; i < cells.length; i += 1) {
         if (i === amountAt) continue;
         const t = text(cells[i]);
         if (!/[a-z]{3}/i.test(t)) continue;
+        if (toLooksLikeDate(t)) continue;
         if (t.length > what.length) what = t;
     }
     if (!what) return null;

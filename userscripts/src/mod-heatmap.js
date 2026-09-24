@@ -899,19 +899,34 @@ function hmMapBar(ctx, map, choices, repaint) {
         + 'z-index:1000;pointer-events:auto;display:flex;gap:6px;flex-wrap:wrap;'
         + 'justify-content:center;max-width:calc(100% - 120px)';
 
+    /* A MENU WEARING THE GAME'S CLASSES AND NOTHING ELSE CAME BACK UNREADABLE.
+     * Bootstrap paints `.dropdown-menu` white and the game's dark theme paints
+     * the text white with it, so the list was white on white — the same fault
+     * the probe found on `.btn-default`, and the same answer the dispatch
+     * select already uses: the system's own pair, `Field` on `FieldText` with
+     * `color-scheme: light dark`, which is always legible against itself and
+     * follows whatever theme the page is in. That is not a colour of YMCA's
+     * own, and it is the one place a menu of ours may set one. */
+    const MENU_CSS = 'display:none;max-height:56vh;overflow:auto;min-width:230px;'
+        + 'padding:8px 10px;text-align:left;background:Field;color:FieldText;'
+        + 'color-scheme:light dark;border:1px solid rgba(128,128,128,.5)';
     const menu = (id, label, body) => `
     <div class="btn-group" data-menu="${id}">
       <button type="button" class="btn btn-default btn-xs dropdown-toggle" data-open="${id}">
         <span data-label="${id}">${label}</span> <span class="caret"></span></button>
-      <div class="dropdown-menu" style="display:none;max-height:56vh;overflow:auto;
-        min-width:220px;padding:6px 10px;text-align:left">${body}</div>
+      <div class="dropdown-menu" style="${MENU_CSS}">${body}</div>
     </div>`;
 
-    const box = (what, id, text, n, on) => `<label style="display:block;margin:2px 0;
-      font-weight:normal;white-space:nowrap">
+    /* EVERY CONTROL IN HERE IS A LABELLED CHECKBOX. The all/none links read as
+     * two more things to understand beside the boxes they act on, and a link
+     * is the one thing in a list of tick boxes that is not a tick box. A group
+     * is a box of its own, labelled with the group and what it holds, and it
+     * shows partly-ticked as indeterminate rather than guessing on or off. */
+    const box = (what, id, text, n, on, bold) => `<label style="display:block;margin:2px 0;
+      font-weight:${bold ? 'bold' : 'normal'};white-space:nowrap">
       <input type="checkbox" data-${what}="${ctx.esc(id)}"${on ? ' checked' : ''}
         style="margin-right:5px;vertical-align:-1px">${ctx.esc(text)}${
-    n === undefined ? '' : ` <span style="opacity:.55">${n}</span>`}</label>`;
+    n === undefined ? '' : ` <span style="opacity:.6">${n}</span>`}</label>`;
 
     const draw = () => {
         const cfg = ctx.store.read('cfg', {});
@@ -921,20 +936,16 @@ function hmMapBar(ctx, map, choices, repaint) {
             ? cfg.centres : centres.map((c) => c.id));
 
         const vehicleBody = `
-      <div style="margin-bottom:4px"><a href="#" data-all="types">all</a>
-        &middot; <a href="#" data-none="types">none</a></div>
-      ${groups.map((gr) => `<div style="margin:6px 0 0">
-        <div style="font-weight:bold">${ctx.esc(gr.label)}
-          <a href="#" data-all="group" data-group="${ctx.esc(gr.id)}"
-            style="font-weight:normal">all</a>
-          <a href="#" data-none="group" data-group="${ctx.esc(gr.id)}"
-            style="font-weight:normal">none</a></div>
+      ${box('every', 'types', 'Every vehicle', undefined, on.size >= types.length, true)}
+      ${groups.map((gr) => `<div style="margin:8px 0 0">
+        ${box('group', gr.id, `${gr.label} \u2014 all ${gr.types.length}`, undefined,
+        gr.types.every((t) => on.has(t)), true)}
         ${gr.types.map((t) => box('type', t, String(nameOf(t)), countOf(t), on.has(t))).join('')}
       </div>`).join('')}`;
 
         const centreBody = `
-      <div style="margin-bottom:4px"><a href="#" data-all="centres">all</a>
-        &middot; <a href="#" data-none="centres">none</a></div>
+      ${box('every', 'centres', 'Every centre', undefined,
+        centresOn.size >= centres.length, true)}
       ${centres.map((c) => box('centre', c.id, c.name, undefined, centresOn.has(c.id))).join('')}`;
 
         const pick = (attr, options, now) => `<select data-${attr}
@@ -965,6 +976,17 @@ function hmMapBar(ctx, map, choices, repaint) {
      * bar and a menu that shut itself on every tick is one you cannot use. */
     let open = '';
     const show = () => {
+        /* PARTLY TICKED IS A THIRD ANSWER. A group box that showed plain off
+         * while three of its five were on would be saying something untrue
+         * about what is drawn, so it shows indeterminate instead. */
+        const on = new Set(ticked());
+        for (const b of bar.querySelectorAll('[data-group]')) {
+            const list = groups.find((gr) => gr.id === b.getAttribute('data-group'))?.types || [];
+            const n = list.filter((t) => on.has(t)).length;
+            b.indeterminate = n > 0 && n < list.length;
+        }
+        const every = bar.querySelector('[data-every="types"]');
+        if (every) every.indeterminate = on.size > 0 && on.size < types.length;
         for (const group of bar.querySelectorAll('[data-menu]')) {
             const is = group.dataset.menu === open;
             group.classList.toggle('open', is);
@@ -988,48 +1010,44 @@ function hmMapBar(ctx, map, choices, repaint) {
     const ticked = () => [...bar.querySelectorAll('[data-type]:checked')]
         .map((b) => b.getAttribute('data-type'));
 
+    const centresTicked = () => [...bar.querySelectorAll('[data-centre]:checked')]
+        .map((b) => b.getAttribute('data-centre'));
+
     bar.addEventListener('change', (e) => {
         const d = e.target.dataset;
+        const wanted = e.target.checked;
         if (d.radius !== undefined) save({ radius: Number(e.target.value) });
         else if (d.focus !== undefined) save({ focus: e.target.value });
         else if (d.opacity !== undefined) save({ opacity: Number(e.target.value) });
         else if (d.mapscale !== undefined) save({ mapScale: e.target.value });
         else if (d.type !== undefined) save({ types: ticked() });
-        else if (d.centre !== undefined) {
-            save({
-                centres: [...bar.querySelectorAll('[data-centre]:checked')]
-                    .map((b) => b.getAttribute('data-centre')),
-            });
+        else if (d.centre !== undefined) save({ centres: centresTicked() });
+        else if (d.every === 'types') save({ types: wanted ? types.slice() : [] });
+        else if (d.every === 'centres') {
+            save({ centres: wanted ? centres.map((c) => c.id) : [] });
+        } else if (d.group !== undefined) {
+            /* A GROUP'S LIST IS THE CHOICES', NOT THE MARKUP'S: the boxes are
+             * redrawn on every change, so the ids come off what was worked out
+             * once rather than off whatever happens to be on screen now. */
+            const group = groups.find((gr) => gr.id === d.group);
+            const now = new Set(ticked());
+            for (const t of group?.types || []) { if (wanted) now.add(t); else now.delete(t); }
+            save({ types: [...now] });
         }
     });
 
     bar.addEventListener('click', (e) => {
         const toggle = e.target.closest('[data-open]');
-        if (toggle) {
-            e.preventDefault();
-            open = open === toggle.dataset.open ? '' : toggle.dataset.open;
-            show();
-            return;
-        }
-        const all = e.target.closest('[data-all]');
-        const none = e.target.closest('[data-none]');
-        if (!all && !none) return;
+        if (!toggle) return;
         e.preventDefault();
-        const btn = all || none;
-        const what = btn.dataset.all || btn.dataset.none;
-        /* A group's list is the choices', not the markup's: the boxes are
-         * redrawn on every change, so the ids come off what was worked out once
-         * rather than off whatever happens to be on screen this second. */
-        if (what === 'group') {
-            const group = groups.find((gr) => gr.id === btn.dataset.group);
-            const now = new Set(ticked());
-            for (const t of group?.types || []) { if (all) now.add(t); else now.delete(t); }
-            save({ types: [...now] });
-        } else if (what === 'centres') {
-            save({ centres: all ? centres.map((c) => c.id) : [] });
-        } else {
-            save({ types: all ? types.slice() : [] });
-        }
+        open = open === toggle.dataset.open ? '' : toggle.dataset.open;
+        show();
+        /* A BUTTON THAT KEEPS THE FOCUS RING LOOKS STUCK DOWN. Bootstrap's
+         * `:focus` and `:active` styling stays on a `.btn-default` after the
+         * press, so every menu that had been opened once read as still open.
+         * The open one is said by its menu being on screen, which is the only
+         * state worth showing. */
+        toggle.blur();
     });
 
     redraw();

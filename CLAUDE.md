@@ -57,6 +57,7 @@ userscripts/
     mod-simpleaao.js
     mod-heatmap.js
     mod-trackops.js
+    mod-statboard.js
     mod-elementfriend.js
     mod-highfive.js
     mod-easyedit.js
@@ -499,6 +500,15 @@ it links to *is* the total; and the next page is followed by **`a[rel="next"]`
 rather than by building `?page=N`**, which is the rule every other reader here
 keeps. How many pages is the player's, because 210 pages is 210 requests and
 that is their call to make, not a default to be clever about.
+
+**A date has three letters in it too.** The ledger reader took the wordiest cell
+that was not the amount and had three letters in it, which `23 Sep 23:21` clears
+— so every row whose description cell was empty fell back to its own date and
+was counted as a mission. A real account came back with **180 such lines and
+236,108 credits** filed under a mission called `# Sep #:#`. A cell that reads as
+a date is never the description, and "reads as a date" is tested by taking the
+digits, the separators and one month name away and seeing whether anything is
+left — so `May Day Parade` is still a mission.
 
 **Find a table's columns, do not assume them.** The ledger reader took cell 0 as
 the amount, cell 1 as the description and cell 2 as the date, and dropped any
@@ -1069,6 +1079,26 @@ already takes. So it is three buttons on one line at the **top edge of the map**
 state without a click, which is the whole reason a folded list can replace an
 open one.
 
+**A menu wearing the game's classes and nothing else came back unreadable.**
+Bootstrap paints `.dropdown-menu` white and the game's dark theme paints the
+text white with it, so the list was white on white — the same fault the probe
+found on `.btn-default`, and the same answer the dispatch select already uses:
+**the system's own pair**, `Field` on `FieldText` with `color-scheme: light
+dark`. That is the one colour a menu of ours may set, because it is not a
+colour: it is whatever the machine uses for every other list on it.
+
+**Every control in there is a labelled checkbox.** The all/none links were two
+more things to understand beside the boxes they acted on, and a link is the one
+thing in a list of tick boxes that is not a tick box. A group is a box of its
+own — *"Fire Station — all 7"* — and **partly ticked is a third answer**, shown
+as indeterminate rather than guessed at as off.
+
+**A button that keeps the focus ring looks stuck down.** Bootstrap's `:focus`
+and `:active` styling stays on a `.btn-default` after the press, so every menu
+that had ever been opened read as still open. The open one is said by its menu
+being on screen, which is the only state worth showing, so the toggle blurs
+itself.
+
 **Which menu is open survives the redraw.** Ticking a box redraws the bar, and a
 menu that shut itself on every tick is one nobody can use.
 
@@ -1587,6 +1617,74 @@ them, so a module can change or go without breaking the report.
 
 Every game request goes through `getJSON` in the shell, so every failure is in
 the log without a module having to remember to log it.
+
+### StatBoard
+
+**Everything YMCA measures was readable before this and none of it was worth
+looking at.** A report is a wall of JSON and a panel is a table; the same
+readings laid out the way anybody reads numbers are four pages of three big
+figures and the list they came from. Stations, fleet, calls, credits.
+
+**Every figure says which of three it is**, on the tile rather than in the code:
+**read from the game**, **from the game's own ledger**, or **no page states this
+yet**. Three of the figures asked for are the third — how long a vehicle has
+driven, what a station's level is, how many of its crew hold a training — and a
+board that quietly drew a nought for them would be exactly what TrackOps'
+payouts were withdrawn for. A tile that cannot answer says so in a sentence and
+carries the button that would find out.
+
+**A figure is looked for by what the game called it, not by a field name
+written down here.** `/api/buildings` and `/api/vehicles` carry more than this
+repo has seen — the fixture is a handful of fields and a real account's is not —
+so `sbRecordFigure` scans the record's own keys for one whose name contains the
+word, and a station's page is read as **every `<dt>`/`<dd>` pair it states**.
+That is the same rule the ledger's columns and a hospital's row already keep,
+and it is why a level this repo has never seen will appear the day the game
+names one, without a capture round trip.
+
+**Nothing is fetched until it is asked for.** The two APIs are one request each
+and already cached for the page load, so they are free. A station's page, a
+vehicle's page and the ledger are one request per station, per vehicle and per
+page of history — 40, 80 and 256 on a real account — so each is a button that
+says how many requests it is about to make. That is the same call `pagesRead`
+already puts to the player, for the same reason.
+
+**The window is the shell's own, twice the size.** A second lightbox over the
+first is two things to close and takes Escape away from the shell, which has to
+go on stepping back the way it does everywhere else. `ymca-wide` goes on
+`#ymca-window` while a board is open and comes off the moment the panel leaves
+the page.
+
+**The drill-down stays in the board.** A station or a vehicle opens **the game's
+own page in a frame inside the panel**, because a new tab is a place with no way
+back to what you were reading and a full-page navigation throws the board away.
+The stat button beside each row is that one station or vehicle on its own, with
+the count of stations replaced by its extensions.
+
+**The card is `#333` and that is a measurement, not a taste.** The categorical
+slots come off the documented palette's dark column, and on the game's own
+`#505050` **every one of them came back under 3:1** — which is what makes a
+chart unreadable rather than merely plain. On `#333` all six pass every check:
+worst adjacent CVD ΔE 8.4, normal-vision ΔE 19.3, contrast clear. It is a darker
+step of the game's own neutral, so it is not a colour of YMCA's own, and it was
+**run through the checker rather than reasoned about** — the same rule that
+settled red-to-green in HeatSeeker.
+
+**Identity is never colour alone.** Every slice and every bar carries its name
+and its figure beside it, and the table says the same thing in words. The ring
+is five slices and an Other, because a ring of thirty is a colour wheel rather
+than a reading, and where there are more categories than that it is bars.
+
+**A line the game named after something else is not a mission.** `Patient
+Treatment`, `Prisoner Transported`, `Vehicle bought`, `Station constructed`,
+`Completed task "…"` — each is the game's own wording, read off a real ledger
+rather than guessed at, and **anything not on that list stays a mission**, so a
+call nobody here has seen still counts.
+
+**The year is the one assumption in the file.** The ledger writes `23 Sep 23:21`
+with no year, so the year is this one, and where that lands in the future it is
+the one before. A line whose date cannot be read is only ever in "everything
+read", and the board says how many those are.
 
 ---
 

@@ -14,7 +14,7 @@ const ROOT = new URL('..', import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 
 /** Version lives here, and nowhere else. Steps of 0.0.1, starting at 0.0.0. */
-export const VERSION = '0.0.72';
+export const VERSION = '0.0.73';
 
 const stripExports = (src) => src.replace(/^export\s+/gm, '');
 const cutAtMarker = (src, marker) => {
@@ -204,6 +204,9 @@ function build() {
         read('userscripts/src/mod-simpleaao.js'),
         read('userscripts/src/mod-heatmap.js'),
         read('userscripts/src/mod-trackops.js'),
+        /* StatBoard reads the ledger with TrackOps' own row reader and the
+         * Renamer's building-type names, so it comes after both. */
+        read('userscripts/src/mod-statboard.js'),
         /* ElementFriend is the switchboard and HighFive is its first
          * element-only tile, so both come after everything they switch: the
          * page lists YMCA.modules, and register order is the order it reads. */
