@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.69
+// @version      0.0.70
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.69',
+    version: '0.0.70',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2875,7 +2875,13 @@ function mmOnScene(known, countDriving = true) {
      * browser where a later read could not correct it. */
     const crewSeenHere = mmStoredCrew();
     let learntCrew = false;
-    const take = (rows) => {
+    /* WHICH TABLE A ROW IS IN IS ITS STATUS. The game puts a vehicle that has
+     * arrived in `mission_vehicle_at_mission` and one still driving in
+     * `mission_vehicle_driving`, and says the same on the row itself —
+     * `building_list_fms_4` against `building_list_fms_3`. The two are not
+     * interchangeable where crew is concerned, which is the whole of the fix
+     * in the personnel line. */
+    const take = (rows, arrived) => {
         for (const row of rows) {
             total += 1;
             const typeId = row.querySelector('[vehicle_type_id]')?.getAttribute('vehicle_type_id');
@@ -2902,15 +2908,15 @@ function mmOnScene(known, countDriving = true) {
             const flags = known[typeId];
             /* Counted as present whatever else is unknown: the seats are on the
              * row, and a type nothing has flags for still carries its people. */
-            onScene.push({ typeId, seats: seats || crew[typeId] || 0, flags: flags || [] });
+            onScene.push({ typeId, seats: seats || crew[typeId] || 0, flags: flags || [], arrived });
             if (!flags) { unknown += 1; continue; }
             vehicles.push(flags);
             for (const flag of flags) counts[flag] = (counts[flag] || 0) + 1;
         }
         return rows.length;
     };
-    const atCount = take(at);
-    const drivingCount = countDriving ? take(driving) : 0;
+    const atCount = take(at, true);
+    const drivingCount = countDriving ? take(driving, false) : 0;
     /* Counted or not, how many are on the way is worth saying. */
     const drivingSeen = driving.length;
     if (learntCrew) mmWriteCrew(crewSeenHere);
@@ -3558,29 +3564,39 @@ async function mmPlan(page, ctx, cfg) {
             const fits = (v) => !trained || mmMeets(v, trained);
             const carried = (v) => (fits(v) ? crew[v.typeId] || 0 : 0);
 
-            /* THE CREW ALREADY COMMITTED COUNT, AND THEY USED NOT TO.
+            /* THE BANNER IS WHAT IS MISSING, AND MISSING IS NET OF WHO ARRIVED.
              *
-             * A call with one HazMat at the mission and two more driving to it
-             * read `wanted 1, there 0`, so the panel asked for a fourth for
-             * ever. `onScene` was nought on purpose, on the written-down
-             * grounds that the game's own shortfall had already taken off
-             * whoever was there and whoever was driving — and the window
-             * disproved it: three HazMats carrying 3 and 4 crew between the
-             * driving pair, and `Missing Personnel` still asking for one.
+             * Two readings got here and both were wrong, in opposite
+             * directions. The first counted nobody already committed, so a call
+             * with three HazMats — one there, two driving — asked for a fourth
+             * for ever. The second counted everybody committed, which took the
+             * crew *at the mission* off a figure the game had already taken
+             * them off, and then asked for too few.
              *
-             * So the people on the way are counted. The seats are the game's
-             * own, stated on each row, and the restriction is the player's
-             * reading of their own game: **only crew who hold the training can
-             * board the vehicle that needs it**, so the crew of a vehicle the
-             * game flags for that training are the trained ones. That is the
-             * player's statement, not a page's, and it is why the count is
-             * taken per vehicle rather than as a total of seats.
+             * The player's own formula settles it, and it is the game's
+             * arithmetic rather than anything worked out here:
              *
-             * It follows the "count what is on the way" switch, because a
-             * player who does not want a driving vehicle counted for the
-             * requirement does not want its crew counted either. */
-            const committed = (scene.onScene || []).reduce(
-                (n, v) => n + (fits({ has: (f) => v.flags.includes(f) }) ? v.seats : 0), 0);
+             *     total wanted = the banner + the trained crew that has arrived
+             *     covered      = arrived + on the way
+             *     still to send = the banner − on the way
+             *
+             * `Missing Personnel` counts against what has **arrived** and
+             * nothing else — a vehicle in status 3 changes it only once it
+             * becomes status 4. So the arrived crew is added back to make the
+             * total honest on screen, and only the crew on the way comes off
+             * what is still to send.
+             *
+             * Only crew on a vehicle the game flags for the training counts
+             * either way. That is the player's reading of their own game: only
+             * somebody holding the training can board the vehicle that needs
+             * it, so the nine seats on an ambulance beside a HazMat are not
+             * the people this call is short of. */
+            const seatsOn = (arrived) => (scene.onScene || []).reduce(
+                (n, v) => (v.arrived === arrived
+                    && fits({ has: (f) => v.flags.includes(f) }) ? n + v.seats : n), 0);
+            const arrivedCrew = seatsOn(true);
+            const committed = arrivedCrew + seatsOn(false);
+            const wantedTotal = personnel.wanted + arrivedCrew;
             let have = committed
                 + [...picked.values()].reduce((n, v) => n + carried(v), 0);
             const bySmallest = (a, b) => carried(a) - carried(b) || mmOrder(a, b);
@@ -3588,9 +3604,9 @@ async function mmPlan(page, ctx, cfg) {
             const pool = vehicles.filter((v) => carried(v) && !picked.has(v.id));
             /* Nothing in range that could bring the training. Said plainly,
              * rather than filled with whatever had a seat. */
-            plannedCrewUntrained = !!trained && !pool.length && have < personnel.wanted;
-            while (have < personnel.wanted && pool.length) {
-                const left = personnel.wanted - have;
+            plannedCrewUntrained = !!trained && !pool.length && have < wantedTotal;
+            while (have < wantedTotal && pool.length) {
+                const left = wantedTotal - have;
                 const fits = pool.filter((v) => carried(v) <= left);
                 const next = fits.length
                     ? fits.sort(byBiggest)[0]
@@ -3604,7 +3620,7 @@ async function mmPlan(page, ctx, cfg) {
                 key: 'personnel',
                 label: `Crew \u2014 ${trained && named ? named.label : personnel.label}`,
                 icon: 'star',
-                wanted: personnel.wanted,
+                wanted: wantedTotal,
                 found: 0,
                 unit: 'crew',
                 carries: 'personnel',

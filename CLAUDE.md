@@ -713,6 +713,27 @@ measurement of that vehicle rather than of its type. It follows the **count what
 is on the way** switch, because somebody who does not want a driving vehicle
 counted for a requirement does not want its crew counted for one either.
 
+**Then it was counted the other way and asked for too few, and the player's own
+formula settled it.** Counting everybody committed took the crew *at the
+mission* off a figure the game had already taken them off — a banner of 5 with
+one HazMat of three already there came out as two people wanted, which is one
+vehicle where two are needed. Which table a vehicle is in **is** its status, and
+the row says the same: `building_list_fms_4` has arrived, `building_list_fms_3`
+is on the way. So:
+
+```
+total wanted  = the banner + the trained crew that has ARRIVED
+covered       = arrived + on the way
+still to send = the banner − what is on the way
+```
+
+`Missing Personnel` counts against what has arrived and nothing else — a vehicle
+in status 3 changes it only once it becomes status 4 — so the arrived crew is
+added back to make the total on screen honest, and only the crew on the way
+comes off what is still to send. Both earlier readings are here because each of
+them looked like the obvious one: the first counted nobody and asked for one too
+many for ever, the second counted everybody and asked for too few.
+
 **Only the crew of a vehicle flagged for the training count towards it, and that
 is the player's reading, not a page's.** No page says who is aboard; what the
 player says is that **only crew holding the training can board the vehicle that

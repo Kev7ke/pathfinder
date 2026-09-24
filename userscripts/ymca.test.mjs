@@ -1059,6 +1059,68 @@ await mission.click('#ymca-mm-panel .mm-switch:has([data-cfg="countDriving"])');
 await mission.waitForTimeout(900);
 await mission.evaluate(() => document.getElementById('mission_vehicle_driving')?.remove());
 
+// ---- and the banner is net of who ARRIVED, which is the other half ----
+// The first reading counted nobody committed and asked for one too many for ever. The second
+// counted everybody committed — including the crew at the mission, whom the game had already
+// taken off its own figure — and then asked for too few. The player's formula settles it:
+//   total wanted = the banner + the trained crew that has arrived
+//   still to send = the banner − what is on the way
+// Banner 5 with one HazMat of 3 already there wants 5 MORE trained people: two vehicles at
+// three seats, not one. Asking for one is the bug this fixes.
+await mission.evaluate(() => {
+  document.getElementById('mission_vehicle_at_mission')?.remove();
+  // Only the crew of a vehicle the game flags for the training count towards it, so the type
+  // has to be known to carry it before its seats mean anything.
+  const types = JSON.parse(localStorage.getItem('ymca-missionmagician-types') || '{}');
+  types['9'] = ['gwgefahrgut', 'gw_gefahrgut_only'];
+  localStorage.setItem('ymca-missionmagician-types', JSON.stringify(types));
+  const short = document.createElement('div');
+  short.id = 'ymca-test-personnel';
+  short.setAttribute('data-requirement-type', 'personnel');
+  short.innerHTML = '<b>Missing Personnel:</b> 5 HazMat';
+  document.body.append(short);
+  window.__catalogue = [{
+    id: '1201', name: 'HazMat crew test',
+    requirements: { personnel_educations: { gw_gefahrgut: 1 } },
+    additional: { personnel_educations: { HazMat: 1 } },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1201');
+  const at = document.createElement('table');
+  at.id = 'mission_vehicle_at_mission';
+  at.innerHTML = `<thead><tr><th></th><th>Vehicle</th><th>Station</th>
+      <th><img src="/images/icons8-swipe_right_dark.svg" title="ETA"></th>
+      <th><img src="/images/icons8-groups_dark.svg" title="Crew"></th></tr></thead>
+    <tbody><tr id="vehicle_row_910"><td>
+        <span class="building_list_fms building_list_fms_4">4</span></td>
+      <td><a href="/vehicles/910" vehicle_type_id="9">HazMat there</a></td>
+      <td>FS07</td><td sortvalue="0">\u2014</td><td sortvalue="3">3</td></tr></tbody>`;
+  document.body.append(at);
+  // Two more HazMats in range, so there is something to pick with.
+  document.getElementById('vehicle_show_table_body_all').innerHTML = [503, 504, 505]
+    .map((id) => `<tr class="vehicle_select_table_tr" vehicle_id="${id}" data-distance="${id % 9}">
+      <td><input type="checkbox" class="vehicle_checkbox" value="${id}"
+        id="vehicle_checkbox_${id}" name="vehicle_ids[]" vehicle_type_id="9"
+        gwgefahrgut="1" gw_gefahrgut_only="1" fms="2"></td>
+      <td id="vehicle_sort_${id}" timevalue="${id}">x</td></tr>`).join('');
+});
+await mission.waitForTimeout(1400);
+const arrivedRow = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim()))
+    .find((r) => /Crew/.test(r[4])));
+console.log('banner plus there :', JSON.stringify(arrivedRow));
+assert.match(arrivedRow[0], /^8 crew/,
+  'the total is the banner plus the trained crew that arrived, not the banner alone');
+assert.match(arrivedRow[1], /^3 crew/, 'and what arrived is shown as covered, not subtracted');
+const arrivedTick = await mission.textContent('#ymca-mm-panel [data-do="select"]');
+console.log('banner plus tick  :', arrivedTick.trim().split('<')[0]);
+assert.match(arrivedTick, /Tick 2 vehicles/,
+  'five more trained people at three seats apiece is two vehicles — asking for one was the bug');
+await mission.evaluate(() => {
+  document.getElementById('mission_vehicle_at_mission')?.remove();
+  document.getElementById('ymca-test-personnel')?.remove();
+});
+
 // ---- a Rescue Engine covers heavy rescue AND an engine, by the same route ----
 // The game flags it fire+rw exactly as it flags a Quint fire+dlk, so this needs no special case;
 // the test is here because "no special case" is a claim that has to keep being true.
