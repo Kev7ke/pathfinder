@@ -696,10 +696,33 @@ game is played in where the tooltip beside it is not.
 **Crew is a total filled by adding vehicles**, the way water is: the people
 arrive on whatever is sent, so covering a shortfall of fourteen means sending
 until fourteen seats have gone — biggest that fits, then the smallest that
-finishes it, ties on the clock. **It is a shortfall**: the game has already
-taken off whoever is there and whoever is driving, so nothing is subtracted
-twice. A type whose crew has never been stated carries **nobody** rather than a
-guess, and the panel says how many of those it picked.
+finishes it, ties on the clock. A type whose crew has never been stated carries
+**nobody** rather than a guess, and the panel says how many of those it picked.
+
+**"The game has already taken off whoever is driving" was written down here and
+is not true.** On that reading `onScene` for the crew line was nought on
+purpose. A real window settled it: mission 47 with **three HazMats** — one at
+the mission, two driving with 3 and 4 crew stated on their own rows — and
+`Missing Personnel` still asking for one, so the panel asked for a fourth for
+ever. The shortfall counts who has **arrived**, not who is committed.
+
+So the crew already committed are counted, and **the seats are read off the row
+rather than looked up**: the driving table states them per vehicle, which is a
+measurement of that vehicle rather than of its type. It follows the **count what
+is on the way** switch, because somebody who does not want a driving vehicle
+counted for a requirement does not want its crew counted for one either.
+
+**Only the crew of a vehicle flagged for the training count towards it, and that
+is the player's reading, not a page's.** No page says who is aboard; what the
+player says is that **only crew holding the training can board the vehicle that
+needs it**, so the people on a `gwgefahrgut` vehicle driving to a HazMat call
+are the trained ones and the nine seats on an ambulance beside it are not. That
+is sourced to them and is the reason the count is taken per vehicle rather than
+as a total of seats. The claim that a HazMat's crew hold the training is
+therefore now made — by the player, for their own game — where before it was
+refused; what has not changed is that a vehicle the game does not flag is never
+picked to bring it, and the refusal detector still stops the table calling
+itself finished when the game turns a send down.
 
 **A training is not seats, and filling it with seats sent an ambulance to a
 HazMat call.** `Missing Personnel` on such a call is a shortfall of people who
@@ -723,12 +746,11 @@ guessed at. The table stops calling itself finished for that mission, said in a
 sentence beside the crew line, so nobody is told a call is covered that the game
 has just refused.
 
-**What is still not claimed is that the people aboard a HazMat hold the HazMat
-training.** No page says that. The claim is the other way round: a vehicle the
-game does not flag for the training cannot be the one that brings it, so it is
-not picked. Where nothing in range carries the flag, **nothing is picked at
-all** and the panel says so — sending the wrong vehicle is worse than sending
-none.
+**A vehicle the game does not flag for the training is never picked to bring
+it**, and where nothing in range carries the flag, **nothing is picked at all**
+and the panel says so — sending the wrong vehicle is worse than sending none.
+That half has not changed; what changed is that the crew of a flagged vehicle
+already on the way now count, on the player's own statement, as above.
 
 **`average_credits` is the game's own figure**, in the catalogue the
 `#mission_help` link points at, so the panel can show what a call is worth

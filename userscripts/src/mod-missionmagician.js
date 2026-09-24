@@ -803,6 +803,10 @@ function mmOnScene(known, countDriving = true) {
     const counts = {};
     const vehicles = [];
     const typeIds = [];
+    /* THE ROW STATES ITS OWN CREW, so the people already committed to this call
+     * are a reading rather than a lookup. Kept per vehicle with its flags, so a
+     * training can be asked of the vehicle carrying them. */
+    const onScene = [];
     let unknown = 0;
     let unreadable = 0;
     let total = 0;
@@ -826,16 +830,23 @@ function mmOnScene(known, countDriving = true) {
             const table = row.closest('table');
             if (table && !crewColumn.has(table)) crewColumn.set(table, mmCrewColumn(table));
             const at = table ? crewColumn.get(table) : -1;
+            let seats = 0;
             if (at >= 0) {
                 const said = Number((row.cells[at]?.textContent || '').trim());
-                if (Number.isFinite(said) && said > 0 && crewSeenHere[typeId] !== said) {
-                    crew[typeId] = said;
-                    crewSeenHere[typeId] = said;
-                    learntCrew = true;
+                if (Number.isFinite(said) && said > 0) {
+                    seats = said;
+                    if (crewSeenHere[typeId] !== said) {
+                        crew[typeId] = said;
+                        crewSeenHere[typeId] = said;
+                        learntCrew = true;
+                    }
                 }
             }
             typeIds.push(Number(typeId));
             const flags = known[typeId];
+            /* Counted as present whatever else is unknown: the seats are on the
+             * row, and a type nothing has flags for still carries its people. */
+            onScene.push({ typeId, seats: seats || crew[typeId] || 0, flags: flags || [] });
             if (!flags) { unknown += 1; continue; }
             vehicles.push(flags);
             for (const flag of flags) counts[flag] = (counts[flag] || 0) + 1;
@@ -848,7 +859,7 @@ function mmOnScene(known, countDriving = true) {
     const drivingSeen = driving.length;
     if (learntCrew) mmWriteCrew(crewSeenHere);
     return {
-        counts, vehicles, unknown, unreadable, total, typeIds,
+        counts, vehicles, unknown, unreadable, total, typeIds, onScene,
         atCount, drivingCount, drivingSeen, countDriving, crew,
     };
 }
@@ -1452,9 +1463,10 @@ async function mmPlan(page, ctx, cfg) {
          * gone. The figure per type is measured off the game's own Crew column
          * the first time one is seen at a mission.
          *
-         * IT IS A SHORTFALL. The game has already taken off whoever is at the
-         * mission and whoever is driving, so nothing is subtracted twice and
-         * `onScene` is zero on purpose.
+         * IT IS A SHORTFALL, and it was read as a bigger one than it is. The
+         * note here used to say the game had already taken off whoever was at
+         * the mission and whoever was driving, so `onScene` was nought on
+         * purpose. A real window disproved it — see the count below.
          *
          * A type whose crew has never been seen carries nothing here rather
          * than a guess, and the panel says how many of those it picked. */
@@ -1489,7 +1501,32 @@ async function mmPlan(page, ctx, cfg) {
             }
             const fits = (v) => !trained || mmMeets(v, trained);
             const carried = (v) => (fits(v) ? crew[v.typeId] || 0 : 0);
-            let have = [...picked.values()].reduce((n, v) => n + carried(v), 0);
+
+            /* THE CREW ALREADY COMMITTED COUNT, AND THEY USED NOT TO.
+             *
+             * A call with one HazMat at the mission and two more driving to it
+             * read `wanted 1, there 0`, so the panel asked for a fourth for
+             * ever. `onScene` was nought on purpose, on the written-down
+             * grounds that the game's own shortfall had already taken off
+             * whoever was there and whoever was driving — and the window
+             * disproved it: three HazMats carrying 3 and 4 crew between the
+             * driving pair, and `Missing Personnel` still asking for one.
+             *
+             * So the people on the way are counted. The seats are the game's
+             * own, stated on each row, and the restriction is the player's
+             * reading of their own game: **only crew who hold the training can
+             * board the vehicle that needs it**, so the crew of a vehicle the
+             * game flags for that training are the trained ones. That is the
+             * player's statement, not a page's, and it is why the count is
+             * taken per vehicle rather than as a total of seats.
+             *
+             * It follows the "count what is on the way" switch, because a
+             * player who does not want a driving vehicle counted for the
+             * requirement does not want its crew counted either. */
+            const committed = (scene.onScene || []).reduce(
+                (n, v) => n + (fits({ has: (f) => v.flags.includes(f) }) ? v.seats : 0), 0);
+            let have = committed
+                + [...picked.values()].reduce((n, v) => n + carried(v), 0);
             const bySmallest = (a, b) => carried(a) - carried(b) || mmOrder(a, b);
             const byBiggest = (a, b) => carried(b) - carried(a) || mmOrder(a, b);
             const pool = vehicles.filter((v) => carried(v) && !picked.has(v.id));
@@ -1515,7 +1552,7 @@ async function mmPlan(page, ctx, cfg) {
                 found: 0,
                 unit: 'crew',
                 carries: 'personnel',
-                onScene: 0,
+                onScene: committed,
                 fromWindow: true,
             });
             /* How many of the picked vehicles have never had their crew stated,

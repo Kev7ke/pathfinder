@@ -1714,11 +1714,16 @@ const crewRow = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
 console.log('crew row          :', JSON.stringify(crewRow));
 assert.ok(crewRow, 'the personnel shortfall is a line of its own');
 assert.match(crewRow[0], /^8/, 'and it is the number the game stated, not one worked out here');
-// Eight seats at three each is three vehicles — the shortfall is already net of who is there,
-// so nothing is subtracted a second time.
+// THE CREW ALREADY ON THE WAY COUNT, and they used not to. The shortfall was read as net of
+// everyone already committed, on grounds a real window disproved: three HazMats on a call — one
+// there, two driving with 3 and 4 crew — and `Missing Personnel` still asking for one, so the
+// panel asked for a fourth for ever. The one ambulance driving here carries 3 of the 8, which
+// leaves 5, which is two more at three seats apiece.
+assert.match(crewRow[3] || '', /3/, 'the seats already committed are counted and shown');
 const tick = await mission.textContent('#ymca-mm-panel [data-do="select"]');
 console.log('crew tick         :', tick.trim().split('<')[0]);
-assert.match(tick, /Tick 3 vehicles/, 'it keeps sending until the seats cover the shortfall');
+assert.match(tick, /Tick 2 vehicles/,
+  'the three seats already driving to it are not asked for a second time');
 await mission.click('#ymca-mm-panel [data-do="select"]');
 await mission.waitForTimeout(400);
 const covered = await mission.$eval('#ymca-mm-panel [data-covered="personnel"]',
@@ -1767,6 +1772,54 @@ const forTraining = await mission.$$eval('.vehicle_checkbox:checked', (bs) =>
 console.log('trained crew      :', JSON.stringify(forTraining), '(9 is the HazMat, 5 the ambulance)');
 assert.deepEqual(forTraining, ['9'],
   'the nearer ambulance has seats and none of the training, so it is not the one sent');
+
+// ---- and a trained crew already on the way is not asked for again ----
+// Only crew who hold the training can board the vehicle that needs it, so the crew of a vehicle
+// the game flags for it are the trained ones. An ambulance driving to the same call is not.
+await mission.evaluate(() => {
+  /* UNTICKING MEANS DISPATCHING A CHANGE EVENT, exactly as ticking does: setting `checked`
+   * alone leaves the panel counting a vehicle that would not be sent. */
+  document.querySelectorAll('.vehicle_checkbox:checked').forEach((b) => {
+    b.checked = false;
+    b.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const driving = document.createElement('table');
+  driving.id = 'mission_vehicle_driving';
+  driving.innerHTML = `<thead><tr><th></th><th>Vehicle</th><th>Station</th>
+      <th><img src="/images/icons8-swipe_right_dark.svg" title="ETA"></th>
+      <th><img src="/images/icons8-groups_dark.svg" title="Crew"></th></tr></thead>
+    <tbody>
+      <tr id="vehicle_row_901"><td>3</td>
+        <td><a href="/vehicles/901" vehicle_type_id="9">HazMat on the way</a></td>
+        <td>FS07</td><td sortvalue="38">00:00:38</td><td sortvalue="3">3</td></tr>
+      <tr id="vehicle_row_902"><td>3</td>
+        <td><a href="/vehicles/902" vehicle_type_id="5">Ambulance on the way</a></td>
+        <td>AS01</td><td sortvalue="60">00:01:00</td><td sortvalue="9">9</td></tr>
+    </tbody>`;
+  document.body.append(driving);
+  /* A full redraw, the way every other block here gets one: a ticked box only recounts. */
+  window.__catalogue = [{
+    id: '1203', name: 'Chemical again',
+    requirements: { personnel_educations: { gw_gefahrgut: 2 } },
+    additional: { personnel_educations: { HazMat: 2 } },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1203');
+  /* The panel watches the selection table, so that is what a redraw is asked of. */
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(1500);
+const committedRow = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim()))
+    .find((r) => /Crew/.test(r[4])));
+console.log('committed crew    :', JSON.stringify(committedRow));
+assert.match(committedRow[3] || '', /^3 crew/,
+  'the HazMat crew driving to it counts, the ambulance\'s nine seats do not');
+const afterCommitted = await mission.textContent('#ymca-mm-panel [data-do="select"]');
+console.log('after committed   :', afterCommitted.trim().split('<')[0]);
+assert.match(afterCommitted, /Tick 0 vehicles/,
+  'two trained crew are wanted and three are already driving, so nothing more is asked for');
+await mission.evaluate(() => document.getElementById('mission_vehicle_driving')?.remove());
 
 // And where nothing in range carries it, nothing is picked rather than the wrong thing.
 await mission.evaluate(() => {
