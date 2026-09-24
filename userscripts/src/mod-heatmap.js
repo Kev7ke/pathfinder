@@ -107,6 +107,14 @@ YMCA.register({
         + 'can reach each spot. Tick the types and the dispatch centres to see cover for all of '
         + 'it or one branch at a time. The scale is relative to your own map, not a standard.',
 
+    /* An injection cannot be un-run, so what it put in the game's page is taken
+     * back here: the control and the canvas both go. */
+    onSwitch(on) {
+        if (on) return;
+        hmClear();
+        document.getElementById(HM_BTN_ID)?.remove();
+    },
+
     async mount(el, ctx) {
         el.innerHTML = '<p class="ymca-dim">Reading your stations and your fleet…</p>';
         const [buildings, vehicles] = await Promise.all([
@@ -194,11 +202,28 @@ YMCA.register({
             ${[2, 4, 6, 8, 12, 20, 35].map((n) => `<option value="${n}"${n === radius
     ? ' selected' : ''}>${n} km</option>`).join('')}
           </select></label>
-        <label style="display:block;margin-top:7px">Scale
+        <label style="display:block;margin-top:7px">Scale in here
           <select data-scale style="margin-left:6px">
             ${Object.entries(HM_SCALES).map(([k, s]) => `<option value="${k}"${k === scale
     ? ' selected' : ''}>${s.label}</option>`).join('')}
           </select></label>
+        <label style="display:block;margin-top:7px">Scale on the game's map
+          <select data-mapscale style="margin-left:6px">
+            ${Object.entries(HM_SCALES).map(([k, s]) => `<option value="${k}"${
+    k === (HM_SCALES[cfg.mapScale] ? cfg.mapScale : 'warm')
+        ? ' selected' : ''}>${s.label}</option>`).join('')}
+          </select></label>
+        <label style="display:block;margin-top:7px">How strong on the map
+          <select data-opacity style="margin-left:6px">
+            ${[0.2, 0.3, 0.45, 0.6, 0.8].map((n) => `<option value="${n}"${
+    n === (Number.isFinite(Number(cfg.opacity)) ? Number(cfg.opacity) : 0.45)
+        ? ' selected' : ''}>${Math.round(n * 100)}%</option>`).join('')}
+          </select></label>
+        <p class="ymca-sub" style="margin:8px 0 0">The button on the game's own map turns the
+          same cover on over the real thing, with these settings. There it opens on
+          <b>red to green</b>, because that is what it is for &mdash; and the count is written
+          beside every station in the same shade, which is what makes that scale readable at
+          all.</p>
         <p class="ymca-dim" style="margin:8px 0 0;font-size:12px"><b>Red to green is the one pair
           a colour-blind reader cannot separate</b> &mdash; measured, not assumed: those two ends
           come back at &#916;E 4.1 under deuteranopia, where 6 is the floor. One hue from light
@@ -327,6 +352,10 @@ YMCA.register({
         el.addEventListener('change', (e) => {
             if (e.target.dataset.radius !== undefined) save({ radius: Number(e.target.value) });
             else if (e.target.dataset.scale !== undefined) save({ scale: e.target.value });
+            else if (e.target.dataset.mapscale !== undefined) save({ mapScale: e.target.value });
+            else if (e.target.dataset.opacity !== undefined) {
+                save({ opacity: Number(e.target.value) });
+            }
             else if (e.target.dataset.type !== undefined) {
                 save({ types: [...el.querySelectorAll('[data-type]:checked')].map((b) => b.dataset.type) });
             } else if (e.target.dataset.centre !== undefined) {
@@ -353,4 +382,257 @@ YMCA.register({
          * gets redrawn rather than stretched. */
         window.addEventListener('resize', draw, { passive: true });
     },
+});
+
+/* --------------------------------------------------------------------------
+ * And the same thing on the game's own map.
+ *
+ * THE TILES ARE THE PROJECTION, so no function of the game's is called and no
+ * global is reached for. A loaded tile is
+ * `https://maps.missionchief.com/tile/13/2410/3080.png` — zoom, column, row —
+ * and in Web Mercator the tile at (x, y, z) is exactly the world-pixel square
+ * from (x·256, y·256) to (x·256+256, y·256+256). One tile's `getBoundingClientRect`
+ * therefore fixes the whole page: where world pixel zero sits on screen, and at
+ * what scale. Every station's own latitude and longitude goes through the same
+ * formula and lands where the game would have put it.
+ *
+ * That is why this needs neither `window.map` nor Leaflet: the answer is in the
+ * markup, and markup is what this repo reads. It also survives the game
+ * renaming anything it likes, because nothing here knows a name to break.
+ *
+ * THE BUTTON IS THE GAME'S OWN KIND. `.leaflet-top.leaflet-left` already holds
+ * a `.leaflet-bar.leaflet-control.leaflet-control-custom` the game made itself,
+ * so ours is one of those, next to it.
+ * -------------------------------------------------------------------------- */
+
+const HM_CANVAS_ID = 'ymca-heat-canvas';
+const HM_BTN_ID = 'ymca-heat-btn';
+let hmFrame = null;
+
+/** Where world pixel zero sits on screen, and how big a world pixel is. */
+function hmProjection() {
+    const map = document.getElementById('map');
+    if (!map) return null;
+    /* A zoom animation has tiles of two zooms on screen at once and every rect
+     * mid-flight, so the frame is skipped rather than drawn at the wrong size. */
+    if (map.classList.contains('leaflet-zoom-anim')) return null;
+    for (const img of map.querySelectorAll('img.leaflet-tile.leaflet-tile-loaded')) {
+        const at = /\/(\d+)\/(\d+)\/(\d+)\.[a-z]+(?:\?|$)/i.exec(img.getAttribute('src') || '');
+        if (!at) continue;
+        const rect = img.getBoundingClientRect();
+        if (!(rect.width > 0)) continue;
+        const scale = rect.width / 256;
+        const z = Number(at[1]);
+        return {
+            z,
+            scale,
+            /* Screen position of world pixel (0,0) at this zoom. */
+            left: rect.left - Number(at[2]) * 256 * scale,
+            top: rect.top - Number(at[3]) * 256 * scale,
+            map: map.getBoundingClientRect(),
+        };
+    }
+    return null;
+}
+
+/** Web Mercator, the projection every slippy map tile in the world is cut on. */
+function hmWorld(lat, lon, z) {
+    const n = 256 * (2 ** z);
+    const rad = (lat * Math.PI) / 180;
+    return {
+        x: ((lon + 180) / 360) * n,
+        y: ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n,
+    };
+}
+
+/** The canvas the heat is painted on, over the map and under nothing. */
+function hmCanvas() {
+    const map = document.getElementById('map');
+    if (!map) return null;
+    let canvas = document.getElementById(HM_CANVAS_ID);
+    if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.id = HM_CANVAS_ID;
+        /* Over the tiles and the markers, and never in the way of a click: the
+         * map has to keep working exactly as it did. */
+        canvas.style.cssText = 'position:absolute;inset:0;z-index:450;pointer-events:none';
+        map.append(canvas);
+    }
+    return canvas;
+}
+
+function hmClear() {
+    if (hmFrame) cancelAnimationFrame(hmFrame);
+    hmFrame = null;
+    document.getElementById(HM_CANVAS_ID)?.remove();
+}
+
+/**
+ * Draw, and keep drawing: the map moves under us and nothing announces it.
+ *
+ * A frame is cheap — a few dozen stations and a coarse grid — and watching for
+ * a pan means watching a transform the game rewrites constantly. So it is
+ * redrawn per frame while it is on, and taken away entirely when it is off.
+ */
+function hmPaint(state) {
+    const canvas = hmCanvas();
+    const p = hmProjection();
+    if (!canvas || !p) return;
+
+    const w = Math.round(p.map.width);
+    const h = Math.round(p.map.height);
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+    }
+    const g = canvas.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+
+    /* Screen position of a station, in the map's own coordinates. */
+    const place = (s) => {
+        const world = hmWorld(s.lat, s.lon, p.z);
+        return {
+            x: p.left + world.x * p.scale - p.map.left,
+            y: p.top + world.y * p.scale - p.map.top,
+        };
+    };
+
+    /* How many screen pixels a kilometre is, here. Mercator stretches with
+     * latitude, so it is taken at the middle of the map rather than assumed. */
+    const midLat = (() => {
+        const worldY = (p.map.top + h / 2 - p.top) / p.scale;
+        const n = 256 * (2 ** p.z);
+        return (Math.atan(Math.sinh(Math.PI * (1 - (2 * worldY) / n))) * 180) / Math.PI;
+    })();
+    const kmInPixels = (256 * (2 ** p.z) * p.scale)
+        / (40075.016686 * Math.cos((midLat * Math.PI) / 180));
+
+    const shown = state.stations.map((s) => ({ ...s, at: place(s) }))
+        .filter((s) => s.at.x > -400 && s.at.x < w + 400 && s.at.y > -400 && s.at.y < h + 400);
+    if (!shown.length) return;
+
+    const rPx = Math.max(6, state.radius * kmInPixels);
+    const cell = 8;
+    const cols = Math.ceil(w / cell);
+    const rows = Math.ceil(h / cell);
+    const heat = new Float64Array(cols * rows);
+    let most = 0;
+    for (let cy = 0; cy < rows; cy += 1) {
+        for (let cx = 0; cx < cols; cx += 1) {
+            const x = (cx + 0.5) * cell;
+            const y = (cy + 0.5) * cell;
+            let sum = 0;
+            for (const s of shown) {
+                const dx = x - s.at.x;
+                const dy = y - s.at.y;
+                sum += s.n * Math.exp(-((dx * dx + dy * dy) / (rPx * rPx)));
+            }
+            heat[cy * cols + cx] = sum;
+            if (sum > most) most = sum;
+        }
+    }
+
+    g.globalAlpha = state.opacity;
+    for (let cy = 0; cy < rows; cy += 1) {
+        for (let cx = 0; cx < cols; cx += 1) {
+            const colour = hmColour(heat[cy * cols + cx] / (most || 1), state.steps);
+            if (!colour) continue;
+            g.fillStyle = colour;
+            g.fillRect(cx * cell, cy * cell, cell, cell);
+        }
+    }
+    g.globalAlpha = 1;
+
+    /* THE NUMBER CARRIES THE COLOUR TOO. The game's own markers stay where they
+     * are; this adds what it counted beside each station, in the shade that
+     * count earns — so the figure is readable whether or not the wash is. */
+    g.font = 'bold 13px "Helvetica Neue", Helvetica, Arial';
+    g.textAlign = 'center';
+    g.lineWidth = 3;
+    g.strokeStyle = 'rgba(0,0,0,.85)';
+    for (const s of shown) {
+        const t = most ? s.n / most : 0;
+        const colour = hmColour(Math.max(0.001, t), state.steps) || state.steps[0];
+        g.strokeText(String(s.n), s.at.x, s.at.y - 12);
+        g.fillStyle = colour;
+        g.fillText(String(s.n), s.at.x, s.at.y - 12);
+    }
+}
+
+/** What to draw, worked out from the settings the panel writes. */
+function hmState(buildings, vehicles, cfg) {
+    const { placed } = hmStations(buildings, vehicles);
+    const types = [...new Set(placed.flatMap((s) => [...s.byType.keys()]))];
+    const on = new Set(Array.isArray(cfg.types) && cfg.types.length ? cfg.types : types);
+    const areas = Array.isArray(cfg.centres) && cfg.centres.length ? new Set(cfg.centres) : null;
+    const stations = placed
+        .filter((s) => !areas || areas.has(s.centre))
+        .map((s) => ({
+            lat: s.lat,
+            lon: s.lon,
+            n: [...on].reduce((n, t) => n + (s.byType.get(t) || 0), 0),
+        }))
+        .filter((s) => s.n > 0);
+    return {
+        stations,
+        radius: Number(cfg.radius) || 8,
+        opacity: Number.isFinite(Number(cfg.opacity)) ? Number(cfg.opacity) : 0.45,
+        /* ON THE MAP THE DEFAULT IS THE ONE THAT WAS ASKED FOR. The measurement
+         * that made one hue the default in the panel has not changed — red and
+         * green are ΔE 4.1 apart under deuteranopia — and it is answered here by
+         * the count being written beside every station in the same shade, which
+         * is the secondary encoding that measurement asks for. */
+        steps: (HM_SCALES[cfg.mapScale] || HM_SCALES.warm).steps,
+    };
+}
+
+YMCA.inject('heatmap', (ctx) => {
+    /* The map page and nowhere else: a mission window is a frame with no map in
+     * it, and a building page has none either. */
+    if (window.top !== window.self) return true;
+    const corner = document.querySelector('#map .leaflet-top.leaflet-left');
+    if (!corner) return;
+    if (document.getElementById(HM_BTN_ID)) return true;
+
+    /* The game's own kind of control, beside the one it made itself. */
+    const bar = document.createElement('div');
+    bar.id = HM_BTN_ID;
+    bar.className = 'leaflet-bar leaflet-control leaflet-control-custom';
+    bar.style.cssText = 'background-color:#fff;width:30px;height:30px;cursor:pointer';
+    bar.title = 'Cover for the vehicles you ticked in HeatSeeker';
+    bar.innerHTML = `<svg viewBox="0 0 30 30" width="30" height="30" fill="none"
+    stroke="#333" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+    aria-hidden="true"><path d="M5 23 L11 9 L16 18 L20 13 L25 23 Z"/></svg>`;
+    corner.append(bar);
+
+    const paint = async () => {
+        const cfg = ctx.store.read('cfg', {});
+        const [buildings, vehicles] = await Promise.all([
+            ctx.game('/api/buildings'), ctx.game('/api/vehicles'),
+        ]);
+        const state = hmState(buildings, vehicles, cfg);
+        const tick = () => {
+            hmPaint(state);
+            hmFrame = requestAnimationFrame(tick);
+        };
+        if (hmFrame) cancelAnimationFrame(hmFrame);
+        tick();
+    };
+
+    bar.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const on = !document.getElementById(HM_CANVAS_ID);
+        bar.style.backgroundColor = on ? '#8ab4f8' : '#fff';
+        if (!on) { hmClear(); ctx.status('Cover overlay off.'); return; }
+        paint().catch((err) => {
+            hmClear();
+            bar.style.backgroundColor = '#fff';
+            ctx.log.warn('heat overlay', err.message);
+        });
+    });
+
+    return true;
 });

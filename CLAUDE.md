@@ -983,14 +983,41 @@ else colour is chrome and belongs to the shell's role classes.
 
 **How far a vehicle counts for is the player's**, because no page states it.
 
-**It draws its own map rather than the game's, deliberately.** Overlaying the
-game's Leaflet means reaching for a global nobody here has seen, and a wrong
-guess there is a dead overlay rather than an honest one. So **Diagnostics →
-Whether the map can be drawn on** asks the page instead: is Leaflet present and
-which of its pieces, does any global answer as a map, and what element a map is
-drawn into — **names and shapes only**, never a coordinate and never a building.
-A global whose name could not plausibly be the game's is not listed either,
-because other userscripts put their own things on `window` too.
+**THE TILES ARE THE PROJECTION, so the overlay needs no global and no Leaflet
+call.** A loaded tile is
+`https://maps.missionchief.com/tile/13/2410/3080.png` — zoom, column, row — and
+in Web Mercator the tile at (x, y, z) is exactly the world-pixel square from
+(x·256, y·256). So **one tile's `getBoundingClientRect` fixes the whole page**:
+where world pixel zero sits on screen and how big a world pixel is. Every
+station's own latitude and longitude goes through the same formula the tile
+cutter used and lands where the game would have put it.
+
+That is what lets the heat sit on the game's real map without `window.map`,
+without `L`, and without anything this repo has never seen. Nothing here knows a
+name the game could rename. **Diagnostics → Whether the map can be drawn on**
+stays as the question it answered — names and shapes only, never a coordinate
+and never a building — but it is no longer what the overlay depends on.
+
+**The button is the game's own kind of control.** `.leaflet-top.leaflet-left`
+already holds a `.leaflet-bar.leaflet-control.leaflet-control-custom` the game
+made for itself, so ours is one of those, beside it. The canvas goes into `#map`
+with `pointer-events: none`: **the map has to keep working exactly as it did**,
+and an overlay that swallowed a click on a station would be worse than no
+overlay.
+
+**It is redrawn every frame while it is on, and taken away entirely when it is
+off.** The map moves under it and announces nothing — pan and zoom rewrite a
+transform the game owns — so watching for a move means watching that transform.
+A frame is a few dozen stations over a coarse grid, which is cheaper than being
+clever. A zoom animation has two zoom levels on screen at once and every rect
+mid-flight, so **that frame is skipped rather than drawn at the wrong size**.
+
+**On the map the default is red to green, which the panel's is not, and both are
+deliberate.** The measurement has not changed — `#0ca30c` against `#d03b3b` is
+ΔE 4.1 under deuteranopia where 6 is the floor — and what answers it is the
+**count written beside every station in the same shade**, which is the secondary
+encoding that measurement asks for. The player asked for red to green on the map
+having been told the number; that is their call and it is theirs to make.
 
 **A station answering to no dispatch centre is still a station.** Without an
 entry of its own in the centre list it vanished the moment the list was filtered

@@ -29,6 +29,16 @@ await pg.setContent(`<html><head><style>
     <ul class="nav navbar-nav"><li><a href="#">Buildings</a></li></ul>
   </div></nav><p>game</p>
   <div class="credits_user_total">500.000</div>
+  <div id="map" class="leaflet-container" style="position:relative;width:600px;height:400px">
+    <div class="leaflet-pane leaflet-map-pane"><div class="leaflet-pane leaflet-tile-pane">
+      <div class="leaflet-tile-container">
+        <img class="leaflet-tile leaflet-tile-loaded" src="/tile/13/2410/3080.png"
+          style="position:absolute;left:100px;top:50px;width:256px;height:256px">
+      </div></div></div>
+    <div class="leaflet-control-container"><div class="leaflet-top leaflet-left">
+      <div class="leaflet-bar leaflet-control leaflet-control-custom map-expand-button"></div>
+    </div></div>
+  </div>
   <div id="mission_list">
     <div id="mission_4711" mission_id="4711" mission_type_id="3" class="missionSideBarEntry">
       <div id="mission_caption_4711"></div><div id="mission_overview_countdown_4711"></div>
@@ -1962,6 +1972,69 @@ await pg.waitForFunction(() => /Nothing ticked/.test(
 console.log('heat empty        : it says so rather than drawing a map of nothing');
 await pg.click('[data-all="types"]');
 await pg.waitForFunction(() => /station/.test(document.querySelector('#hm-legend')?.textContent || ''));
+
+// ---- and the same cover on the game's own map ----
+// THE TILES ARE THE PROJECTION. A loaded tile is /tile/{z}/{x}/{y}.png, and in Web Mercator the
+// tile at (x,y,z) is exactly the world-pixel square from (x·256, y·256). One tile's rect fixes
+// where world pixel zero is and how big a world pixel is, so no Leaflet call and no global is
+// needed — which is why this works without anybody having seen the game's own map object.
+// The lightbox covers the page, so it steps back out the way a player would before touching
+// the map at all — Escape returns to the tiles, Escape again closes the window.
+await pg.keyboard.press('Escape');
+await pg.keyboard.press('Escape');
+await pg.waitForFunction(() => !document.getElementById('ymca-window'));
+await pg.waitForSelector('#ymca-heat-btn', { timeout: 20000 });
+const ctrl = await pg.$eval('#ymca-heat-btn', (b) => ({
+  className: b.className,
+  beside: b.previousElementSibling?.className || null,
+}));
+console.log('map control       :', JSON.stringify(ctrl));
+assert.match(ctrl.className, /leaflet-bar leaflet-control/,
+  'the button is the game\'s own kind of control, in the map');
+assert.match(ctrl.beside || '', /map-expand-button/,
+  'and it sits beside the one the game made itself');
+// Off until pressed; pressing paints over the map without taking clicks from it.
+assert.equal(await pg.locator('#ymca-heat-canvas').count(), 0, 'nothing is drawn until asked');
+await pg.click('#ymca-heat-btn');
+await pg.waitForSelector('#ymca-heat-canvas');
+await pg.waitForFunction(() => {
+  const c = document.getElementById('ymca-heat-canvas');
+  if (!c || !c.width) return false;
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  for (let i = 3; i < d.length; i += 4 * 211) if (d[i] > 0) return true;
+  return false;
+}, null, { timeout: 15000 });
+const over = await pg.$eval('#ymca-heat-canvas', (c) => ({
+  events: getComputedStyle(c).pointerEvents,
+  w: c.width > 0,
+}));
+console.log('map overlay       :', JSON.stringify(over));
+assert.equal(over.events, 'none', 'the map has to keep working: the overlay never takes a click');
+// The projection put the stations where the tile says they belong, not at a guess.
+const heatWhere = await pg.evaluate(() => {
+  const n = 256 * (2 ** 13);
+  const rad = (40.7169 * Math.PI) / 180;
+  const x = ((-74.0019 + 180) / 360) * n;
+  const y = ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n;
+  const tile = document.querySelector('#map img.leaflet-tile').getBoundingClientRect();
+  const map = document.getElementById('map').getBoundingClientRect();
+  return {
+    x: Math.round(tile.left - 2410 * 256 + x - map.left),
+    y: Math.round(tile.top - 3080 * 256 + y - map.top),
+  };
+});
+console.log('station lands at  :', JSON.stringify(heatWhere), '(from the tile, not from a global)');
+assert.ok(Number.isFinite(heatWhere.x) && Number.isFinite(heatWhere.y),
+  'a tile alone fixes where a latitude and longitude lands on screen');
+// Pressing again takes it away entirely.
+await pg.click('#ymca-heat-btn');
+await pg.waitForTimeout(200);
+assert.equal(await pg.locator('#ymca-heat-canvas').count(), 0, 'off means gone, not hidden');
+// Back into the window and into a tool, which is where the map block stepped out from.
+await pg.click('#ymca-nav');
+await pg.waitForSelector('#ymca-window');
+await pg.click('.ymca-tile[data-mod="heatmap"]');
+await pg.waitForSelector('#hm-canvas');
 
 // ---- SimpleAAO: the dispatch orders you would have built by hand ----
 // The editor's capability fields are <input type="number">, so an order is a COUNT per class.
