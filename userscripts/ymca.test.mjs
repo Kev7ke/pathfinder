@@ -24,6 +24,12 @@ await pg.goto('http://localhost:8777/README.md');
 await pg.setContent(`<html><head><style>
     .btn-default:hover{background-color:#e6e6e6}
     .navbar-nav>.active>a{background-color:#003a78}
+    /* Leaflet's own control rules. Markup that borrows the game's look has to be tested
+       against something that supplies it, or a control sitting under the tiles passes. */
+    .leaflet-control-container{position:absolute;inset:0;pointer-events:none}
+    .leaflet-top{position:absolute;top:0;z-index:1000;pointer-events:none}
+    .leaflet-left{left:0}
+    .leaflet-control{position:relative;float:left;clear:both;margin:10px;pointer-events:auto}
   </style></head><body>
   <nav class="navbar navbar-fixed-top"><div id="navbar-main-collapse">
     <ul class="nav navbar-nav"><li><a href="#">Buildings</a></li></ul>
@@ -2003,11 +2009,13 @@ await pg.click('#ymca-back');
 await pg.click('.ymca-tile[data-mod="heatmap"]');
 await pg.waitForSelector('#hm-canvas');
 await pg.waitForFunction(() => /station/.test(document.querySelector('#hm-legend')?.textContent || ''));
-const hmTypes = await pg.$$eval('[data-type]', (b) => b.map((x) => x.dataset.type));
+// Scoped to HeatSeeker's own list: a bare [data-type] catches whatever else the page is
+// carrying, and then the assertion is about something other than what it names.
+const hmTypes = await pg.$$eval('.ymca-pick [data-type]', (b) => b.map((x) => x.dataset.type));
 console.log('heat types        :', JSON.stringify(hmTypes));
 assert.ok(hmTypes.includes('13') && hmTypes.includes('10'),
   'every type the fleet holds is offered, by the id the game uses');
-const hmCentres = await pg.$$eval('[data-centre]', (b) => b.map((x) => x.dataset.centre));
+const hmCentres = await pg.$$eval('.ymca-pick [data-centre]', (b) => b.map((x) => x.dataset.centre));
 console.log('heat centres      :', JSON.stringify(hmCentres));
 assert.deepEqual(hmCentres, ['90', ''],
   'the dispatch centres, plus one for the stations answering to none \u2014 without it a station '
@@ -2027,6 +2035,34 @@ const painted = await pg.evaluate(() => {
 });
 console.log('heat painted      :', painted, 'sampled pixels carry ink');
 assert.ok(painted > 20, 'the heat is actually drawn rather than an empty canvas');
+// A HEATMAP IS A SUM OF RADIAL KERNELS, NOT A CIRCLE PER STATION, and a continuous ramp is what
+// keeps it from reading as bands nobody set. Counting the distinct colours on a row through the
+// middle is how "smooth" is checked rather than looked at: eight banded steps cannot make forty.
+const shades = await pg.evaluate(() => {
+  const c = document.getElementById('hm-canvas');
+  const g = c.getContext('2d');
+  const d = g.getImageData(0, Math.floor(c.height / 2), c.width, 1).data;
+  const seen = new Set();
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 8) seen.add(`${d[i]},${d[i + 1]},${d[i + 2]}`);
+  return seen.size;
+});
+console.log('heat shades       :', shades, 'distinct colours across the middle');
+assert.ok(shades > 20,
+  'the ramp is continuous, not the handful of bands a stepped palette would draw');
+// The badge is a white disc with a ring in the shade that count earned, so the figure reads over
+// whatever is under it. Checked as a measurement: white at the centre of a station.
+const badge = await pg.evaluate(() => {
+  const c = document.getElementById('hm-canvas');
+  const g = c.getContext('2d');
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  let white = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] > 248 && d[i + 1] > 248 && d[i + 2] > 248 && d[i + 3] > 240) white += 1;
+  }
+  return white;
+});
+console.log('heat badges       :', badge, 'white pixels, the discs under the figures');
+assert.ok(badge > 100, 'each station carries a white badge so its count reads over the wash');
 // Ticking nothing must say so rather than drawing a map of nothing.
 await pg.click('[data-none="types"]');
 await pg.waitForFunction(() => /Nothing ticked/.test(
@@ -2088,10 +2124,47 @@ const heatWhere = await pg.evaluate(() => {
 console.log('station lands at  :', JSON.stringify(heatWhere), '(from the tile, not from a global)');
 assert.ok(Number.isFinite(heatWhere.x) && Number.isFinite(heatWhere.y),
   'a tile alone fixes where a latitude and longitude lands on screen');
-// Pressing again takes it away entirely.
+// ---- and the tick boxes came up with it, on the map ----
+// Choosing which vehicles to look at from inside a lightbox, two clicks away from the map the
+// answer is drawn on, is the same fault as a tool you have to open a window to reach.
+const panel = await pg.$eval('#ymca-heat-panel', (b) => ({
+  className: b.className,
+  events: getComputedStyle(b).pointerEvents,
+  types: [...b.querySelectorAll('[data-type]')].map((x) => x.dataset.type),
+  centres: [...b.querySelectorAll('[data-centre]')].map((x) => x.dataset.centre),
+  selects: [...b.querySelectorAll('select')].map((x) => Object.keys(x.dataset)[0]),
+}));
+console.log('map tick boxes    :', JSON.stringify(panel));
+assert.match(panel.className, /leaflet-bar/,
+  'it borrows the game\'s own control styling rather than inventing a look');
+assert.equal(panel.events, 'auto', 'and unlike the canvas it does take a click, or it is inert');
+assert.ok(panel.types.includes('13') && panel.types.includes('10'),
+  'every type the fleet holds is offered on the map too');
+assert.deepEqual(panel.centres, ['90', ''], 'and the dispatch centres, none-of-them included');
+assert.deepEqual(panel.selects, ['radius', 'focus', 'opacity', 'mapscale'],
+  'with the reach, the focus, the strength and the scale beside them');
+// A tick on the map is the same setting the window writes, and it redraws there and then.
+await pg.click('#ymca-heat-panel [data-none="types"]');
+await pg.waitForTimeout(400);
+const afterNone = await pg.evaluate(() =>
+  JSON.parse(localStorage.getItem('ymca-heatmap-cfg') || '{}').types);
+console.log('map tick writes   :', JSON.stringify(afterNone));
+assert.deepEqual(afterNone, [], 'the map\'s tick boxes write the same settings the window reads');
+await pg.click('#ymca-heat-panel [data-all="types"]');
+await pg.waitForTimeout(400);
+// CLOSING THE LISTS IS NOT SWITCHING THE COVER OFF: somebody who has finished choosing still
+// wants to see what they chose.
+await pg.click('#ymca-heat-panel [data-close]');
+await pg.waitForTimeout(200);
+assert.equal(await pg.locator('#ymca-heat-panel').count(), 0, 'the \u00d7 closes the lists');
+assert.equal(await pg.locator('#ymca-heat-canvas').count(), 1,
+  'and leaves the cover on, because closing the lists is not switching it off');
+
+// Pressing again takes it away entirely — the lists with it.
 await pg.click('#ymca-heat-btn');
 await pg.waitForTimeout(200);
 assert.equal(await pg.locator('#ymca-heat-canvas').count(), 0, 'off means gone, not hidden');
+assert.equal(await pg.locator('#ymca-heat-panel').count(), 0, 'and the lists go with the mode');
 // Back into the window and into a tool, which is where the map block stepped out from.
 await pg.click('#ymca-nav');
 await pg.waitForSelector('#ymca-window');

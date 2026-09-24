@@ -985,7 +985,36 @@ carries `latitude` and `longitude` per station beside `leitstelle_building_id`,
 and `/api/vehicles` carries `building_id` and `vehicle_type`. That is vehicles
 per station per type and where each station is — everything a coverage map
 needs, with **nothing captured for it**. HeatSeeker shades each spot by how many
-of the ticked vehicles reach it, on a plain bell that falls off with distance.
+of the ticked vehicles reach it.
+
+**A heatmap is a sum of radial kernels, not a circle per station.** The first
+version drew a coarse grid in banded colours and read as a blob that grows and
+runs into the next blob — which is a picture of where the stations are, not of
+how much cover there is. What is drawn now is the textbook thing: one radial
+fall-off per station, **added together** into a mask, and the mask coloured
+through a continuous ramp. `globalCompositeOperation = 'lighter'` is what makes
+it a sum rather than a pile of discs, and what accumulates under it is the
+**alpha** channel, not the red — so the colouring pass reads that.
+
+Three things follow and all three are the point. **The sum is the reading**:
+two stations near each other are hotter than either alone, which is what "how
+much cover is here" means. **The kernel is compactly supported** —
+`(1 − t²)^focus` — so the wash stops at the distance the player set instead of
+trailing off for ever, and raising the exponent hugs the stations more tightly,
+which is why it is a setting beside the reach rather than a constant. **The
+colour is continuous**, sampled at 256 steps from the browser's own gradient
+interpolation, so there are no bands to mistake for thresholds nobody set.
+
+**The mask is drawn at a third of the size and blown back up**, and that is not
+a corner cut: scaling up with smoothing *is* a bilinear filter, which is exactly
+the smoothing this wants, done by the browser for nothing — and it takes the
+per-pixel colouring loop from a million iterations a frame to a hundred
+thousand.
+
+**The normalisation is the map's, not the screen's.** Dividing by the hottest
+cell on screen meant the colours changed as the map was panned — the same
+station dark green alone and orange beside a bigger one. The peak is taken over
+every station in play, in kilometres, so it does not move when the view does.
 
 **The scale is this map's own and says so on the panel.** No page of the game
 states what "good cover" is, so the deepest shade is wherever *this* player's
@@ -1002,7 +1031,44 @@ way, so the colour is never the only thing saying it. This is the one place a
 module encodes with colour at all: the shade *is* the reading, where everywhere
 else colour is chrome and belongs to the shell's role classes.
 
-**How far a vehicle counts for is the player's**, because no page states it.
+**How far a vehicle counts for is the player's**, because no page states it. So
+is how tightly the wash hugs the station, which is the same question from the
+other end.
+
+**A red-to-green ramp that stops at green cannot say "covered twice over".**
+Five steps left well-covered and over-covered the same colour, and the
+difference between those two is exactly what somebody looking at their own map
+wants to see — so the warm ramp runs on past green into a deeper one.
+
+**The count is a badge, not a stroked figure.** An outline in black kept the
+number legible and made it ugly, and on a busy tile it was still hard work. It
+is a white disc with a ring in the shade that count earned and the figure in the
+same shade **darkened until it clears 4.5:1 against the white** — measured, the
+way ΔE was, so the ramp's own yellow is never a number nobody can read. The
+colour is still the reading; the badge is only what makes it legible over a map
+already full of things.
+
+**The tick boxes belong on the map.** Choosing which vehicles to look at from
+inside a lightbox, two clicks from where the answer is drawn, is the same fault
+as a tool you have to open a window to reach. The button turns the mode on and
+the lists come up beside it, in `.leaflet-bar` — the game's own control styling,
+for the same reason the button borrows it. **Closing the lists is not switching
+the cover off**: somebody who has finished choosing still wants to see what they
+chose, so the × takes only the lists and the button takes both.
+
+**Every pointer event stops at the panel's edge.** Leaflet reads pointer and
+wheel events off the map container, so without that a tick dragged the map
+underneath it. And the browser test's fixture carries Leaflet's own control
+rules — `.leaflet-top` at `z-index: 1000`, `.leaflet-control` with
+`pointer-events: auto` — because markup borrowing the game's look has to be
+tested against something that supplies it, or a control sitting under the tiles
+passes. That is the `.caret` lesson again, on a different control.
+
+**A frame that would paint the same pixels is skipped.** The map announces
+nothing when it moves, so the projection is asked once a frame — but with a
+per-pixel colouring pass behind it, redrawing an idle map sixty times a second
+is real work for no picture. The projection, the size and the settings make a
+signature, and an unchanged one paints nothing.
 
 **THE TILES ARE THE PROJECTION, so the overlay needs no global and no Leaflet
 call.** A loaded tile is

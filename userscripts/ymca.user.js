@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.70
+// @version      0.0.71
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.70',
+    version: '0.0.71',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -5583,34 +5583,64 @@ YMCA.register({
  * with `leitstelle_building_id`; `/api/vehicles` carries `building_id` and
  * `vehicle_type`. Vehicles per station per type, and where each station is.
  *
- * IT IS NOT THE GAME'S MAP, and that is said on the panel. Overlaying the
- * game's own Leaflet map means reaching for a global nobody here has seen, and
- * a wrong guess there is a dead overlay rather than an honest one. So this
- * draws its own, out of the coordinates the game states, and Diagnostics asks
- * the map question separately.
- *
  * THE SCALE IS RELATIVE TO THIS MAP AND SAYS SO. There is no figure anywhere in
- * the game for what "good cover" is, so the darkest cell is the best-covered
+ * the game for what "good cover" is, so the deepest shade is the best-covered
  * spot *on this player's own map* rather than a standard. Inventing a threshold
  * would be a guess wearing a colour.
  *
- * WHY THE DEFAULT IS NOT RED-TO-GREEN, although that is what was asked for:
- * run over the documented status palette, `#0ca30c` against `#d03b3b` comes
- * back at **ΔE 4.1 under deuteranopia** — below the floor of 6, which is to say
- * the two ends of the scale are the one pair a colour-blind reader cannot tell
- * apart. Magnitude takes one hue, light to dark, so that is the default. Red to
- * green is still offered because it is what was pictured, and either way the
- * count is written on every station, so the colour is never the only encoding.
+ * WHY THE DEFAULT IN THE WINDOW IS NOT RED-TO-GREEN, although that is what was
+ * asked for: run over the documented status palette, `#0ca30c` against
+ * `#d03b3b` comes back at **ΔE 4.1 under deuteranopia** — below the floor of 6,
+ * which is to say the two ends of the scale are the one pair a colour-blind
+ * reader cannot tell apart. Magnitude takes one hue, light to dark, so that is
+ * the default there. Red to green is what the game's own map opens on, because
+ * it is what was pictured and because the count is written on every station —
+ * the second encoding that measurement asks for.
+ *
+ * A HEATMAP IS A SUM OF RADIAL KERNELS, NOT A CIRCLE PER STATION. The first
+ * version drew a coarse grid in banded colours, which reads as a blob that
+ * grows and runs into the next blob rather than as a quantity. What is drawn
+ * now is the textbook thing: one radial fall-off per station, ADDED together
+ * into a mask, and the mask coloured through a continuous ramp. Three things
+ * follow from doing it that way and all three are the point —
+ *
+ *   - the sum is the reading. Two stations near each other are hotter than
+ *     either alone, which is what "how much cover is here" means;
+ *   - the kernel is compactly supported, `(1 - t²)^focus`, so the wash STOPS at
+ *     the distance the player set instead of trailing off for ever. Raising the
+ *     exponent hugs the stations more tightly, and that is a setting;
+ *   - the colour is continuous, sampled from the browser's own gradient
+ *     interpolation at 256 steps, so there are no bands to mistake for
+ *     thresholds nobody set.
+ *
+ * AND THE NORMALISATION IS THE MAP'S, NOT THE SCREEN'S. Dividing by the hottest
+ * cell on screen meant the colours changed as you panned — the same station
+ * dark green alone and orange beside a bigger one. The peak is taken over every
+ * station in play, in kilometres, so it does not move when the view does.
  * -------------------------------------------------------------------------- */
 
 /** The documented sequential ramp: one hue, light to dark, for magnitude. */
-const HM_BLUE = ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf', '#184f95', '#0d366b'];
-/** The status palette's own three steps, for the red-to-green that was asked for. */
-const HM_WARM = ['#d03b3b', '#ec835a', '#fab219', '#8fbf1a', '#0ca30c'];
+const HM_BLUE = ['#e7f1fd', '#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf', '#184f95', '#0d366b'];
+/* The status palette's own steps, for the red-to-green that was asked for —
+ * with a deeper green past the top of it. Five steps left "well covered" and
+ * "covered twice over" the same colour, and the difference between those two is
+ * exactly what somebody looking at their own map wants to see. */
+const HM_WARM = ['#d03b3b', '#e8714a', '#f5a623', '#d6c916', '#8fbf1a', '#0ca30c', '#0a7a33', '#07532c'];
 
 const HM_SCALES = {
     blue: { label: 'One hue, light to dark', steps: HM_BLUE },
     warm: { label: 'Red to green', steps: HM_WARM },
+};
+
+/* How tightly the wash hugs the station. The exponent on `(1 - t²)`: 1 is a
+ * soft dome that fills the whole reach, 7 is a tight core with a thin skirt.
+ * It is a setting because how far a vehicle counts for is already the player's
+ * and this is the other half of the same question. */
+const HM_FOCUS = {
+    soft: { label: 'Soft, fills the whole reach', p: 1.5 },
+    balanced: { label: 'Balanced', p: 2.5 },
+    tight: { label: 'Tight around the station', p: 4 },
+    tighter: { label: 'Tightest', p: 7 },
 };
 
 /** Kilometres between two points on the globe, near enough for a city. */
@@ -5624,11 +5654,195 @@ function hmKm(aLat, aLon, bLat, bLon) {
     return Math.sqrt(dLat * dLat + x * x) * R;
 }
 
-/** A colour off a ramp, by where the value sits between nothing and the most. */
-function hmColour(t, steps) {
-    if (!(t > 0)) return null;
-    const at = Math.min(steps.length - 1, Math.floor(t * steps.length));
-    return steps[at];
+/* ------------------------------------------------------------ the gradient */
+
+/**
+ * The ramp as 256 samples, interpolated by the browser rather than by us.
+ *
+ * A list of seven colours drawn as seven bands reads as seven thresholds, and
+ * there are no thresholds here. Painting the list into a one-pixel-tall canvas
+ * gradient and reading it back gives a continuous ramp for nothing, and it is
+ * the same interpolation CSS would do with the same stops.
+ */
+const hmRamps = new Map();
+function hmRamp(steps) {
+    const key = steps.join(',');
+    if (hmRamps.has(key)) return hmRamps.get(key);
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 1;
+    const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 256, 0);
+    steps.forEach((s, i) => grad.addColorStop(steps.length === 1 ? 0 : i / (steps.length - 1), s));
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 256, 1);
+    const lut = g.getImageData(0, 0, 256, 1).data;
+    hmRamps.set(key, lut);
+    return lut;
+}
+
+/** The ramp's colour at t, as the three channels. */
+function hmAt(lut, t) {
+    const i = Math.max(0, Math.min(255, Math.round((t > 0 ? t : 0) * 255))) * 4;
+    return [lut[i], lut[i + 1], lut[i + 2]];
+}
+
+function hmRgb(c) { return `rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`; }
+
+/** WCAG relative luminance, so "readable" is a measurement and not a feeling. */
+function hmLum(r, g, b) {
+    const f = (c) => {
+        const v = c / 255;
+        return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+
+/**
+ * The same colour, darkened until it reads on white.
+ *
+ * The badge is white so the figure is legible over any tile, which means the
+ * ramp's own yellow would be a number nobody can read. Darkening in steps until
+ * the contrast ratio clears 4.5:1 keeps the shade that count earned while
+ * making it legible, rather than swapping in a colour of YMCA's own.
+ */
+function hmInk(c) {
+    let [r, g, b] = c;
+    for (let i = 0; i < 14; i += 1) {
+        if (1.05 / (hmLum(r, g, b) + 0.05) >= 4.5) break;
+        r *= 0.82; g *= 0.82; b *= 0.82;
+    }
+    return hmRgb([r, g, b]);
+}
+
+/* -------------------------------------------------------------- the drawing */
+
+/** Canvases reused between frames, because allocating one per frame is not free. */
+const hmScratches = new Map();
+function hmScratch(key, w, h) {
+    let c = hmScratches.get(key);
+    if (!c) { c = document.createElement('canvas'); hmScratches.set(key, c); }
+    if (c.width !== w) c.width = w;
+    if (c.height !== h) c.height = h;
+    return c;
+}
+
+/**
+ * The hottest a point on this map can be, in the map's own units.
+ *
+ * Taken at the stations, because the sum of kernels peaks where the kernels are
+ * centred. In kilometres, so it is the same number at every zoom and the
+ * colours do not change under a pan — which is the fault it was written to fix.
+ */
+function hmPeak(stations, radius, focus) {
+    let peak = 0;
+    for (const a of stations) {
+        let sum = 0;
+        for (const b of stations) {
+            const t = hmKm(a.lat, a.lon, b.lat, b.lon) / radius;
+            if (t < 1) sum += b.n * ((1 - t * t) ** focus);
+        }
+        if (sum > peak) peak = sum;
+    }
+    return peak || 1;
+}
+
+/**
+ * Paint the heat itself: one radial fall-off per station, added up.
+ *
+ * `globalCompositeOperation = 'lighter'` is what makes it a sum rather than a
+ * pile of discs — it adds the source into the destination, so where two
+ * stations' reach overlaps the mask carries both. What accumulates is the
+ * ALPHA channel, which is why the colouring pass reads that and not the red.
+ *
+ * The mask is drawn at a third of the size and blown back up. That is not a
+ * corner cut: scaling up with smoothing is a bilinear filter, which is exactly
+ * the smoothing this wants, done by the browser at no cost — and it takes the
+ * per-pixel colouring loop from a million iterations a frame to a hundred
+ * thousand.
+ */
+function hmHeat(g, w, h, pts, opts) {
+    const { peak, steps, opacity, rPx, focus } = opts;
+    if (!pts.length || !(rPx > 0) || !(w > 0) || !(h > 0)) return;
+
+    const s = 1 / 3;
+    const mw = Math.max(1, Math.ceil(w * s));
+    const mh = Math.max(1, Math.ceil(h * s));
+    const mask = hmScratch('mask', mw, mh);
+    const mg = mask.getContext('2d', { willReadFrequently: true });
+    mg.setTransform(1, 0, 0, 1, 0, 0);
+    mg.clearRect(0, 0, mw, mh);
+    mg.globalCompositeOperation = 'lighter';
+
+    const rr = rPx * s;
+    /* The kernel as gradient stops. Twelve is enough that the browser's own
+     * interpolation between them is invisible, and the last one is a real zero
+     * so the reach ends where the player said it does. */
+    for (const p of pts) {
+        const x = p.x * s;
+        const y = p.y * s;
+        if (x < -rr || y < -rr || x > mw + rr || y > mh + rr) continue;
+        const grad = mg.createRadialGradient(x, y, 0, x, y, rr);
+        for (let i = 0; i <= 12; i += 1) {
+            const t = i / 12;
+            grad.addColorStop(t, `rgba(255,255,255,${((1 - t * t) ** focus).toFixed(4)})`);
+        }
+        mg.globalAlpha = Math.min(1, p.n / peak);
+        mg.fillStyle = grad;
+        mg.beginPath();
+        mg.arc(x, y, rr, 0, Math.PI * 2);
+        mg.fill();
+    }
+    mg.globalCompositeOperation = 'source-over';
+    mg.globalAlpha = 1;
+
+    const img = mg.getImageData(0, 0, mw, mh);
+    const d = img.data;
+    const lut = hmRamp(steps);
+    for (let i = 0; i < d.length; i += 4) {
+        const v = d[i + 3];
+        if (!v) { d[i] = 0; d[i + 1] = 0; d[i + 2] = 0; continue; }
+        const j = v * 4;
+        d[i] = lut[j];
+        d[i + 1] = lut[j + 1];
+        d[i + 2] = lut[j + 2];
+        /* Fades in over the coldest sliver, so the far edge of the reach is a
+         * fade rather than a line drawn round every station. */
+        d[i + 3] = Math.round(255 * opacity * Math.min(1, v / 30));
+    }
+    mg.putImageData(img, 0, 0);
+
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(mask, 0, 0, mw, mh, 0, 0, w, h);
+}
+
+/**
+ * The station and what it counted, in a badge that reads over any tile.
+ *
+ * White fill, a ring in the shade that count earned, and the figure in the same
+ * shade darkened until it clears 4.5:1 against the white. The colour is still
+ * the reading; the badge is only what makes it legible over a map that is
+ * already full of things.
+ */
+function hmBadges(g, pts, lut, peak) {
+    g.font = 'bold 12px "Helvetica Neue", Helvetica, Arial';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    for (const p of pts) {
+        const colour = hmAt(lut, Math.min(1, p.n / peak));
+        const label = String(p.n);
+        const r = Math.max(9, g.measureText(label).width / 2 + 6);
+        g.beginPath();
+        g.arc(p.x, p.y, r, 0, Math.PI * 2);
+        g.fillStyle = '#fff';
+        g.fill();
+        g.lineWidth = 2.5;
+        g.strokeStyle = hmRgb(colour);
+        g.stroke();
+        g.fillStyle = hmInk(colour);
+        g.fillText(label, p.x, p.y);
+    }
 }
 
 /**
@@ -5668,6 +5882,48 @@ function hmStations(buildings, vehicles) {
     return { placed, noPlace };
 }
 
+/**
+ * The lists to tick: the types this fleet holds and the centres they answer to.
+ *
+ * Worked out in one place because there are two pages of tick boxes now — the
+ * window's and the one on the game's own map — and two copies of this would
+ * drift the first time a type was named.
+ */
+function hmChoices(buildings, vehicles) {
+    const { placed, noPlace } = hmStations(buildings, vehicles);
+    /* The names come from the store every module writes to, so a type named
+     * once is named here too. A type nothing has named is still offered — by
+     * its id, which is what the game calls it. */
+    let names = {};
+    try { names = JSON.parse(localStorage.getItem('ymca-vehicle-types')) || {}; } catch (e) { /* none */ }
+    const nameOf = (id) => (names[id] && (names[id].name || names[id])) || `Type ${id}`;
+    const types = [...new Set(placed.flatMap((s) => [...s.byType.keys()]))]
+        .sort((a, b) => String(nameOf(a)).localeCompare(String(nameOf(b))));
+    const centres = (buildings || [])
+        .filter((b) => (buildings || []).some((x) => String(x.leitstelle_building_id) === String(b.id)))
+        .map((b) => ({ id: String(b.id), name: b.caption || `Center ${b.id}` }));
+    /* A STATION ANSWERING TO NO CENTRE IS STILL A STATION. Without an entry of
+     * its own it vanished the moment the list was filtered at all, which reads
+     * as cover that is not there — the one thing this page must not get wrong.
+     * It is offered by the game's own words for it. */
+    if (centres.length && placed.some((s) => !s.centre)) {
+        centres.push({ id: '', name: '— not assigned —' });
+    }
+    const countOf = (t) => placed.reduce((n, s) => n + (s.byType.get(t) || 0), 0);
+    return { placed, noPlace, types, centres, nameOf, countOf };
+}
+
+/** The settings both faces read, with every default in one place. */
+function hmSettings(cfg) {
+    return {
+        radius: Number(cfg.radius) || 8,
+        focus: HM_FOCUS[cfg.focus] ? cfg.focus : 'tight',
+        scale: HM_SCALES[cfg.scale] ? cfg.scale : 'blue',
+        mapScale: HM_SCALES[cfg.mapScale] ? cfg.mapScale : 'warm',
+        opacity: Number.isFinite(Number(cfg.opacity)) ? Number(cfg.opacity) : 0.55,
+    };
+}
+
 YMCA.register({
     id: 'heatmap',
     optional: true,
@@ -5675,12 +5931,13 @@ YMCA.register({
     title: 'HeatSeeker',
     tagline: 'Where your cover is thin',
 
-    description: 'A map of your own stations shaded by how much of a chosen kind of vehicle '
+    description: 'A map of your own stations shaded by how many of a chosen kind of vehicle '
         + 'can reach each spot. Tick the types and the dispatch centres to see cover for all of '
-        + 'it or one branch at a time. The scale is relative to your own map, not a standard.',
+        + 'it or one branch at a time, in here or on the game’s own map. The scale is '
+        + 'relative to your own map, not a standard.',
 
     /* An injection cannot be un-run, so what it put in the game's page is taken
-     * back here: the control and the canvas both go. */
+     * back here: the control, the canvas and the tick boxes all go. */
     onSwitch(on) {
         if (on) return;
         hmClear();
@@ -5692,7 +5949,7 @@ YMCA.register({
         const [buildings, vehicles] = await Promise.all([
             ctx.game('/api/buildings'), ctx.game('/api/vehicles'),
         ]);
-        const { placed, noPlace } = hmStations(buildings, vehicles);
+        const { placed, noPlace, types, centres, nameOf, countOf } = hmChoices(buildings, vehicles);
         if (!placed.length) {
             el.innerHTML = `<div class="ymca-note">No station of yours carries both a vehicle and
         a position, so there is nothing to draw yet.${noPlace.length
@@ -5701,40 +5958,19 @@ YMCA.register({
             return;
         }
 
-        /* The names come from the store every module writes to, so a type named
-         * once is named here too. A type nothing has named is still offered —
-         * by its id, which is what the game calls it. */
-        let names = {};
-        try { names = JSON.parse(localStorage.getItem('ymca-vehicle-types')) || {}; } catch (e) { /* none */ }
-        const nameOf = (id) => (names[id] && (names[id].name || names[id])) || `Type ${id}`;
-
-        const types = [...new Set(placed.flatMap((s) => [...s.byType.keys()]))]
-            .sort((a, b) => String(nameOf(a)).localeCompare(String(nameOf(b))));
-        const centres = (buildings || [])
-            .filter((b) => (buildings || []).some((x) => String(x.leitstelle_building_id) === String(b.id)))
-            .map((b) => ({ id: String(b.id), name: b.caption || `Center ${b.id}` }));
-        /* A STATION ANSWERING TO NO CENTRE IS STILL A STATION. Without an entry
-         * of its own it vanished the moment the list was filtered at all, which
-         * reads as cover that is not there — the one thing this page must not
-         * get wrong. It is offered by the game's own words for it. */
-        if (centres.length && placed.some((s) => !s.centre)) {
-            centres.push({ id: '', name: '\u2014 not assigned \u2014' });
-        }
-
         const cfg = ctx.store.read('cfg', {});
+        const set = hmSettings(cfg);
         const on = new Set(Array.isArray(cfg.types) && cfg.types.length ? cfg.types : types);
         const centresOn = new Set(Array.isArray(cfg.centres) && cfg.centres.length
             ? cfg.centres : centres.map((c) => c.id));
-        const radius = Number(cfg.radius) || 8;
-        const scale = HM_SCALES[cfg.scale] ? cfg.scale : 'blue';
 
         el.innerHTML = `
       <div class="ymca-card">
         <b>${placed.length} station${placed.length === 1 ? '' : 's'} on the map</b>
         <p class="ymca-sub" style="margin:4px 0 10px">Every spot is shaded by how many of the
-          ticked vehicles are within reach of it, falling off with distance. <b>The scale is
-          this map's own</b> &mdash; the deepest shade is wherever your cover is thickest, not a
-          standard anybody set.</p>
+          ticked vehicles reach it, each station spreading its own count outwards and the
+          overlaps adding up. <b>The scale is this map's own</b> &mdash; the deepest shade is
+          wherever your cover is thickest, not a standard anybody set.</p>
         <canvas id="hm-canvas" style="width:100%;height:360px;border-radius:4px"></canvas>
         <div id="hm-legend" style="display:flex;align-items:center;gap:8px;margin-top:8px"></div>
       </div>
@@ -5750,8 +5986,7 @@ YMCA.register({
         </div>
         <div class="ymca-pick">${types.map((t) => `<label><input type="checkbox"
           data-type="${ctx.esc(t)}"${on.has(t) ? ' checked' : ''}> ${ctx.esc(String(nameOf(t)))}
-          <span class="ymca-dim">${placed.reduce((n, s) => n + (s.byType.get(t) || 0), 0)}</span>
-          </label>`).join('')}</div>
+          <span class="ymca-dim">${countOf(t)}</span></label>`).join('')}</div>
       </div>
 
       ${centres.length ? `
@@ -5771,36 +6006,39 @@ YMCA.register({
         <b>How it is drawn</b>
         <label style="display:block;margin-top:7px">How far a vehicle counts for
           <select data-radius style="margin-left:6px">
-            ${[2, 4, 6, 8, 12, 20, 35].map((n) => `<option value="${n}"${n === radius
+            ${[2, 4, 6, 8, 12, 20, 35].map((n) => `<option value="${n}"${n === set.radius
     ? ' selected' : ''}>${n} km</option>`).join('')}
+          </select></label>
+        <label style="display:block;margin-top:7px">How tightly it hugs the station
+          <select data-focus style="margin-left:6px">
+            ${Object.entries(HM_FOCUS).map(([k, f]) => `<option value="${k}"${k === set.focus
+    ? ' selected' : ''}>${f.label}</option>`).join('')}
           </select></label>
         <label style="display:block;margin-top:7px">Scale in here
           <select data-scale style="margin-left:6px">
-            ${Object.entries(HM_SCALES).map(([k, s]) => `<option value="${k}"${k === scale
+            ${Object.entries(HM_SCALES).map(([k, s]) => `<option value="${k}"${k === set.scale
     ? ' selected' : ''}>${s.label}</option>`).join('')}
           </select></label>
         <label style="display:block;margin-top:7px">Scale on the game's map
           <select data-mapscale style="margin-left:6px">
-            ${Object.entries(HM_SCALES).map(([k, s]) => `<option value="${k}"${
-    k === (HM_SCALES[cfg.mapScale] ? cfg.mapScale : 'warm')
-        ? ' selected' : ''}>${s.label}</option>`).join('')}
+            ${Object.entries(HM_SCALES).map(([k, s]) => `<option value="${k}"${k === set.mapScale
+    ? ' selected' : ''}>${s.label}</option>`).join('')}
           </select></label>
         <label style="display:block;margin-top:7px">How strong on the map
           <select data-opacity style="margin-left:6px">
-            ${[0.2, 0.3, 0.45, 0.6, 0.8].map((n) => `<option value="${n}"${
-    n === (Number.isFinite(Number(cfg.opacity)) ? Number(cfg.opacity) : 0.45)
-        ? ' selected' : ''}>${Math.round(n * 100)}%</option>`).join('')}
+            ${[0.25, 0.4, 0.55, 0.7, 0.85].map((n) => `<option value="${n}"${n === set.opacity
+    ? ' selected' : ''}>${Math.round(n * 100)}%</option>`).join('')}
           </select></label>
         <p class="ymca-sub" style="margin:8px 0 0">The button on the game's own map turns the
-          same cover on over the real thing, with these settings. There it opens on
-          <b>red to green</b>, because that is what it is for &mdash; and the count is written
-          beside every station in the same shade, which is what makes that scale readable at
-          all.</p>
+          same cover on over the real thing, and brings these tick boxes with it so the choosing
+          happens where the map is. There it opens on <b>red to green</b>, because that is what
+          it is for &mdash; and the count is written beside every station in the same shade,
+          which is what makes that scale readable at all.</p>
         <p class="ymca-dim" style="margin:8px 0 0;font-size:12px"><b>Red to green is the one pair
           a colour-blind reader cannot separate</b> &mdash; measured, not assumed: those two ends
           come back at &#916;E 4.1 under deuteranopia, where 6 is the floor. One hue from light
-          to dark says the same thing and says it to everybody, so that is what it opens on.
-          The distance is yours because no page of the game states what a vehicle covers.</p>
+          to dark says the same thing and says it to everybody, so that is what this one opens
+          on. The distance is yours because no page of the game states what a vehicle covers.</p>
         ${noPlace.length ? `<p class="ymca-warn" style="margin:8px 0 0;font-size:12px">
           ${noPlace.length} station${noPlace.length === 1 ? '' : 's'} with vehicles stated no
           position, so ${noPlace.length === 1 ? 'it is' : 'they are'} not on the map.</p>` : ''}
@@ -5814,8 +6052,9 @@ YMCA.register({
             const picked = [...el.querySelectorAll('[data-type]:checked')].map((b) => b.dataset.type);
             const areas = new Set([...el.querySelectorAll('[data-centre]:checked')]
                 .map((b) => b.dataset.centre));
-            const r = Number(el.querySelector('[data-radius]')?.value) || radius;
-            const steps = HM_SCALES[el.querySelector('[data-scale]')?.value || scale].steps;
+            const r = Number(el.querySelector('[data-radius]')?.value) || set.radius;
+            const steps = HM_SCALES[el.querySelector('[data-scale]')?.value || set.scale].steps;
+            const focus = (HM_FOCUS[el.querySelector('[data-focus]')?.value] || HM_FOCUS[set.focus]).p;
 
             const shown = placed
                 .filter((s) => !centres.length || areas.has(s.centre))
@@ -5825,8 +6064,8 @@ YMCA.register({
             const w = canvas.clientWidth || 600;
             const h = 360;
             const dpr = window.devicePixelRatio || 1;
-            canvas.width = w * dpr;
-            canvas.height = h * dpr;
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
             const g = canvas.getContext('2d');
             g.setTransform(dpr, 0, 0, dpr, 0, 0);
             g.clearRect(0, 0, w, h);
@@ -5857,78 +6096,32 @@ YMCA.register({
             const px = (lon) => offX + (lon - minLon) * Math.cos(midLat * Math.PI / 180) * k;
             const py = (lat) => offY + (maxLat - lat) * k;
 
-            /* A cell per 6 screen pixels: fine enough to read as a wash, coarse
-             * enough that a big map does not cost a second of drawing. */
-            const cell = 6;
-            const cols = Math.ceil(w / cell);
-            const rows = Math.ceil(h / cell);
-            const heat = new Float64Array(cols * rows);
-            let most = 0;
-            for (let cy = 0; cy < rows; cy += 1) {
-                for (let cx = 0; cx < cols; cx += 1) {
-                    const lon = minLon + ((cx + 0.5) * cell - offX)
-                        / (k * Math.cos(midLat * Math.PI / 180));
-                    const lat = maxLat - ((cy + 0.5) * cell - offY) / k;
-                    let sum = 0;
-                    for (const s of shown) {
-                        const d = hmKm(lat, lon, s.lat, s.lon);
-                        /* A plain bell: a vehicle counts fully at the station and
-                         * fades to nothing by about twice the distance set. */
-                        sum += s.n * Math.exp(-((d / r) ** 2));
-                    }
-                    heat[cy * cols + cx] = sum;
-                    if (sum > most) most = sum;
-                }
-            }
+            const pts = shown.map((s) => ({ x: px(s.lon), y: py(s.lat), n: s.n }));
+            const peak = hmPeak(shown, r, focus);
+            /* `k` is pixels per degree of latitude, and a degree of latitude is
+             * 111.32 km wherever you stand. */
+            hmHeat(g, w, h, pts, { peak, steps, opacity: 0.85, rPx: (r * k) / 111.32, focus });
+            hmBadges(g, pts, hmRamp(steps), peak);
 
-            g.globalAlpha = 0.55;
-            for (let cy = 0; cy < rows; cy += 1) {
-                for (let cx = 0; cx < cols; cx += 1) {
-                    const colour = hmColour(heat[cy * cols + cx] / (most || 1), steps);
-                    if (!colour) continue;
-                    g.fillStyle = colour;
-                    g.fillRect(cx * cell, cy * cell, cell, cell);
-                }
-            }
-            g.globalAlpha = 1;
-
-            /* The station and its count, on top, because a number is the one
-             * encoding nobody has to be able to see a colour to read. */
-            g.font = '11px "Helvetica Neue", Helvetica, Arial';
-            g.textAlign = 'center';
-            for (const s of shown) {
-                const x = px(s.lon);
-                const y = py(s.lat);
-                g.beginPath();
-                g.arc(x, y, 9, 0, Math.PI * 2);
-                g.fillStyle = 'rgba(0,0,0,.55)';
-                g.fill();
-                g.lineWidth = 2;
-                g.strokeStyle = '#fff';
-                g.stroke();
-                g.fillStyle = '#fff';
-                g.fillText(String(s.n), x, y + 4);
-            }
-
+            const total = shown.reduce((n, s) => n + s.n, 0);
             legend.innerHTML = `<span class="ymca-dim" style="font-size:12px">thin</span>
-        ${steps.map((c) => `<span style="width:22px;height:12px;border-radius:2px;
-          background:${c};display:inline-block"></span>`).join('')}
+        <span style="flex:0 0 140px;height:12px;border-radius:2px;display:inline-block;
+          background:linear-gradient(to right,${steps.join(',')})"></span>
         <span class="ymca-dim" style="font-size:12px">thickest here</span>
         <span class="ymca-dim" style="font-size:12px;margin-left:10px">&middot;
           ${shown.length} station${shown.length === 1 ? '' : 's'},
-          ${ctx.fmt(shown.reduce((n, s) => n + s.n, 0))} vehicle${
-    shown.reduce((n, s) => n + s.n, 0) === 1 ? '' : 's'}, within ${r} km</span>`;
+          ${ctx.fmt(total)} vehicle${total === 1 ? '' : 's'}, within ${r} km</span>`;
             ctx.status(`${shown.length} stations, ${r} km.`);
         };
 
         el.addEventListener('change', (e) => {
             if (e.target.dataset.radius !== undefined) save({ radius: Number(e.target.value) });
+            else if (e.target.dataset.focus !== undefined) save({ focus: e.target.value });
             else if (e.target.dataset.scale !== undefined) save({ scale: e.target.value });
             else if (e.target.dataset.mapscale !== undefined) save({ mapScale: e.target.value });
             else if (e.target.dataset.opacity !== undefined) {
                 save({ opacity: Number(e.target.value) });
-            }
-            else if (e.target.dataset.type !== undefined) {
+            } else if (e.target.dataset.type !== undefined) {
                 save({ types: [...el.querySelectorAll('[data-type]:checked')].map((b) => b.dataset.type) });
             } else if (e.target.dataset.centre !== undefined) {
                 save({ centres: [...el.querySelectorAll('[data-centre]:checked')].map((b) => b.dataset.centre) });
@@ -5975,11 +6168,24 @@ YMCA.register({
  * THE BUTTON IS THE GAME'S OWN KIND. `.leaflet-top.leaflet-left` already holds
  * a `.leaflet-bar.leaflet-control.leaflet-control-custom` the game made itself,
  * so ours is one of those, next to it.
+ *
+ * AND THE TICK BOXES COME WITH IT. Choosing which vehicles to look at from
+ * inside a lightbox, two clicks away from the map the answer is drawn on, is
+ * the same fault as a tool you have to open a window to reach. The button turns
+ * the mode on and the lists appear beside it; they go when the mode goes, or
+ * when they are closed on their own — closing the lists is not switching the
+ * cover off, because somebody who has finished choosing still wants to see it.
  * -------------------------------------------------------------------------- */
 
 const HM_CANVAS_ID = 'ymca-heat-canvas';
 const HM_BTN_ID = 'ymca-heat-btn';
+const HM_PANEL_ID = 'ymca-heat-panel';
 let hmFrame = null;
+/* What was last painted. The map announces nothing when it moves, so this is
+ * redrawn per frame — but a frame that would paint exactly the same pixels is
+ * skipped, which is the difference between an idle map costing nothing and
+ * costing a colouring pass sixty times a second. */
+let hmLast = '';
 
 /** Where world pixel zero sits on screen, and how big a world pixel is. */
 function hmProjection() {
@@ -6036,15 +6242,17 @@ function hmCanvas() {
 function hmClear() {
     if (hmFrame) cancelAnimationFrame(hmFrame);
     hmFrame = null;
+    hmLast = '';
     document.getElementById(HM_CANVAS_ID)?.remove();
+    document.getElementById(HM_PANEL_ID)?.remove();
 }
 
 /**
  * Draw, and keep drawing: the map moves under us and nothing announces it.
  *
- * A frame is cheap — a few dozen stations and a coarse grid — and watching for
- * a pan means watching a transform the game rewrites constantly. So it is
- * redrawn per frame while it is on, and taken away entirely when it is off.
+ * Watching for a pan means watching a transform the game rewrites constantly,
+ * so it is asked once a frame instead — and a frame whose projection has not
+ * moved and whose settings have not changed paints nothing at all.
  */
 function hmPaint(state) {
     const canvas = hmCanvas();
@@ -6053,6 +6261,10 @@ function hmPaint(state) {
 
     const w = Math.round(p.map.width);
     const h = Math.round(p.map.height);
+    const sig = `${p.z}|${Math.round(p.left)}|${Math.round(p.top)}|${p.scale}|${w}|${h}|${state.stamp}`;
+    if (sig === hmLast) return;
+    hmLast = sig;
+
     const dpr = window.devicePixelRatio || 1;
     if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
         canvas.width = Math.round(w * dpr);
@@ -6081,61 +6293,35 @@ function hmPaint(state) {
     const kmInPixels = (256 * (2 ** p.z) * p.scale)
         / (40075.016686 * Math.cos((midLat * Math.PI) / 180));
 
-    const shown = state.stations.map((s) => ({ ...s, at: place(s) }))
-        .filter((s) => s.at.x > -400 && s.at.x < w + 400 && s.at.y > -400 && s.at.y < h + 400);
-    if (!shown.length) return;
-
     const rPx = Math.max(6, state.radius * kmInPixels);
-    const cell = 8;
-    const cols = Math.ceil(w / cell);
-    const rows = Math.ceil(h / cell);
-    const heat = new Float64Array(cols * rows);
-    let most = 0;
-    for (let cy = 0; cy < rows; cy += 1) {
-        for (let cx = 0; cx < cols; cx += 1) {
-            const x = (cx + 0.5) * cell;
-            const y = (cy + 0.5) * cell;
-            let sum = 0;
-            for (const s of shown) {
-                const dx = x - s.at.x;
-                const dy = y - s.at.y;
-                sum += s.n * Math.exp(-((dx * dx + dy * dy) / (rPx * rPx)));
-            }
-            heat[cy * cols + cx] = sum;
-            if (sum > most) most = sum;
-        }
-    }
+    /* Off-screen stations still count towards what is drawn at the edge, so the
+     * wash does not stop at the window; only the badges are trimmed. */
+    const pts = state.stations.map((s) => ({ ...place(s), n: s.n }));
+    if (!pts.length) return;
 
-    g.globalAlpha = state.opacity;
-    for (let cy = 0; cy < rows; cy += 1) {
-        for (let cx = 0; cx < cols; cx += 1) {
-            const colour = hmColour(heat[cy * cols + cx] / (most || 1), state.steps);
-            if (!colour) continue;
-            g.fillStyle = colour;
-            g.fillRect(cx * cell, cy * cell, cell, cell);
-        }
-    }
-    g.globalAlpha = 1;
-
-    /* THE NUMBER CARRIES THE COLOUR TOO. The game's own markers stay where they
-     * are; this adds what it counted beside each station, in the shade that
-     * count earns — so the figure is readable whether or not the wash is. */
-    g.font = 'bold 13px "Helvetica Neue", Helvetica, Arial';
-    g.textAlign = 'center';
-    g.lineWidth = 3;
-    g.strokeStyle = 'rgba(0,0,0,.85)';
-    for (const s of shown) {
-        const t = most ? s.n / most : 0;
-        const colour = hmColour(Math.max(0.001, t), state.steps) || state.steps[0];
-        g.strokeText(String(s.n), s.at.x, s.at.y - 12);
-        g.fillStyle = colour;
-        g.fillText(String(s.n), s.at.x, s.at.y - 12);
-    }
+    hmHeat(g, w, h, pts, {
+        peak: state.peak,
+        steps: state.steps,
+        opacity: state.opacity,
+        rPx,
+        focus: state.focus,
+    });
+    /* THE NUMBER CARRIES THE COLOUR TOO, in a badge that reads over any tile:
+     * the game's own markers stay where they are, and this adds what it counted
+     * beside each station in the shade that count earned. */
+    hmBadges(
+        g,
+        pts.filter((s) => s.x > -40 && s.x < w + 40 && s.y > -40 && s.y < h + 40)
+            .map((s) => ({ ...s, y: s.y - 14 })),
+        hmRamp(state.steps),
+        state.peak,
+    );
 }
 
 /** What to draw, worked out from the settings the panel writes. */
 function hmState(buildings, vehicles, cfg) {
     const { placed } = hmStations(buildings, vehicles);
+    const set = hmSettings(cfg);
     const types = [...new Set(placed.flatMap((s) => [...s.byType.keys()]))];
     const on = new Set(Array.isArray(cfg.types) && cfg.types.length ? cfg.types : types);
     const areas = Array.isArray(cfg.centres) && cfg.centres.length ? new Set(cfg.centres) : null;
@@ -6147,17 +6333,135 @@ function hmState(buildings, vehicles, cfg) {
             n: [...on].reduce((n, t) => n + (s.byType.get(t) || 0), 0),
         }))
         .filter((s) => s.n > 0);
+    const focus = HM_FOCUS[set.focus].p;
     return {
         stations,
-        radius: Number(cfg.radius) || 8,
-        opacity: Number.isFinite(Number(cfg.opacity)) ? Number(cfg.opacity) : 0.45,
+        radius: set.radius,
+        focus,
+        peak: hmPeak(stations, set.radius, focus),
+        opacity: set.opacity,
         /* ON THE MAP THE DEFAULT IS THE ONE THAT WAS ASKED FOR. The measurement
-         * that made one hue the default in the panel has not changed — red and
+         * that made one hue the default in the window has not changed — red and
          * green are ΔE 4.1 apart under deuteranopia — and it is answered here by
          * the count being written beside every station in the same shade, which
          * is the secondary encoding that measurement asks for. */
-        steps: (HM_SCALES[cfg.mapScale] || HM_SCALES.warm).steps,
+        steps: HM_SCALES[set.mapScale].steps,
+        /* Anything a redraw depends on, so a frame that would repeat itself
+         * does not. */
+        stamp: JSON.stringify([stations.length, set, cfg.types, cfg.centres]),
     };
+}
+
+/**
+ * The tick boxes, on the map, in the game's own kind of box.
+ *
+ * It borrows `.leaflet-bar`, which is the game's own control styling, for the
+ * same reason the button does: a panel that invented a look of its own would be
+ * the one thing on that map that did not belong to it. Every pointer event is
+ * stopped at its edge — without that, ticking a box drags the map underneath.
+ */
+function hmMapPanel(ctx, corner, choices, repaint) {
+    document.getElementById(HM_PANEL_ID)?.remove();
+    const { types, centres, nameOf, countOf } = choices;
+    const cfg = ctx.store.read('cfg', {});
+    const set = hmSettings(cfg);
+    const on = new Set(Array.isArray(cfg.types) && cfg.types.length ? cfg.types : types);
+    const centresOn = new Set(Array.isArray(cfg.centres) && cfg.centres.length
+        ? cfg.centres : centres.map((c) => c.id));
+
+    const box = document.createElement('div');
+    box.id = HM_PANEL_ID;
+    box.className = 'leaflet-bar leaflet-control';
+    box.style.cssText = 'background:#fff;color:#333;width:232px;max-height:62vh;overflow:auto;'
+        + 'padding:8px 10px;margin-top:6px;font:12px/1.4 "Helvetica Neue",Helvetica,Arial;'
+        + 'pointer-events:auto;cursor:default';
+    const list = (items) => items.map((i) => `<label style="display:block;margin:2px 0">
+      <input type="checkbox" data-${i.what}="${ctx.esc(i.id)}"${i.on ? ' checked' : ''}
+        style="margin-right:5px;vertical-align:-1px">${ctx.esc(i.label)}${i.n === undefined ? ''
+    : ` <span style="opacity:.55">${i.n}</span>`}</label>`).join('');
+
+    box.innerHTML = `
+    <div style="display:flex;align-items:center;margin:0 0 6px">
+      <b style="flex:1">Cover</b>
+      <a href="#" data-close style="color:#333;text-decoration:none;font-size:15px;
+        line-height:1;padding:0 2px" title="Close this, leave the cover on">&times;</a>
+    </div>
+    <div style="font-weight:bold;margin:6px 0 2px">Which vehicles
+      <a href="#" data-all="types" style="font-weight:normal;margin-left:4px">all</a>
+      <a href="#" data-none="types" style="font-weight:normal;margin-left:4px">none</a></div>
+    ${list(types.map((t) => ({
+        what: 'type', id: t, label: String(nameOf(t)), n: countOf(t), on: on.has(t),
+    })))}
+    ${centres.length ? `<div style="font-weight:bold;margin:8px 0 2px">Which dispatch centres
+      <a href="#" data-all="centres" style="font-weight:normal;margin-left:4px">all</a>
+      <a href="#" data-none="centres" style="font-weight:normal;margin-left:4px">none</a></div>
+    ${list(centres.map((c) => ({
+        what: 'centre', id: c.id, label: c.name, on: centresOn.has(c.id),
+    })))}` : ''}
+    <div style="margin:8px 0 0">
+      <label style="display:block;margin:3px 0">Reach
+        <select data-radius style="float:right;width:88px">${[2, 4, 6, 8, 12, 20, 35]
+        .map((n) => `<option value="${n}"${n === set.radius ? ' selected' : ''}>${n} km</option>`)
+        .join('')}</select></label>
+      <label style="display:block;margin:3px 0;clear:both">Focus
+        <select data-focus style="float:right;width:88px">${Object.entries(HM_FOCUS)
+        .map(([k, f]) => `<option value="${k}"${k === set.focus ? ' selected' : ''}>${
+            f.label.split(',')[0]}</option>`).join('')}</select></label>
+      <label style="display:block;margin:3px 0;clear:both">Strength
+        <select data-opacity style="float:right;width:88px">${[0.25, 0.4, 0.55, 0.7, 0.85]
+        .map((n) => `<option value="${n}"${n === set.opacity ? ' selected' : ''}>${
+            Math.round(n * 100)}%</option>`).join('')}</select></label>
+      <label style="display:block;margin:3px 0;clear:both">Scale
+        <select data-mapscale style="float:right;width:88px">${Object.entries(HM_SCALES)
+        .map(([k, s]) => `<option value="${k}"${k === set.mapScale ? ' selected' : ''}>${
+            k === 'warm' ? 'Red to green' : 'One hue'}</option>`).join('')}</select></label>
+    </div>
+    <div style="clear:both;height:1px"></div>`;
+
+    /* THE MAP IS UNDERNEATH. Leaflet reads pointer and wheel events off the
+     * container, so a tick that reached it would drag or zoom the map while the
+     * box was being used. Stopped at the box's own edge, before anything else
+     * on it runs — stopping propagation does not stop the handlers below. */
+    for (const kind of ['mousedown', 'pointerdown', 'touchstart', 'dblclick', 'wheel', 'click']) {
+        box.addEventListener(kind, (e) => e.stopPropagation());
+    }
+
+    const save = (patch) => {
+        ctx.store.write('cfg', { ...ctx.store.read('cfg', {}), ...patch });
+        repaint();
+    };
+    const ticked = (sel) => [...box.querySelectorAll(`${sel}:checked`)]
+        .map((b) => b.getAttribute(sel.slice(1, -1)));
+
+    box.addEventListener('change', (e) => {
+        const d = e.target.dataset;
+        if (d.radius !== undefined) save({ radius: Number(e.target.value) });
+        else if (d.focus !== undefined) save({ focus: e.target.value });
+        else if (d.opacity !== undefined) save({ opacity: Number(e.target.value) });
+        else if (d.mapscale !== undefined) save({ mapScale: e.target.value });
+        else if (d.type !== undefined) save({ types: ticked('[data-type]') });
+        else if (d.centre !== undefined) save({ centres: ticked('[data-centre]') });
+    });
+
+    box.addEventListener('click', (e) => {
+        const close = e.target.closest('[data-close]');
+        const all = e.target.closest('[data-all]');
+        const none = e.target.closest('[data-none]');
+        if (!close && !all && !none) return;
+        e.preventDefault();
+        /* CLOSING THE LISTS IS NOT SWITCHING THE COVER OFF. Somebody who has
+         * finished choosing still wants to see what they chose. */
+        if (close) { box.remove(); return; }
+        const what = (all || none).dataset.all || (all || none).dataset.none;
+        const sel = what === 'types' ? '[data-type]' : '[data-centre]';
+        for (const b of box.querySelectorAll(sel)) b.checked = !!all;
+        save(what === 'types'
+            ? { types: all ? types : [] }
+            : { centres: all ? centres.map((c) => c.id) : [] });
+    });
+
+    corner.append(box);
+    return box;
 }
 
 YMCA.inject('heatmap', (ctx) => {
@@ -6179,18 +6483,25 @@ YMCA.inject('heatmap', (ctx) => {
     aria-hidden="true"><path d="M5 23 L11 9 L16 18 L20 13 L25 23 Z"/></svg>`;
     corner.append(bar);
 
-    const paint = async () => {
-        const cfg = ctx.store.read('cfg', {});
-        const [buildings, vehicles] = await Promise.all([
-            ctx.game('/api/buildings'), ctx.game('/api/vehicles'),
-        ]);
-        const state = hmState(buildings, vehicles, cfg);
+    const run = (buildings, vehicles) => {
+        const state = hmState(buildings, vehicles, ctx.store.read('cfg', {}));
+        hmLast = '';
         const tick = () => {
             hmPaint(state);
             hmFrame = requestAnimationFrame(tick);
         };
         if (hmFrame) cancelAnimationFrame(hmFrame);
         tick();
+    };
+
+    const paint = async () => {
+        const [buildings, vehicles] = await Promise.all([
+            ctx.game('/api/buildings'), ctx.game('/api/vehicles'),
+        ]);
+        run(buildings, vehicles);
+        /* The tick boxes come up with the mode, so the choosing happens where
+         * the answer is drawn rather than two clicks away in a lightbox. */
+        hmMapPanel(ctx, corner, hmChoices(buildings, vehicles), () => run(buildings, vehicles));
     };
 
     bar.addEventListener('click', (e) => {
