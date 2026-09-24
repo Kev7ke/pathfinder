@@ -103,6 +103,7 @@ YMCA.register({
         <button class="ymca-btn" data-do="capabilities">What they can do</button>
         <button class="ymca-btn" data-do="sweep">Look for new types now</button>
         <button class="ymca-btn" data-do="aao">What the dispatch orders know</button>
+        <button class="ymca-btn" data-do="map">Whether the map can be drawn on</button>
         <button class="ymca-btn" data-do="missions">Mission list only</button>
       </div>
 
@@ -428,6 +429,11 @@ async function run(what, ctx, put) {
     if (what === 'capabilities') {
         ctx.status('Reading one vehicle of each type you own…');
         put(await vehicleCapabilities(ctx), 'what your vehicles can do');
+        return;
+    }
+
+    if (what === 'map') {
+        put(mapShape(), 'what the map is made of');
         return;
     }
 
@@ -1029,6 +1035,60 @@ const CAP_NOT_A_FLAG = new Set([
     'fms', 'checked', 'disabled', 'value', 'name', 'type', 'id', 'class',
     'vehicle_type_id', 'direct', 'distance', 'tabindex', 'custom_',
 ]);
+
+/**
+ * Whether the game's own map is something a layer could be added to.
+ *
+ * HeatSeeker draws its own map out of the coordinates `/api/buildings` states,
+ * because overlaying the game's would mean reaching for a global nobody here
+ * has seen — and a wrong guess there is a dead overlay rather than an honest
+ * one. This asks the page instead of guessing: is there a Leaflet, does a map
+ * exist on the window, and what is the element it is drawn into.
+ *
+ * NAMES AND SHAPES ONLY. Which globals exist and what kind of thing they are;
+ * never a coordinate, never a building, never anything the account owns. A
+ * global whose name is not one the game could plausibly have written — anything
+ * with a digit in it, anything enormous — is not listed either, because other
+ * userscripts put their own things on `window` too.
+ */
+function mapShape() {
+    const looksLikeAMap = (v) => !!v && typeof v === 'object'
+        && typeof v.getCenter === 'function' && typeof v.addLayer === 'function';
+
+    const named = [];
+    for (const key of Object.getOwnPropertyNames(window)) {
+        if (!/^[A-Za-z_][A-Za-z_]{1,24}$/.test(key)) continue;
+        let value;
+        try { value = window[key]; } catch (e) { continue; }
+        if (!looksLikeAMap(value)) continue;
+        named.push(key);
+        if (named.length >= 8) break;
+    }
+
+    const L = window.L;
+    return {
+        note: 'whether the game\'s own map could take a layer. Global names and element '
+            + 'shapes only — no coordinates, no buildings, nothing this account owns.',
+        ymca: YMCA.version,
+        page: location.pathname.replace(/\d+/g, '#'),
+        leaflet: L ? {
+            present: true,
+            version: typeof L.version === 'string' ? L.version : null,
+            /* The pieces a layer would be built from, by name. */
+            has: ['Map', 'Layer', 'GridLayer', 'Canvas', 'imageOverlay', 'latLngBounds']
+                .filter((k) => L[k] !== undefined),
+        } : { present: false },
+        /* A map instance the game left on the window, if it did. */
+        mapGlobals: named.length ? named : 'no global on this page answers as a map',
+        /* Where a map is drawn, whatever it was made with. */
+        panes: [...document.querySelectorAll('.leaflet-container, .leaflet-map-pane, #map')]
+            .map((el) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}`
+                + (typeof el.className === 'string' && el.className.trim()
+                    ? `.${el.className.trim().split(/\s+/).slice(0, 4).join('.')}` : '')),
+        /* And whether this is even the page that has one. */
+        inAFrame: window.top !== window.self,
+    };
+}
 
 /** What the sweep knows and does not, for the report and the button. */
 function sweepState() {

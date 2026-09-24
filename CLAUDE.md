@@ -55,6 +55,7 @@ userscripts/
     mod-missionmagician.js
     mod-recruitroom.js
     mod-simpleaao.js
+    mod-heatmap.js
     mod-trackops.js
     mod-elementfriend.js
     mod-highfive.js
@@ -957,6 +958,45 @@ selection tabs (`feuerwehr_lf`, `rettungsdienst`, `polizei`, `wasserrettung`,
 the dataset grows from what players actually have, and the open question —
 whether an at-mission row carries the flags itself, which would end the need for
 it — rides in MissionMagician's report as `tablesNotSeenYet`.
+
+**Where the fleet is was already answered and nobody had asked.** `/api/buildings`
+carries `latitude` and `longitude` per station beside `leitstelle_building_id`,
+and `/api/vehicles` carries `building_id` and `vehicle_type`. That is vehicles
+per station per type and where each station is — everything a coverage map
+needs, with **nothing captured for it**. HeatSeeker shades each spot by how many
+of the ticked vehicles reach it, on a plain bell that falls off with distance.
+
+**The scale is this map's own and says so on the panel.** No page of the game
+states what "good cover" is, so the deepest shade is wherever *this* player's
+cover is thickest rather than a standard. An absolute threshold would be a guess
+wearing a colour.
+
+**Red to green is the one pair a colour-blind reader cannot separate, and that
+is measured rather than asserted.** The status palette's own two ends,
+`#0ca30c` against `#d03b3b`, come back at **ΔE 4.1 under deuteranopia** where
+6 is the floor — run, not reasoned about. Magnitude takes **one hue, light to
+dark**, so that is what the panel opens on; red to green stays on offer because
+it is what was pictured, and the **count is written on every station** either
+way, so the colour is never the only thing saying it. This is the one place a
+module encodes with colour at all: the shade *is* the reading, where everywhere
+else colour is chrome and belongs to the shell's role classes.
+
+**How far a vehicle counts for is the player's**, because no page states it.
+
+**It draws its own map rather than the game's, deliberately.** Overlaying the
+game's Leaflet means reaching for a global nobody here has seen, and a wrong
+guess there is a dead overlay rather than an honest one. So **Diagnostics →
+Whether the map can be drawn on** asks the page instead: is Leaflet present and
+which of its pieces, does any global answer as a map, and what element a map is
+drawn into — **names and shapes only**, never a coordinate and never a building.
+A global whose name could not plausibly be the game's is not listed either,
+because other userscripts put their own things on `window` too.
+
+**A station answering to no dispatch centre is still a station.** Without an
+entry of its own in the centre list it vanished the moment the list was filtered
+at all, which reads as cover that is not there — the one thing a coverage map
+must not get wrong. It is offered as `— not assigned —`, the game's own words
+for it.
 
 **The station list already says which dispatch centre each station answers
 to.** A row is `li#building_list_<id>` carrying `building_type_id` and

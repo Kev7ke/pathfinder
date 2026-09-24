@@ -46,15 +46,20 @@ window.__hired = [];
   window.I18n = { locale: 'en_US' };
 
   const buildings = [
-    { id: 90, caption: 'Central Dispatch', building_type: 1, generates_mission_categories: '#<Set: {}>' },
+    { id: 90, caption: 'Central Dispatch', building_type: 1, latitude: 40.72, longitude: -74.00,
+      generates_mission_categories: '#<Set: {}>' },
     { id: 1, caption: 'FS01', building_type: 0, leitstelle_building_id: 90, small_building: true,
+      latitude: 40.7169, longitude: -74.0019,
       generates_mission_categories: '#<Set: {:fire}>', extensions: [] },
     { id: 2, caption: 'FS02', building_type: 0, leitstelle_building_id: 90,
+      latitude: 40.7500, longitude: -73.9900,
       generates_mission_categories: '#<Set: {:fire}>',
       extensions: [{ caption: 'Forestry Expansion', type_id: 3, available: true, enabled: true }] },
     { id: 3, caption: 'PO01', building_type: 5, leitstelle_building_id: 90,
+      latitude: 40.6900, longitude: -74.0400,
       generates_mission_categories: '#<Set: {:police}>', extensions: [] },
     { id: 4, caption: 'AS01', building_type: 3,
+      latitude: 40.7300, longitude: -73.9600,
       generates_mission_categories: '#<Set: {:ambulance}>',
       extensions: [{ caption: 'Forestry Expansion', type_id: 3, available: false,
         available_at: '2099-01-01 00:00:00 -0400' }] },
@@ -66,7 +71,7 @@ window.__hired = [];
     // A type the repo does not ship: exactly what the sweep exists for.
     { id: 14, caption: 'Old D', building_id: 1, vehicle_type: 904 },
     // Its page names the flags on an element carrying no type id at all.
-    { id: 15, caption: 'Old E', building_id: 3, vehicle_type: 5 },
+    { id: 15, caption: 'Old E', building_id: 4, vehicle_type: 5 },
   ].map((v) => Object.assign(v, { fms_real: 2, fms_show: 2, vehicle_type_caption: 'Quint' }));
   // One of them is transporting: fms_real 5 is what HighFive looks for.
   vehicles[2].fms_real = 5;
@@ -310,7 +315,7 @@ await pg.waitForSelector('#ymca-window');
 const tiles = await pg.$$eval('.ymca-tile[data-mod]', (b) => b.map((x) => x.dataset.mod));
 console.log('tiles             :', JSON.stringify(tiles));
 assert.deepEqual(tiles,
-  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao', 'trackops',
+  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao', 'heatmap', 'trackops',
     'elementfriend', 'diagnostics']);
 // HighFive is an element tile: it lives in ElementFriend and never in the launcher.
 assert.equal(await pg.locator('.ymca-tile[data-mod="highfive"]').count(), 0,
@@ -1919,6 +1924,45 @@ console.log('days left         :', JSON.stringify(rooms.map((r) => r.left)));
 assert.ok(rooms.every((r) => r.left === '\u2013' || /^\d+$/.test(r.left)),
   'days left is a number the game stated or nothing at all');
 
+// ---- HeatSeeker: where the cover is thick and where it is thin ----
+// Nothing was captured for this: /api/buildings states latitude and longitude per station and
+// /api/vehicles states building_id and vehicle_type, so where the fleet is is already answered.
+await pg.click('#ymca-back');
+await pg.click('.ymca-tile[data-mod="heatmap"]');
+await pg.waitForSelector('#hm-canvas');
+await pg.waitForFunction(() => /station/.test(document.querySelector('#hm-legend')?.textContent || ''));
+const hmTypes = await pg.$$eval('[data-type]', (b) => b.map((x) => x.dataset.type));
+console.log('heat types        :', JSON.stringify(hmTypes));
+assert.ok(hmTypes.includes('13') && hmTypes.includes('10'),
+  'every type the fleet holds is offered, by the id the game uses');
+const hmCentres = await pg.$$eval('[data-centre]', (b) => b.map((x) => x.dataset.centre));
+console.log('heat centres      :', JSON.stringify(hmCentres));
+assert.deepEqual(hmCentres, ['90', ''],
+  'the dispatch centres, plus one for the stations answering to none \u2014 without it a station '
+  + 'vanished the moment the list was filtered, which reads as cover that is not there');
+const legend = (await pg.textContent('#hm-legend')).replace(/\s+/g, ' ').trim();
+console.log('heat legend       :', legend);
+assert.match(legend, /thickest here/, 'the scale says it is this map\'s own, not a standard');
+assert.match(legend, /within 8 km/, 'and the distance it was drawn at, because that is a choice');
+// The canvas is drawn on, not left blank: something is actually painted.
+const painted = await pg.evaluate(() => {
+  const c = document.getElementById('hm-canvas');
+  const g = c.getContext('2d');
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  let lit = 0;
+  for (let i = 3; i < d.length; i += 4 * 97) if (d[i] > 0) lit += 1;
+  return lit;
+});
+console.log('heat painted      :', painted, 'sampled pixels carry ink');
+assert.ok(painted > 20, 'the heat is actually drawn rather than an empty canvas');
+// Ticking nothing must say so rather than drawing a map of nothing.
+await pg.click('[data-none="types"]');
+await pg.waitForFunction(() => /Nothing ticked/.test(
+  document.querySelector('#hm-legend')?.textContent || ''));
+console.log('heat empty        : it says so rather than drawing a map of nothing');
+await pg.click('[data-all="types"]');
+await pg.waitForFunction(() => /station/.test(document.querySelector('#hm-legend')?.textContent || ''));
+
 // ---- SimpleAAO: the dispatch orders you would have built by hand ----
 // The editor's capability fields are <input type="number">, so an order is a COUNT per class.
 // That is the whole feature, and it is read off the game's own form rather than listed here.
@@ -2042,8 +2086,8 @@ const elements = await pg.$$eval('.ymca-tile.el', (b) => b.map((x) => x.dataset.
 console.log('elements          :', JSON.stringify(elements));
 await pg.screenshot({ path: '/tmp/ymca-elements.png' });
 assert.deepEqual(elements,
-  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao', 'trackops', 'highfive',
-    'easyedit', 'eagleeye', 'diagnostics'],
+  ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao', 'heatmap', 'trackops',
+    'highfive', 'easyedit', 'eagleeye', 'diagnostics'],
   'every module carries a switch now: the page answers "what have I got" in one look');
 // AND EVERY TILE SAYS WHAT IT IS FOR. A four-word tagline tells you which tool this is and
 // nothing about whether you want it, which is the only question this page exists to answer.
@@ -2064,7 +2108,7 @@ assert.equal(await pg.locator('.ymca-tile.el[data-el="shuteye"]').count(), 0,
   'a module in a group is listed inside the group, not beside it');
 // Nothing that works is off by default: an update that hides a tool is an update that broke.
 for (const id of ['stepops', 'renamer', 'missionmagician', 'recruitroom', 'simpleaao',
-  'trackops', 'highfive', 'easyedit', 'eagleeye', 'diagnostics']) {
+  'heatmap', 'trackops', 'highfive', 'easyedit', 'eagleeye', 'diagnostics']) {
   assert.equal(await pg.locator(`.ymca-switch[data-sw="${id}"] input`).isChecked(), true,
     `${id} should be on until somebody says otherwise`);
 }

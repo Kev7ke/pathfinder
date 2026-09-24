@@ -395,6 +395,8 @@ const ICONS = {
     simpleaao: '<rect x="4" y="6" width="26" height="8" rx="2"/>'
         + '<rect x="4" y="20" width="14" height="8" rx="2"/>'
         + '<path d="M23 24h7 M26.5 20.5v7"/>',
+    heatmap: '<path d="M5 27 L12 9 L19 21 L24 14 L29 27 Z"/>'
+        + '<circle cx="12" cy="9" r="2.5"/><circle cx="24" cy="14" r="2.5"/>',
     default: '<rect x="6" y="6" width="9" height="9"/><rect x="19" y="6" width="9" height="9"/>'
         + '<rect x="6" y="19" width="9" height="9"/><rect x="19" y="19" width="9" height="9"/>',
 };
