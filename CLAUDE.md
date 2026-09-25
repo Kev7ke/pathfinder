@@ -570,6 +570,37 @@ it. It is added only where nothing has already asked for it, so
 the day the game lists it the entry becomes a no-op, and the row reads **not in
 the game's own list** with the reason under the cursor.
 
+**A patient transport wants a CCTU, and that is the second entry that came from
+neither the catalogue nor the page — this one from the player.** Nothing in the
+game states it: every mission in the ambulance branch, all **157** of them,
+carries an empty `requirements`; the window states a patient rather than what to
+send it; and `#missing_text` is silent. So the rule is the player's, for their
+own game, and it is **sourced to them wherever it shows** — the row reads *not
+in the game's own list* with *your own rule for your game* under the cursor,
+exactly as the skateboard accident's does.
+
+**It is answered by a type id, because there is nothing else to answer it
+with.** `109` is the CCTU on the game's own buy page, and no selection checkbox
+any install has ever read carries a word for it — `data/vehicle-types.json` has
+the name and no `capabilities`. A rule that could only ask for a flag could not
+ask for a CCTU at all. So `MM_REQUIREMENTS` entries may carry `typeIds`, matched
+against the `vehicle_type_id` the game writes on the checkbox: still the game
+stating it, and the same constant on every account. Three places assumed every
+rule names a flag and quietly put `undefined` in a set of capabilities —
+`MM_NAMED_FLAGS`, the versatility set and Cancel Unused's `covers` — and all
+three ask the vehicle now rather than its flag list.
+
+**Keyed on the game's own names until an id is reported**, the way 1167 replaced
+the skateboard's name: `Patient Transfer`, `Patient transfer from flight`,
+`Interfacility transport`. **One per patient**, which is what "one per
+transport" comes to — the window counts patients and a transport carries one, so
+on the ordinary transfer the two readings are the same number.
+
+**The ambulance beside it is not this rule.** A transport whose window states a
+patient asks for an ambulance too, and that is the window's own arithmetic from
+long before the CCTU line existed. If a CCTU is meant to stand *instead* of the
+ambulance, that is a different rule and has to be said.
+
 **`possible_patient` does not dispatch anything.** It is the most a mission
 *can* produce — 8 on a tunnel fire — and ticking eight ambulances because eight
 were possible is the inference this repo does not make. It is marked

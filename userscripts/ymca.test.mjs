@@ -1818,6 +1818,85 @@ await mission.evaluate(() => {
   document.getElementById('mission_vehicle_driving')?.remove();
 });
 
+// ---- a patient transport wants a CCTU, and that is the player's own rule ----
+// Nothing in the game states it: every mission in the ambulance branch carries an empty
+// `requirements`, the window states a patient rather than what to send, and #missing_text is
+// silent. So it is the second entry that came from neither the catalogue nor the page, and like
+// the first it says so on the row. It is answered by the TYPE ID because there is nothing else:
+// 109 is the CCTU on the game's own buy page and no checkbox any install has read names it.
+await mission.evaluate(() => {
+  document.getElementById('mission_vehicle_at_mission')?.remove();
+  document.getElementById('mission_vehicle_driving')?.remove();
+  window.__catalogue = [
+    { id: '1300', name: 'Interfacility transport', requirements: {},
+      additional: { possible_patient: 1 } },
+    { id: '1301', name: 'Chest Pains', requirements: {}, additional: { possible_patient: 1 } },
+  ];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1300');
+  // The window states one patient, the way it always does.
+  const patients = document.createElement('div');
+  patients.id = 'patient_button_text';
+  patients.innerHTML = '<strong>1</strong> Patient';
+  document.body.append(patients);
+  // One CCTU in range and one ordinary ambulance, so picking the wrong one would show.
+  document.getElementById('vehicle_show_table_body_all').innerHTML = [
+    ['601', '109', ''], ['602', '5', 'any_rtw="1"'],
+  ].map(([id, type, flags]) => `<tr class="vehicle_select_table_tr" vehicle_id="${id}"
+      data-distance="1" vehicle_type="CCTU">
+      <td><input type="checkbox" class="vehicle_checkbox" value="${id}"
+        id="vehicle_checkbox_${id}" name="vehicle_ids[]" vehicle_type_id="${type}" ${flags}
+        fms="2"></td>
+      <td id="vehicle_sort_${id}" timevalue="${id}">x</td></tr>`).join('');
+});
+await mission.waitForTimeout(1400);
+const transportRows = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim())));
+console.log('transport rows    :', JSON.stringify(transportRows));
+const cctuRow = transportRows.find((r) => /Critical care/.test(r[4]));
+assert.ok(cctuRow, 'a patient transport asks for a critical care transport');
+assert.equal(cctuRow[0], '1', 'one per patient, which is what one per transport comes to');
+// The row says whose rule it is, so a line no page of the game stated is never mistaken for one
+// that was — the same thing the skateboard accident's row does.
+assert.match(cctuRow[4], /not in the game/i,
+  'and it says on the row that the game\'s own list does not carry it');
+// WHOSE RULE IT IS SITS UNDER THE CURSOR, not just the fact that the game did not state it.
+const cctuWhy = await mission.$$eval('#ymca-mm-panel tbody tr small[title]',
+  (els) => els.map((e) => e.getAttribute('title')));
+console.log('cctu sourced to   :', JSON.stringify(cctuWhy.filter((t) => /your own/.test(t))));
+assert.ok(cctuWhy.some((t) => /your own rule/.test(t)),
+  'it is the player\'s rule and says so, rather than reading as something the game asked for');
+// It ticks the CCTU, found by the id the game wrote on its checkbox. The ambulance goes too and
+// that is the window's own arithmetic, not this rule: the window states a patient, and a patient
+// has wanted an ambulance since long before the CCTU line existed.
+await mission.click('#ymca-mm-panel [data-do="select"]');
+await mission.waitForTimeout(400);
+const tickedTransport = await mission.$$eval('.vehicle_checkbox:checked', (b) => b.map((x) => x.value));
+console.log('transport ticked  :', JSON.stringify(tickedTransport));
+assert.ok(tickedTransport.includes('601'),
+  'the CCTU goes, and nothing but its type id could have found it');
+// AND IT IS NOT ADDED TO EVERY CALL WITH A PATIENT. Chest Pains is the same branch, the same
+// empty requirements and the same one patient, and it wants an ambulance rather than a CCTU.
+await mission.evaluate(() => {
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1301');
+  for (const b of document.querySelectorAll('.vehicle_checkbox')) {
+    b.checked = false;
+    b.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  // The panel watches the selection table, so that is what has to move for it to re-read
+  // which mission this is.
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(1400);
+const ordinaryRows = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim())));
+console.log('ordinary rows     :', JSON.stringify(ordinaryRows));
+assert.ok(!ordinaryRows.some((r) => /Critical care/.test(r[4])),
+  'an ordinary ambulance call is not a transport, so no CCTU is asked for');
+await mission.evaluate(() => {
+  document.getElementById('patient_button_text')?.remove();
+});
+
 // ---- a training is not seats ----
 // `Missing Personnel` on a HazMat call is a shortfall of people holding that training, and the
 // mission names which one. Any vehicle with a seat satisfies a count of seats, which is how an

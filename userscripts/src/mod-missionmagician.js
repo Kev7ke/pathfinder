@@ -145,6 +145,22 @@ const MM_REQUIREMENTS = {
      * and the game does not flag either `any_rtw`. So this is the same test as
      * the ambulances line above, deliberately and not a looser one. */
     patients: { flag: 'any_rtw', label: 'Ambulances', icon: 'cross', source: 'one per patient' },
+    /* THE ONE RULE IN HERE THAT IS THE PLAYER'S, not the game's and not this
+     * repo's reading of it. A patient transport wants a CCTU, and no page of
+     * the game says so: the mission's `requirements` is empty, the whole
+     * ambulance branch's is, and the window states a patient rather than what
+     * to send it. The player plays this game and told YMCA the rule, so it is
+     * sourced to them, wherever it shows.
+     *
+     * It is answered by the type id because there is nothing else to answer it
+     * with: `109` is the CCTU on the buy page — the game naming it — and no
+     * checkbox any install has read carries a word for it. */
+    cctu: {
+        typeIds: ['109'],
+        label: 'Critical care transport',
+        icon: 'cross',
+        source: 'the CCTU is type 109 on the game\u2019s own buy page',
+    },
 };
 
 /* ------------------------------ where the game's own list is wrong on purpose */
@@ -183,6 +199,28 @@ const MM_ADDED_REQUIREMENTS = [{
     key: 'ambulances',
     wanted: 1,
     source: 'reported empty of requirements while still wanting an ambulance',
+}, {
+    /* A PATIENT TRANSPORT WANTS A CCTU, AND THAT IS THE PLAYER'S OWN RULE.
+     * Nothing in the game states it: every mission in the ambulance branch —
+     * all 157 of them — carries an empty `requirements`, the window states a
+     * patient rather than what to send, and `#missing_text` is silent. So this
+     * is the second entry here that came from neither the catalogue nor the
+     * page, and like the first it says so on the row.
+     *
+     * KEYED ON THE GAME'S OWN NAMES until an id is reported. The catalogue
+     * calls them `Patient Transfer`, `Patient transfer from flight` and
+     * `Interfacility transport`; a made-up type id would put a CCTU on
+     * whatever mission happened to hold it. The moment a report carries the
+     * real type id this becomes an id entry, exactly as 1167 did.
+     *
+     * ONE PER PATIENT, which is what "one per transport" comes to: the window
+     * counts patients and a transport carries one. On the ordinary transfer
+     * the two readings are the same number. */
+    match: /patient transfer|interfacility transport|patient transport|krankentransport/i,
+    key: 'cctu',
+    wanted: 1,
+    perPatient: true,
+    source: 'your own rule for your game: one CCTU per patient transport, which no page states',
 }];
 
 /** Which of those apply to this mission — by the game's own type id first. */
@@ -409,9 +447,13 @@ function mmIcon(name) {
     aria-hidden="true" class="mm-glyph">${path}</svg>`;
 }
 
-/** Every flag the requirements above ask for by name. */
+/** Every flag the requirements above ask for by name.
+ *
+ * A rule answered by a type id names no flag at all, so it contributes none —
+ * `[r.flag]` on one of those put `undefined` into the set, which then read as a
+ * capability every vehicle lacked. */
 const MM_NAMED_FLAGS = [...new Set(Object.values(MM_REQUIREMENTS)
-    .flatMap((r) => r.anyOf || [r.flag]))];
+    .flatMap((r) => r.anyOf || (r.flag ? [r.flag] : [])))];
 
 /**
  * Attributes on a vehicle's checkbox that are not capabilities.
@@ -501,11 +543,25 @@ function mmIconFor(key, label) {
 
 /** Does this vehicle answer the requirement — one flag, or any of several? */
 function mmMeets(v, rule) {
+    /* A TYPE ID IS THE GAME'S OWN CONSTANT, and for one kind of vehicle it is
+     * the only thing there is. The CCTU carries no capability flag any install
+     * has ever read — the buy page names it and no checkbox has been seen with
+     * a word on it — so a rule that could only ever ask for a flag could not
+     * ask for a CCTU at all. The id is read off the same checkbox as the flags
+     * and is the same number on every account, so this is still the game
+     * stating it rather than a name being matched. */
+    if (rule.typeIds) return rule.typeIds.includes(String(v.typeId));
     return rule.anyOf ? rule.anyOf.some((f) => v.has(f)) : v.has(rule.flag);
 }
 
 /** The same question for a type already at the mission, whose flags were learnt. */
 function mmSceneCount(scene, rule) {
+    /* A vehicle already at the mission carries a type id and nothing else,
+     * which is exactly what a type-id rule asks for — so this is the one kind
+     * of requirement the at-mission table can answer without the dataset. */
+    if (rule.typeIds) {
+        return scene.typeIds.filter((id) => rule.typeIds.includes(String(id))).length;
+    }
     if (!rule.anyOf) return scene.counts[rule.flag] || 0;
     /* A vehicle carrying two of the alternatives must not be counted twice, so
      * the per-vehicle flag sets are kept and asked, not the per-flag totals. */
@@ -1150,7 +1206,7 @@ function mmAllocate(needs, vehicles) {
      * `road_rescue_or_fire_engine`, and counting those would rank a vehicle by
      * how many ways the game has of describing it. */
     const judged = new Set([...MM_NAMED_FLAGS,
-        ...needs.flatMap((n) => n.rule.anyOf || [n.rule.flag])]);
+        ...needs.flatMap((n) => n.rule.anyOf || (n.rule.flag ? [n.rule.flag] : []))]);
     const capsOf = new Map(vehicles.map((v) =>
         [v.id, [...judged].filter((f) => v.has(f))]));
     const kindOf = (v) => capsOf.get(v.id).join('|');
@@ -1320,7 +1376,12 @@ async function mmPlan(page, ctx, cfg) {
         for (const add of mmAddedFor(name, page.missionType)) {
             if (wants.some(([k]) => k === add.key)) continue;
             if (add.key === 'ambulances' && wants.some(([k]) => k === 'patients')) continue;
-            wants.push([add.key, add.wanted, false]);
+            /* One per patient where the entry says so and the window actually
+             * counted them. Where it did not, one — the mission is a transport
+             * and a transport is at least one. */
+            const wanted = add.perPatient && patients && patients.measured
+                ? Math.max(1, patients.count) : add.wanted;
+            wants.push([add.key, wanted, false]);
             mmAddedHere.set(add.key, add.source);
         }
 
@@ -2612,15 +2673,22 @@ function mmSurplus(plan) {
         .map((l) => ({ wanted: l.wanted, rule: l.rule }));
     if (!checks.length) return [];
 
-    const covers = (flags, rule) => (rule.anyOf
-        ? rule.anyOf.some((f) => flags.includes(f))
-        : flags.includes(rule.flag));
+    /* Asked of the vehicle rather than of its flags, because a type-id rule has
+     * no flag to ask about — and the at-mission row's type id is the one thing
+     * it always carries. */
+    const covers = (v, rule) => {
+        if (rule.typeIds) return rule.typeIds.includes(String(v.typeId));
+        return rule.anyOf
+            ? rule.anyOf.some((f) => v.flags.includes(f))
+            : v.flags.includes(rule.flag);
+    };
 
     /* A vehicle whose abilities no requirement here judges is not surplus, it is
      * unaccounted for. An ambulance on a call whose patients went undetected has
      * no ambulance line to be measured against, and sending it away because
      * nothing asked for it is exactly the wrong reading. */
-    const judged = new Set(checks.flatMap(({ rule }) => rule.anyOf || [rule.flag]));
+    const judged = new Set(checks.flatMap(({ rule }) =>
+        rule.anyOf || (rule.flag ? [rule.flag] : [])));
     /* Judged against the flags a requirement can ask for. The game also writes
      * composites of its own — `road_rescue_or_fire_engine`, `ktw_or_rtw` — and
      * counting those as unaccounted-for would mean nothing is ever spare. */
@@ -2628,7 +2696,7 @@ function mmSurplus(plan) {
     const accountable = (v) =>
         v.flags.filter((f) => meaningful.has(f)).every((f) => judged.has(f));
     const met = (kept) => checks.every(({ wanted, rule }) =>
-        kept.filter((v) => covers(v.flags, rule)).length >= wanted);
+        kept.filter((v) => covers(v, rule)).length >= wanted);
 
     if (!met(here)) return [];   // already short — nothing is spare
 
