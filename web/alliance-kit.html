@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USDU Dispatch United — Alliance Kit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=Saira:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#dae2e7; --card:#eef2f4; --card2:#e3eaed; --field:#fbfdfd;
+  --ink:#122430; --soft:#4c6373; --rule:#9db0bc;
+  --alarm:#ac3227; --alarm-bg:#f3ddda; --go:#1c6650;
+  --shadow:rgba(18,36,48,.12);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0d171e; --card:#17232b; --card2:#1d2b35; --field:#0b141a;
+  --ink:#dce6eb; --soft:#8da5b2; --rule:#2c4150;
+  --alarm:#e6766a; --alarm-bg:#351f1c; --go:#61c199;
+  --shadow:rgba(0,0,0,.4);
+}}
+:root[data-theme="dark"]{
+  --paper:#0d171e; --card:#17232b; --card2:#1d2b35; --field:#0b141a;
+  --ink:#dce6eb; --soft:#8da5b2; --rule:#2c4150;
+  --alarm:#e6766a; --alarm-bg:#351f1c; --go:#61c199;
+  --shadow:rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Saira","Helvetica Neue",Arial,sans-serif;font-size:16px;line-height:1.55;
+  padding:clamp(14px,3vw,38px)}
+.wrap{max-width:860px;margin:0 auto}
+h1{font-family:"Saira Condensed","Arial Narrow",sans-serif;font-weight:700;
+  font-size:clamp(28px,6vw,44px);line-height:1.04;margin:0 0 6px;letter-spacing:-.01em}
+.sub{color:var(--soft);margin:0 0 4px;max-width:66ch}
+.status{font-size:13px;color:var(--soft);min-height:20px;margin:0 0 18px}
+.status.on{color:var(--go)}
+h2{font-family:"Saira Condensed",sans-serif;font-weight:700;font-size:21px;
+  margin:34px 0 3px;padding-bottom:5px;border-bottom:2px solid var(--rule)}
+.where{color:var(--soft);font-size:13.5px;margin:0 0 11px;max-width:72ch}
+.notice{background:var(--alarm-bg);border-left:5px solid var(--alarm);
+  padding:12px 16px;margin:18px 0;font-size:14.5px}
+
+.block{background:var(--card);border:1px solid var(--rule);box-shadow:0 2px 0 var(--shadow)}
+.block .bar{display:flex;align-items:center;gap:8px;padding:7px 10px;flex-wrap:wrap;
+  border-bottom:1px solid var(--rule);background:var(--card2)}
+.block .bar .lbl{font-size:13px;color:var(--soft);flex:1;min-width:90px}
+button{font:inherit;font-size:13px;padding:4px 12px;cursor:pointer;
+  background:var(--card);color:var(--ink);border:1px solid var(--rule)}
+button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+button.done{background:var(--go);color:#fff;border-color:var(--go)}
+button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+textarea{display:block;width:100%;border:0;background:var(--field);color:var(--ink);
+  font-family:inherit;font-size:15px;line-height:1.6;padding:15px;resize:vertical;
+  min-height:120px;overflow:hidden}
+textarea:focus{outline:2px solid var(--ink);outline-offset:-2px}
+textarea.mono{font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;font-size:13.5px}
+.out{white-space:pre-wrap;word-wrap:break-word;padding:15px;background:var(--field);
+  font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;font-size:13.5px;
+  line-height:1.6;margin:0}
+
+.gen{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));
+  gap:10px 14px;padding:13px 13px 3px}
+.gen label{display:block;font-size:12.5px;color:var(--soft);margin-bottom:2px}
+.gen input{width:100%;background:var(--field);color:var(--ink);border:1px solid var(--rule);
+  padding:5px 8px;font:inherit;font-size:15px}
+.genrow{padding:3px 13px 12px;font-size:13.5px;color:var(--soft);
+  display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.genrow input[type=checkbox]{width:17px;height:17px;accent-color:var(--alarm)}
+.tokens{padding:0 13px 12px;font-size:12.5px;color:var(--soft)}
+.tokens code{background:var(--card2);padding:1px 5px;border:1px solid var(--rule)}
+
+.addrow{margin-top:16px;display:flex;gap:9px;flex-wrap:wrap}
+.tip{font-size:14px;color:var(--soft);margin:9px 0 0;max-width:74ch}
+.tip b{color:var(--ink);font-weight:600}
+footer{margin-top:42px;padding-top:14px;border-top:2px solid var(--rule);
+  font-size:13.5px;color:var(--soft);max-width:80ch}
+.tt{font-size:15px;font-weight:600;background:transparent;border:0;color:var(--ink);
+  font-family:"Saira Condensed",sans-serif;flex:1;min-width:110px;padding:2px 0}
+.tt:focus{outline:2px solid var(--ink);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>USDU Dispatch United</h1>
+<p class="sub">Every text here is editable. Change anything, and it stays changed the next time you open this page in this browser.</p>
+<p class="status" id="status"></p>
+
+<div class="notice">
+  Put your forum thread URL wherever you see <b>[FORUM LINK]</b>. That link carries the detail, which is what lets the in-game texts stay short.
+  Your edits live in this browser only — use <b>Backup</b> at the bottom before switching device or clearing your data.
+</div>
+
+<h2>1 · Alliance description</h2>
+<p class="where">The public page. The one place the whole goal is spelled out — everything else points here.</p>
+<div id="b-desc"></div>
+
+<h2>2 · Welcome message</h2>
+<p class="where">Automatic message on acceptance. Three things, then out of the way.</p>
+<div id="b-welcome"></div>
+
+<h2>3 · Chat bulletin</h2>
+<p class="where">Fill in the target and the numbers — the bar builds itself. The wording below it is a template you can rewrite; the tokens get replaced automatically.</p>
+<div class="block">
+  <div class="bar"><span class="lbl">Numbers</span></div>
+  <div class="gen">
+    <div><label for="g-target">Current target</label><input id="g-target" value="Fire Academy"></div>
+    <div><label for="g-now">Raised so far</label><input id="g-now" type="number" min="0" step="1000" value="310000"></div>
+    <div><label for="g-goal">Total needed</label><input id="g-goal" type="number" min="1" step="1000" value="500000"></div>
+    <div><label for="g-width">Bar length</label><input id="g-width" type="number" min="4" max="30" value="12"></div>
+  </div>
+  <div class="genrow">
+    <input type="checkbox" id="g-rec" checked><label for="g-rec" style="margin:0">Include the recruiting line</label>
+  </div>
+</div>
+
+<div id="b-tpl-open" style="margin-top:14px"></div>
+<div id="b-tpl-done" style="margin-top:14px"></div>
+<div id="b-tpl-rec" style="margin-top:14px"></div>
+
+<div class="block" style="margin-top:14px">
+  <div class="bar">
+    <span class="lbl">Ready to paste into chat</span>
+    <button data-copyout="1" class="primary">Copy</button>
+  </div>
+  <p class="out" id="bulletin"></p>
+</div>
+<p class="tip"><b>Keep it this short.</b> No rules, no roadmap — people scroll past those. One target, one bar, one line of context. When a target completes, the finished template takes over automatically.</p>
+
+<h2>4 · Rules</h2>
+<p class="where">One screen. A new player should read it and know whether they are in.</p>
+<div id="b-rules"></div>
+
+<h2>5 · Leadership document</h2>
+<p class="where">Admins only. Long on purpose — it is the thing you work from, not something anybody reads to join.</p>
+<div id="b-leader"></div>
+
+<h2>Your own blocks</h2>
+<p class="where">For recruiting posts, forum threads, anything else you want to keep here.</p>
+<div id="custom"></div>
+<div class="addrow"><button id="add" class="primary">+ New text block</button></div>
+
+<h2>Backup</h2>
+<p class="where">Copy this out and keep it somewhere. Paste it back and press Restore to get everything back on another device, or after clearing your browser.</p>
+<div class="block">
+  <div class="bar">
+    <span class="lbl">All your texts as one blob</span>
+    <button id="bk-refresh">Refresh</button>
+    <button data-copy-el="backup">Copy</button>
+    <button id="bk-restore" class="primary">Restore</button>
+  </div>
+  <textarea id="backup" class="mono" spellcheck="false"></textarea>
+</div>
+
+<footer>
+Role names come from the official MissionChief help centre list of alliance rights, as does the rule that a shared mission cannot be deleted — only fast-finished with coins or left to expire after 24 to 48 hours. School pricing of 500,000 credits plus 400,000 per classroom is from the game's building information; alliance hospital and cell prices are deliberately left out for you to read off the build menu. The 1,000-credit sharing threshold and the special-vehicle rule are your alliance's own policy, not a game mechanic.
+</footer>
+
+</div>
+
+<script>
+/* ============ defaults ============ */
+const D = {};
+
+D.desc = `USDU DISPATCH UNITED
+Five boroughs, one network.
+
+We are a New York metro alliance building something together: a shared emergency network across Manhattan, Brooklyn, Queens, the Bronx and Staten Island. Fire, police and EMS, all three, all equal.
+
+WHAT WE ARE BUILDING
+    THREE ACADEMIES. FIVE HOSPITALS. ONE CITY.
+
+First all three academies — fire, police and EMS — so that whatever department you love, your training is covered and it is free. Then five alliance hospitals, one per borough, so nobody drives a patient across a bridge again. Cells follow for the police side.
+
+Every credit in the fund goes down that list in order, and the current target is always pinned in chat so you can watch it fill up.
+
+WHAT YOU GET
+Free courses in every department, from your first day. Hospital access as we build it. Backup on the big calls — share it, say what you need, and units roll. And a chat where a beginner question gets a real answer.
+
+WHAT WE ASK
+Turn up when you can, answer a call now and then, and chip into the fund if you feel like it. No quotas, no minimum account size, no questions about how much you play.
+
+WHO WE WANT
+Anyone in the New York metro area — the five boroughs, Long Island, Westchester, northern New Jersey. Brand new players especially: the academies exist so that your start here is easier than starting alone. Experienced players who want to help build this, the admin seats are open.
+
+Fire, police or EMS — there is a classroom with your name on it.
+
+Full plan, build order and discussion: [FORUM LINK]`;
+
+D.welcome = `Welcome to USDU Dispatch United — good to have you.
+
+Three things and you are set:
+
+1. Your courses are free. Every academy, every department, 100% discount. If the class you need is not running, just say so in chat.
+
+2. Post your department and your borough. That is genuinely how we decide what gets built next — your answer moves the map.
+
+3. Share calls over 1,000 credits, and drop a link in chat when you need a special vehicle you do not have yet. Say which one and someone will roll.
+
+Right now we are building all three academies so that whatever you play, your training is covered. Hospitals in all five boroughs are next.
+
+Rules are on the alliance page and they fit on one screen. Everything longer lives here: [FORUM LINK]
+
+Ask us anything. Everyone here started exactly where you are.
+
+— USDU leadership`;
+
+D.tplOpen = `📟 USDU — NEXT UP: {TARGET}
+   {BAR}  {PCT}%   ({NOW} / {GOAL})
+
+Every credit in the fund goes here until it is done. Full plan on our alliance page.`;
+
+D.tplDone = `📟 USDU — {TARGET}: FUNDED ✅
+   {BAR}  {PCT}%
+
+That is it — {TARGET} is paid for. Thanks to everyone who chipped in. Next target goes up shortly.`;
+
+D.tplRec = `Recruiting is open — fire, police and EMS, all three covered. Send anyone in the metro area our way.`;
+
+D.rules = `USDU DISPATCH UNITED — HOW WE RUN
+
+We are building one shared network across New York. These are the few things that keep it working. Everything longer lives in our forum thread: [FORUM LINK]
+
+TOGETHER
+· Fire, police and EMS are equally at home here. Every department gets its own academy, and every course is free for every member.
+· Build wherever you like, including right next to another member — overlapping coverage means faster help for both of you.
+· Tell us your department and your borough. That is how we choose what to build next.
+
+CALLS
+· Share calls worth over 1,000 credits. The small ones are yours to enjoy.
+· Link a call in chat when it needs a special vehicle you do not own, and say which one — that is what gets you an answer.
+· A shared mission cannot be deleted, so give yours an ending: finish it, or let us know you are heading off.
+· New members get answered first. We have all been the person who could not clear a call.
+
+THE FUND
+· Contributing is voluntary. Set your own rate, change it whenever you like.
+· The fund goes down one published list, one target at a time, and every purchase gets posted.
+· Courses stay free. Hospital and cell use carries one small rate, the same for everybody, always posted in advance.
+
+CHAT
+· English in the main channel so everyone can follow.
+· Beginner questions are always welcome — answering them well is half of what this alliance is for.
+· Treat people the way you would want to be treated on your first day.
+
+ACTIVITY
+· Log in roughly once a week. Heading away for a while? Say so and you are covered for as long as you need.
+
+IF SOMETHING GOES WRONG
+· We talk to people first, and breaches are handled accordingly.
+· Racism and discrimination of any kind: zero tolerance, immediate removal.
+· Got a problem with how leadership is running things? Bring it to the owner, or say it openly in chat. That is welcome, not insubordination.
+
+ROLES
+Owner · Admin · Co-admin · Finance admin · Education admin · Transport admin · Action log moderator · Staff
+Given for reliability, not for credits. Want one? Ask — wanting to help is never embarrassing.
+
+Last updated: [DATE]`;
+
+D.leader = `USDU DISPATCH UNITED — LEADERSHIP DOCUMENT
+Internal. Not for the public page.
+
+═══════════════════════════════════
+THE STRATEGY IN ONE LINE
+═══════════════════════════════════
+We are not trying to be the biggest alliance. We are trying to be the
+one where starting out in New York is obviously easier than starting
+alone, whatever department you picked.
+
+Free training and building access are the products. Everything else is
+decoration.
+
+═══════════════════════════════════
+WHERE EACH KIND OF TEXT LIVES
+═══════════════════════════════════
+Keep this separation or the in-game texts turn into walls nobody reads.
+
+  ALLIANCE PAGE  — the goal, the offer, the rules. Changes rarely.
+  CHAT BULLETIN  — one target, one bar, one line. Changes weekly.
+  FORUM THREAD   — build order, spend log, long explanations,
+                   recruiting posts, anything that needs paragraphs.
+  WELCOME MSG    — three things and a link. Never more.
+
+Rule of thumb: if it needs scrolling, it belongs in the forum thread
+and the in-game text just links to it.
+
+═══════════════════════════════════
+BULLETIN CADENCE
+═══════════════════════════════════
+  - Repost whenever the number moves meaningfully, or once a week
+    minimum. A bar that never moves is worse than no bar.
+  - When a target completes, post the win before you post the next
+    target. Wins are what make the next bar feel worth filling.
+  - Never put rules in the bulletin. It trains people to skip it.
+
+═══════════════════════════════════
+ENFORCEMENT — THE ACTUAL LADDER
+═══════════════════════════════════
+The public rules say "handled accordingly" on purpose. Vague in
+public, precise in private, so nobody lawyers over how many warnings
+they have left.
+
+  CONDUCT BREACHES (rudeness, pile-ons, poaching, ignoring the
+  sharing rules after being told directly):
+    1. Private word first. Not in main chat. Most things end here.
+    2. One formal warning, logged with date and what happened. Say
+       plainly that it is a warning.
+    3. A second warning exists at admin discretion, for borderline
+       cases or a first-timer who took the first one well. It is a
+       discretion, not an entitlement, and members are not told it
+       exists.
+    4. After that, removal. No third chances.
+
+  RACISM AND DISCRIMINATION OF ANY KIND:
+    Immediate removal. No warning, no private word, no discussion.
+    Screenshot first, log it, then one short neutral line in chat —
+    "a member was removed for a zero-tolerance breach" — and do not
+    elaborate or argue. Public debate turns one incident into a
+    week-long fight that costs you three quiet members.
+
+  DELIBERATE SABOTAGE: same.
+
+  Log every warning and removal: date, member, what happened, who
+  acted. It is what protects you when someone claims they were
+  removed for nothing.
+
+═══════════════════════════════════
+THE SHARING RULES — HOW TO ENFORCE THEM
+═══════════════════════════════════
+These get broken constantly and almost always innocently. New players
+share everything because they do not yet know what they can handle.
+
+  - First time is never a warning. One friendly line in chat: "under
+    1,000, that one's yours — you've got it." Light and public, so the
+    rule teaches itself to everyone reading.
+  - Only escalate if someone keeps doing it after being told directly.
+  - Never enforce the special-vehicle rule on someone who cannot tell
+    yet what a call wants. Tell them what it needs instead. That one
+    habit does more for retention than any recruiting post.
+
+═══════════════════════════════════
+PHASE 0 — SOLO FOUNDATION (now to ~4 weeks)
+═══════════════════════════════════
+Be worth joining before anyone joins.
+
+  □ Three academies first, one classroom each: fire, police, EMS.
+    Breadth before depth. A police recruit who sees only a fire
+    academy reads this alliance as "not for me" and never applies.
+  □ Your own department first, then the other two as you can afford
+    them. All three before the first hospital.
+  □ Set education discount to 100% for everyone now, before anyone
+    joins, so it is never a decision you have to defend later.
+  □ Publish the description, the rules, and the forum thread. An empty
+    alliance with real text reads as serious; one with none reads as
+    abandoned.
+  □ Set hospital and cell fees low and post the rate. Never change it
+    quietly. There is a well-known failure mode where an admin raises
+    hospital fees to maximum and hides the collection — members
+    notice, and the alliance dies. Do the opposite, loudly.
+
+  Recruiting while solo, what actually works:
+    - Answer other people's shared calls in the open. Visible
+      competence recruits better than adverts.
+    - Forum and subreddit posts with the goal in the title, not the
+      alliance name. "Free academies in fire, police and EMS —
+      building 5 hospitals across NYC" beats "join my alliance".
+    - Lead with all three departments every time. Most small alliances
+      cannot say that, and it is your whole differentiator.
+    - Message unaffiliated players near your stations directly, with
+      one concrete offer: free courses.
+    - Discord webhook early. Alliances with a Discord read as
+      permanent.
+
+═══════════════════════════════════
+PHASE 1 — THREE ACADEMIES, FIVE BOROUGHS (month 1–3)
+═══════════════════════════════════
+Roster target: 10 active members.
+
+  Build order:
+    1. Fire, police and EMS academy — one classroom each
+    2. First hospital, wherever your densest member cluster is
+    3. Second classroom in whichever academy has a waiting list
+    4. Remaining hospitals, ordered by where members actually have
+       stations — never by which borough sounds best
+    5. Detention capacity once police members generate the volume
+
+  Ratios that keep it honest:
+    - Breadth before depth: every department gets one classroom before
+      any department gets two.
+    - After that, roughly one classroom per 3 active members in that
+      department. Four classrooms is the cap per school, so a second
+      school of a type is triggered by demand, not headcount.
+    - One hospital per ~2 active members, floor of one per borough you
+      have members in. Distance first, capacity second — a hospital in
+      the wrong borough teaches members that alliance hospitals are
+      useless to them.
+
+  Admin team, in this order and no faster:
+    - First: Education admin. Highest value, lowest risk, and it takes
+      the job that would otherwise eat your evenings.
+    - Second: Co-admin, once applications exceed a few a week.
+    - Last: Finance admin. Can build and expand alliance buildings and
+      change member discount rates. Months of trust, minimum.
+    - Hand out Staff freely. It costs nothing and makes people feel
+      like they belong, which is most of the job.
+
+═══════════════════════════════════
+PHASE 2 — DEPTH (month 3–6)
+═══════════════════════════════════
+  □ Expand classrooms where the waiting list is, not evenly.
+  □ Detention cells online, same free-or-cheap principle.
+  □ Standing "what is everyone short of" thread. The pattern of
+    missing units tells you what to fund next better than theory.
+  □ Track who answers shared calls — to know who to promote.
+  □ Post a win every time something lands.
+
+═══════════════════════════════════
+PHASE 3 — THE METRO (month 6+)
+═══════════════════════════════════
+  □ Outward: Long Island, Westchester, northern New Jersey. Buildings
+    follow members, members do not follow buildings.
+  □ Goals that are not buildings: coverage targets, response culture,
+    a large-call playbook.
+  □ Watch for the classic mid-size failure — leadership quietly stops
+    publishing what the fund bought. Put the spend log on a fixed
+    weekly rhythm now, while it is easy.
+
+═══════════════════════════════════
+WHAT WOULD KILL THIS
+═══════════════════════════════════
+  1. Charging for courses.
+  2. Building only fire infrastructure.
+  3. Changing hospital or cell fees quietly.
+  4. A fund with no published spend log.
+  5. Finance admin to someone you met last week.
+  6. Coming down hard on beginners over the sharing rules.
+  7. Arguing publicly about a zero-tolerance removal.
+  8. In-game texts that take five minutes to read.
+
+═══════════════════════════════════
+STILL TO LOOK UP
+═══════════════════════════════════
+  - Alliance hospital cost and alliance cell cost. A school is 500,000
+    credits plus 400,000 per extra classroom, up to four; confirm the
+    rest from the build menu before promising anyone a timeline.
+  - Your available fee options for hospital and cell use, so the rate
+    you publish is one that actually exists.
+  - Whether all three academy types are separate alliance buildings on
+    your server and what each costs. Phase 1 depends on it.`;
+
+/* ============ state ============ */
+const KEY = "usdu-kit-v1";
+let S = { text:{}, gen:{target:"Fire Academy", now:310000, goal:500000, width:12, rec:true}, custom:[] };
+
+function load(){
+  try{
+    const raw = localStorage.getItem(KEY);
+    if(!raw) return;
+    const s = JSON.parse(raw);
+    if(s && typeof s === "object"){
+      if(s.text) S.text = s.text;
+      if(s.gen) Object.assign(S.gen, s.gen);
+      if(Array.isArray(s.custom)) S.custom = s.custom;
+    }
+  }catch(_){}
+}
+let saveTimer = null;
+function save(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(()=>{
+    try{
+      localStorage.setItem(KEY, JSON.stringify(S));
+      flash("Saved");
+    }catch(_){ flash("Could not save — storage is blocked in this browser", true); }
+  }, 350);
+}
+let flashTimer=null;
+function flash(msg, bad){
+  const el = document.getElementById("status");
+  el.textContent = msg;
+  el.className = "status" + (bad ? "" : " on");
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(()=>{ el.textContent=""; el.className="status"; }, 1800);
+}
+function val(id){ return S.text[id] !== undefined ? S.text[id] : D[id]; }
+
+/* ============ block builder ============ */
+function grow(ta){ ta.style.height="auto"; ta.style.height=(ta.scrollHeight+4)+"px"; }
+
+function makeBlock(host, id, label, opts){
+  opts = opts || {};
+  const box = document.createElement("div");
+  box.className = "block";
+  const bar = document.createElement("div");
+  bar.className = "bar";
+
+  if(opts.editableTitle){
+    const t = document.createElement("input");
+    t.className = "tt"; t.value = label;
+    t.addEventListener("input", ()=>{ opts.onTitle(t.value); save(); });
+    bar.appendChild(t);
+  }else{
+    const s = document.createElement("span");
+    s.className = "lbl"; s.textContent = label;
+    bar.appendChild(s);
+  }
+
+  const copy = document.createElement("button");
+  copy.className = "primary"; copy.textContent = "Copy";
+  bar.appendChild(copy);
+
+  if(!opts.noReset){
+    const rst = document.createElement("button");
+    rst.textContent = "Reset";
+    rst.addEventListener("click", ()=>{
+      delete S.text[id]; ta.value = D[id]; grow(ta); save();
+      if(opts.onInput) opts.onInput();
+      flash("Reset to the original text");
+    });
+    bar.appendChild(rst);
+  }
+  if(opts.onDelete){
+    const del = document.createElement("button");
+    del.textContent = "Delete";
+    del.addEventListener("click", ()=>{ opts.onDelete(); });
+    bar.appendChild(del);
+  }
+
+  const ta = document.createElement("textarea");
+  ta.spellcheck = false;
+  ta.value = opts.getValue ? opts.getValue() : val(id);
+  if(opts.mono) ta.classList.add("mono");
+  ta.addEventListener("input", ()=>{
+    grow(ta);
+    if(opts.setValue) opts.setValue(ta.value); else S.text[id] = ta.value;
+    save();
+    if(opts.onInput) opts.onInput();
+  });
+
+  copy.addEventListener("click", ()=>copyText(ta.value, copy));
+
+  box.appendChild(bar); box.appendChild(ta);
+  host.appendChild(box);
+  requestAnimationFrame(()=>grow(ta));
+  return ta;
+}
+
+async function copyText(txt, btn){
+  let done=false;
+  try{ await navigator.clipboard.writeText(txt); done=true; }
+  catch(_){
+    try{
+      const t=document.createElement("textarea");
+      t.value=txt; t.style.position="fixed"; t.style.opacity="0";
+      document.body.appendChild(t); t.select();
+      done=document.execCommand("copy"); document.body.removeChild(t);
+    }catch(__){}
+  }
+  const old=btn.textContent;
+  btn.textContent = done ? "Copied" : "Copy failed";
+  btn.classList.toggle("done", done);
+  setTimeout(()=>{ btn.textContent=old; btn.classList.remove("done"); }, 1800);
+}
+
+/* ============ bulletin ============ */
+function nf(n){ return Number(n||0).toLocaleString("en"); }
+function buildBulletin(){
+  const g = S.gen;
+  const width = Math.max(4, Math.min(30, +g.width||12));
+  const goal = Math.max(1, +g.goal||1);
+  const now  = Math.max(0, +g.now||0);
+  const pct  = Math.min(100, Math.round(now/goal*100));
+  const filled = Math.max(0, Math.min(width, Math.round(pct/100*width)));
+  const barStr = "▓".repeat(filled) + "░".repeat(width-filled);
+  const target = (g.target||"our next target").trim();
+  let tpl = now >= goal ? val("tplDone") : val("tplOpen");
+  let out = tpl
+    .replace(/\{TARGET\}/g, target.toUpperCase())
+    .replace(/\{target\}/g, target)
+    .replace(/\{BAR\}/g, barStr)
+    .replace(/\{PCT\}/g, pct)
+    .replace(/\{NOW\}/g, nf(now))
+    .replace(/\{GOAL\}/g, nf(goal));
+  if(g.rec) out += "\n\n" + val("tplRec");
+  out += "\n\n— USDU";
+  document.getElementById("bulletin").textContent = out;
+}
+
+/* ============ custom blocks ============ */
+function renderCustom(){
+  const host = document.getElementById("custom");
+  host.innerHTML = "";
+  S.custom.forEach((c, i) => {
+    const wrap = document.createElement("div");
+    wrap.style.marginBottom = "14px";
+    host.appendChild(wrap);
+    makeBlock(wrap, "custom"+i, c.title, {
+      editableTitle: true, noReset: true,
+      getValue: ()=>c.body,
+      setValue: v=>{ c.body = v; },
+      onTitle: v=>{ c.title = v; },
+      onDelete: ()=>{ S.custom.splice(i,1); save(); renderCustom(); flash("Block deleted"); }
+    });
+  });
+}
+
+/* ============ backup ============ */
+function fillBackup(){
+  document.getElementById("backup").value = JSON.stringify(S, null, 1);
+  grow(document.getElementById("backup"));
+}
+
+/* ============ boot ============ */
+load();
+
+makeBlock(document.getElementById("b-desc"), "desc", "Public page");
+makeBlock(document.getElementById("b-welcome"), "welcome", "Auto-welcome");
+makeBlock(document.getElementById("b-tpl-open"), "tplOpen", "Template — target in progress", {mono:true, onInput:buildBulletin});
+makeBlock(document.getElementById("b-tpl-done"), "tplDone", "Template — target funded", {mono:true, onInput:buildBulletin});
+makeBlock(document.getElementById("b-tpl-rec"), "tplRec", "Template — recruiting line", {mono:true, onInput:buildBulletin});
+makeBlock(document.getElementById("b-rules"), "rules", "Public rules");
+makeBlock(document.getElementById("b-leader"), "leader", "Internal");
+
+const tokenNote = document.createElement("p");
+tokenNote.className = "tokens";
+tokenNote.innerHTML = 'Tokens you can use in the templates: <code>{TARGET}</code> uppercase · <code>{target}</code> as typed · <code>{BAR}</code> · <code>{PCT}</code> · <code>{NOW}</code> · <code>{GOAL}</code>';
+document.getElementById("b-tpl-rec").appendChild(tokenNote);
+
+const gi = {target:"g-target", now:"g-now", goal:"g-goal", width:"g-width"};
+for(const k in gi){
+  const el = document.getElementById(gi[k]);
+  el.value = S.gen[k];
+  el.addEventListener("input", ()=>{
+    S.gen[k] = (k==="target") ? el.value : +el.value;
+    buildBulletin(); save();
+  });
+}
+const rec = document.getElementById("g-rec");
+rec.checked = !!S.gen.rec;
+rec.addEventListener("change", ()=>{ S.gen.rec = rec.checked; buildBulletin(); save(); });
+
+document.querySelector("[data-copyout]").addEventListener("click", ev =>
+  copyText(document.getElementById("bulletin").textContent, ev.target));
+
+document.getElementById("add").addEventListener("click", ()=>{
+  S.custom.push({title:"New block", body:""});
+  save(); renderCustom(); flash("Block added");
+});
+
+document.querySelector("[data-copy-el]").addEventListener("click", ev =>
+  copyText(document.getElementById("backup").value, ev.target));
+document.getElementById("bk-refresh").addEventListener("click", ()=>{ fillBackup(); flash("Backup refreshed"); });
+document.getElementById("bk-restore").addEventListener("click", ()=>{
+  try{
+    const s = JSON.parse(document.getElementById("backup").value);
+    if(!s || typeof s !== "object") throw 0;
+    S = {text:s.text||{}, gen:Object.assign({target:"",now:0,goal:1,width:12,rec:true}, s.gen||{}), custom:Array.isArray(s.custom)?s.custom:[]};
+    localStorage.setItem(KEY, JSON.stringify(S));
+    location.reload();
+  }catch(_){ flash("That does not look like a valid backup", true); }
+});
+
+renderCustom();
+buildBulletin();
+fillBackup();
+document.getElementById("backup").addEventListener("input", e=>grow(e.target));
+</script>
+</body>
+</html>
