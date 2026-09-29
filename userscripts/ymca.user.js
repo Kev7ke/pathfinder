@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YMCA — Your Mission Chief Alpha
 // @namespace    https://github.com/Kev7ke/pathfinder
-// @version      0.0.75
+// @version      0.0.76
 // @description  A tool set for MissionChief: build planning, bulk renaming, and a way to hand game data back for support.
 // @author       Kev7ke (built with Claude Code)
 // @homepageURL  https://github.com/Kev7ke/pathfinder
@@ -688,7 +688,7 @@ const PF = {
  * ========================================================================== */
 
 const YMCA = {
-    version: '0.0.75',
+    version: '0.0.76',
     modules: [],
     /** Register a module. Order here is the order in the sidebar. */
     register(mod) {
@@ -2314,6 +2314,22 @@ const MM_REQUIREMENTS = {
      * It is answered by the type id because there is nothing else to answer it
      * with: `109` is the CCTU on the buy page — the game naming it — and no
      * checkbox any install has read carries a word for it. */
+    /* THE SECOND RULE THAT IS THE PLAYER'S. Nothing in the game asks for an
+     * EMS Chief on a call with patients — no mission's `requirements` names
+     * one, and the window never mentions it. The player runs one from a
+     * patient count they set, so the rule is theirs, the number is theirs, and
+     * the row says so.
+     *
+     * Answered by the flag rather than the type id, because there is one to
+     * answer with: the EMS Chief's checkbox carries `kdow_orgl`, which is how
+     * every other requirement here is matched. The type id is the fallback for
+     * a vehicle the game flags with nothing, which this is not. */
+    ems_chief: {
+        anyOf: ['kdow_orgl', 'kdow_orgl_any'],
+        label: 'EMS Chief',
+        icon: 'star',
+        source: 'the EMS Chief\u2019s own checkbox carries kdow_orgl',
+    },
     cctu: {
         typeIds: ['109'],
         label: 'Critical care transport',
@@ -2745,6 +2761,35 @@ function mmMeets(v, rule) {
      * stating it rather than a name being matched. */
     if (rule.typeIds) return rule.typeIds.includes(String(v.typeId));
     return rule.anyOf ? rule.anyOf.some((f) => v.has(f)) : v.has(rule.flag);
+}
+
+/**
+ * How many of what a rule asks for have ARRIVED — never what is on the way.
+ *
+ * **`Missing Vehicles` counts against what is at the mission and nothing else**,
+ * exactly as `Missing Personnel` does, and mission 99 proved it: nothing
+ * arrived, twenty-six vehicles driving, and the game's line read `6 firetrucks,
+ * 2 platform trucks, 2 Battalion chief units, 1 Mobile Command Vehicle, 2 Heavy
+ * Rescue Vehicles, 2 Patrol cars` — **character for character the catalogue's
+ * whole requirement for Commercial Fire**. If a vehicle on its way counted, the
+ * line would have been empty.
+ *
+ * So a shortfall off the window is added to what has arrived. Adding it to what
+ * is *committed* counts every driving vehicle twice: twelve engines on the way
+ * plus a shortfall of six came out as eighteen wanted, and the panel asked for
+ * eleven more vehicles on a call that already had twenty-six coming. That is
+ * the crew's mistake again, on the other table.
+ *
+ * What the "There" column shows is unchanged — that stays what is committed,
+ * because a vehicle on its way does meet the requirement and the player's own
+ * switch decides whether it counts. Only the arithmetic against the game's own
+ * sentence uses this.
+ */
+function mmArrivedCount(scene, rule) {
+    return (scene.onScene || []).filter((v) => v.arrived && mmMeets({
+        typeId: v.typeId,
+        has: (flag) => (v.flags || []).includes(flag),
+    }, rule)).length;
 }
 
 /** The same question for a type already at the mission, whose flags were learnt. */
@@ -3542,6 +3587,25 @@ async function mmPlan(page, ctx, cfg) {
             else wants.push(['patients', perPatient, patients.total === false]);
         }
 
+        /* ONE EMS CHIEF FROM A PATIENT COUNT THE PLAYER SETS.
+         *
+         * No page of the game asks for this — no mission's `requirements`
+         * names an EMS Chief and no window mentions one — so it is the
+         * player's rule for their own game, the way the CCTU is, and the row
+         * says so under the cursor. **One, whatever the count**: it is a
+         * commander, and a second one commands nothing.
+         *
+         * Only where the window actually counted the patients. `possible_patient`
+         * is the most a call *can* produce and has never sent anything here;
+         * it is not going to start by sending a chief. */
+        if (cfg.emsChief !== false && patients && patients.measured
+            && patients.count >= mmEmsChiefFrom(cfg)
+            && !wants.some(([k]) => k === 'ems_chief')) {
+            wants.push(['ems_chief', 1, false]);
+            mmAddedHere.set('ems_chief', `your own rule for your game: one EMS Chief from `
+                + `${mmEmsChiefFrom(cfg)} patients, which no page of the game asks for`);
+        }
+
         /* What the game's own words can answer. Every flag on every checkbox in
          * this table, and every flag learnt from any table before it: a HazMat
          * out of range today still taught `hazmat` the day it was in one, and a
@@ -3579,8 +3643,8 @@ async function mmPlan(page, ctx, cfg) {
              * patient line already does — and the larger of the two figures
              * stands. Where the catalogue is right the window says nothing and
              * nothing changes; where it is behind, the game corrects it. */
-            const there = mmSceneCount(scene, found.rule);
-            const total = there + wanted;
+            /* ARRIVED, not committed — see mmArrivedCount. */
+            const total = mmArrivedCount(scene, found.rule) + wanted;
             if (total > existing[1]) {
                 existing[1] = total;
                 existing[2] = false;
@@ -3631,9 +3695,17 @@ async function mmPlan(page, ctx, cfg) {
                 continue;
             }
             const onScene = mmSceneCount(scene, rule);
-            /* A shortfall is counted on top of what is there; a total has what
-             * is there counted against it. */
-            needs.push({ key, rule, wanted: isShortfall ? wanted + onScene : wanted, onScene });
+            /* A shortfall is counted on top of what has ARRIVED; a total has
+             * everything committed counted against it. The two are different
+             * numbers the moment anything is still driving, and using the
+             * second for both is what asked for eleven vehicles on a call with
+             * twenty-six already on their way. */
+            needs.push({
+                key,
+                rule,
+                wanted: isShortfall ? wanted + mmArrivedCount(scene, rule) : wanted,
+                onScene,
+            });
         }
 
         for (const v of mmAllocate(needs, vehicles)) picked.set(v.id, v);
@@ -4570,6 +4642,11 @@ const MM_SWITCH_CSS = `
 #${MM_PANEL_ID} .mm-switch input:checked + i::after{left:16px}
 #${MM_PANEL_ID} .mm-switch input:focus-visible + i{outline:2px solid currentColor;outline-offset:2px}
 #${MM_PANEL_ID} .mm-switch.off{opacity:.55}
+/* The system's own pair, as everywhere a control of ours has to be readable in
+ * whatever theme the game is wearing. */
+#${MM_PANEL_ID} .mm-num{width:44px;margin:0 4px;padding:1px 3px;text-align:center;
+  background:Field;color:FieldText;color-scheme:light dark;
+  border:1px solid rgba(128,128,128,.6);border-radius:3px;font:inherit}
 #${MM_PANEL_ID} .mm-lock{background:none;border:0;padding:0 2px;line-height:1;opacity:.45;color:inherit}
 #${MM_PANEL_ID} .mm-lock.on{opacity:1}
 
@@ -4629,6 +4706,28 @@ const MM_SWITCH_CSS = `
   background:rgba(255,255,255,.22);box-shadow:inset 0 -1px 0 rgba(0,0,0,.25)}
 #${MM_PANEL_ID} .mm-glyph{vertical-align:-2.5px;margin-left:6px;opacity:.8;overflow:visible}
 #${MM_PANEL_ID} tr:hover .mm-glyph{opacity:1}`;
+
+/** From how many patients a chief goes. The player's number, never a reading. */
+const MM_EMS_CHIEF_DEFAULT = 3;
+function mmEmsChiefFrom(cfg) {
+    const n = Number(cfg?.emsChiefFrom);
+    return Number.isFinite(n) && n >= 1 ? Math.min(99, Math.round(n)) : MM_EMS_CHIEF_DEFAULT;
+}
+
+/**
+ * A switch with a number beside it.
+ *
+ * The switch says whether the rule is on at all and the number says from where,
+ * so the two belong together — a threshold two clicks away in a lightbox is one
+ * nobody changes. It is a plain `number` input, which is the up-and-down the
+ * browser already has.
+ */
+function mmSwitchWithNumber(key, before, after, on, numberKey, value) {
+    return `<label class="mm-switch${on ? '' : ' off'}">
+    <input type="checkbox" data-cfg="${key}"${on ? ' checked' : ''}>
+    <i></i>${before}<input class="mm-num" type="number" min="1" max="99" step="1"
+      data-num="${numberKey}" value="${value}" aria-label="${before} how many">${after}</label>`;
+}
 
 function mmSwitch(key, label, on, disabled) {
     return `<label class="mm-switch${on ? '' : ' off'}"${disabled ? ' title="not on this mission"' : ''}>
@@ -4693,6 +4792,18 @@ function mmMountPanel(ctx) {
      * is allowed to render. */
     let drawing = 0;
     const draw = async () => {
+        /* A REDRAW IN THE MIDDLE OF TYPING SWALLOWS WHAT IS BEING TYPED. The
+         * panel is redrawn whenever the mission window moves — a vehicle
+         * arriving, a travel time landing — and it redraws by replacing its own
+         * markup, so a half-typed threshold is thrown away along with the box
+         * it was in. That is the fault the HighFive bar had, from the other
+         * end: a control that writes itself back on every redraw.
+         *
+         * Nothing is lost by waiting: the field's own `change` redraws as soon
+         * as the number is committed, and the next thing the mission does
+         * redraws anyway. */
+        if (panel.contains(document.activeElement)
+            && document.activeElement.matches?.('.mm-num')) return;
         const mine = (drawing += 1);
         const cfg = ctx.store.read('cfg', { fastestFirst: true });
         /* Another mission holding follow-up means its tab is not opened here
@@ -4782,12 +4893,21 @@ function mmMountPanel(ctx) {
     });
 
     panel.addEventListener('change', (e) => {
+        const num = e.target.dataset.num;
+        if (num) {
+            const cfg = ctx.store.read('cfg', {});
+            cfg[num] = Math.max(1, Math.min(99, Math.round(Number(e.target.value) || 1)));
+            ctx.store.write('cfg', cfg);
+            draw();
+            return;
+        }
         const key = e.target.dataset.cfg;
         /* AUTO'S SWITCH IS NOT HERE. It lives in the game's own mission-filter
          * row, where it is on screen whatever mission is open — a switch inside
          * the panel was two clicks away whenever the window it belonged to was
          * shut, and moved with the table under the cursor besides. */
-        if (!['fastestFirst', 'ambulancePerPatient', 'followUp', 'countDriving'].includes(key)) return;
+        if (!['fastestFirst', 'ambulancePerPatient', 'followUp', 'countDriving', 'emsChief']
+            .includes(key)) return;
         const cfg = ctx.store.read('cfg', {});
         cfg[key] = e.target.checked;
         ctx.store.write('cfg', cfg);
@@ -5338,6 +5458,8 @@ function mmGamePanelHtml(plan, cfg, ctx) {
         ${mmSwitch('fastestFirst', 'Fastest first', cfg.fastestFirst !== false)}
         ${mmSwitch('ambulancePerPatient', 'Ambulance per patient', cfg.ambulancePerPatient !== false)}
         ${mmSwitch('countDriving', 'Count what is on the way', cfg.countDriving !== false)}
+        ${mmSwitchWithNumber('emsChief', 'EMS Chief from', ' patients',
+        cfg.emsChief !== false, 'emsChiefFrom', mmEmsChiefFrom(cfg))}
         ${mmSwitch('followUp', `Follow-up${plan.followUp ? ` (${plan.followUp})` : ''}`,
         cfg.followUp === true, !plan.followUpOffered)}
       </div>

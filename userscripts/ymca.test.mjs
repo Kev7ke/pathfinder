@@ -1885,6 +1885,130 @@ await mission.evaluate(() => {
   document.getElementById('mission_vehicle_at_mission')?.remove();
 });
 
+// ---- a shortfall counts against what has ARRIVED, never what is on the way ----
+// Mission 99: nothing at the mission, sixteen vehicles driving, and the game's line read
+// `6 firetrucks, 2 platform trucks, ...` — character for character the catalogue's whole
+// requirement for Commercial Fire. If a vehicle on its way counted for it, that line would have
+// been empty. Adding the shortfall to what is COMMITTED counts every driving vehicle twice: six
+// engines on the way plus a shortfall of six came out as twelve wanted, and the panel asked for
+// eleven more on a call that already had sixteen coming. That is the crew's mistake again.
+await mission.evaluate(() => {
+  for (const t of document.querySelectorAll('#mission_vehicle_at_mission, #mission_vehicle_driving')) {
+    t.remove();
+  }
+  const types = JSON.parse(localStorage.getItem('ymca-missionmagician-types') || '{}');
+  types['10'] = { caps: ['fustw', 'fustw_or_police_motorcycle'], name: 'Patrol car' };
+  localStorage.setItem('ymca-missionmagician-types', JSON.stringify(types));
+  window.__catalogue = [{
+    id: '99', name: 'Commercial Fire', average_credits: 5000,
+    requirements: { firetrucks: 6, platform_trucks: 2, police_cars: 2 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '99');
+  // Everything is DRIVING — six engines' worth of Quints, and two patrol cars.
+  const driving = document.createElement('table');
+  driving.id = 'mission_vehicle_driving';
+  driving.innerHTML = `<tbody>${[13, 13, 13, 13, 13, 13, 10, 10].map((t, i) => `
+    <tr id="vehicle_row_9${i}"><td><a href="/vehicles/9${i}"
+      vehicle_type_id="${t}">driving</a></td></tr>`).join('')}</tbody>`;
+  document.body.append(driving);
+  // The game still says the whole requirement is missing, because none of them has arrived.
+  document.getElementById('missing_text').textContent =
+    'Missing Vehicles: 6 firetrucks, 2 platform trucks, 2 Patrol cars';
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(1400);
+const driving99 = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim())));
+console.log('all on the way    :', JSON.stringify(driving99));
+const line99 = (label) => driving99.find((r) => new RegExp(label, 'i').test(r[4]));
+assert.equal(line99('Fire engines')[0], '6',
+  'six wanted — the shortfall plus nothing arrived, not the shortfall plus six driving');
+assert.equal(line99('Fire engines')[1], '6', 'and the six on their way are what is there');
+const tick99 = await mission.textContent('#ymca-mm-panel [data-do="select"]');
+console.log('nothing to add    :', tick99.trim().split('<')[0]);
+assert.match(tick99, /Tick 0 vehicles/,
+  'a call with everything already driving to it needs nothing more');
+await mission.evaluate(() => {
+  document.getElementById('missing_text').textContent = '';
+  document.getElementById('mission_vehicle_driving')?.remove();
+});
+
+// ---- one EMS Chief from a patient count the player sets ----
+// No page of the game asks for this: no mission's requirements names an EMS Chief and no window
+// mentions one. It is the player's rule for their own game, the way the CCTU is, and the number
+// sits beside its own switch rather than two clicks away in a lightbox.
+await mission.evaluate(() => {
+  window.__catalogue = [{ id: '1400', name: 'Crash with patients', requirements: {} }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '1400');
+  const patients = document.createElement('div');
+  patients.id = 'patient_button_text';
+  patients.innerHTML = '<strong>4</strong> Patients';
+  document.body.append(patients);
+  // Two EMS Chiefs and two ambulances in range, so picking two chiefs would show.
+  document.getElementById('vehicle_show_table_body_all').innerHTML = [
+    ['701', '29', 'kdow_orgl="1"'], ['702', '29', 'kdow_orgl="1"'],
+    ['703', '5', 'any_rtw="1"'], ['704', '5', 'any_rtw="1"'],
+  ].map(([id, type, flags]) => `<tr class="vehicle_select_table_tr" vehicle_id="${id}"
+      data-distance="1" vehicle_type="EMS Chief">
+      <td><input type="checkbox" class="vehicle_checkbox" value="${id}"
+        id="vehicle_checkbox_${id}" name="vehicle_ids[]" vehicle_type_id="${type}" ${flags}
+        fms="2"></td><td id="vehicle_sort_${id}" timevalue="${id}">x</td></tr>`).join('');
+});
+await mission.waitForTimeout(1400);
+const chiefRows = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim())));
+console.log('ems chief rows    :', JSON.stringify(chiefRows));
+const chief = chiefRows.find((r) => /EMS Chief/i.test(r[4]));
+assert.ok(chief, 'four patients clears the default of three, so a chief is asked for');
+assert.equal(chief[0], '1', 'ONE, whatever the count — a commander, and a second commands nothing');
+assert.match(chief[4], /not in the game/i, 'and the row says the game does not ask for it');
+// The number sits beside the switch and is the player's.
+const chiefControl = await mission.$eval('#ymca-mm-panel [data-num="emsChiefFrom"]', (n) => ({
+  value: n.value, min: n.min, max: n.max, type: n.type,
+  switched: n.closest('label').querySelector('[data-cfg="emsChief"]').checked,
+}));
+console.log('ems chief control :', JSON.stringify(chiefControl));
+assert.deepEqual(chiefControl, { value: '3', min: '1', max: '99', type: 'number', switched: true },
+  'an up-and-down beside its own switch, which is the browser\'s own number input');
+// Raise the threshold past the patient count and the chief goes.
+// Typed into, the way a player types into it. A REDRAW IN THE MIDDLE OF TYPING used to swallow
+// this: the panel redraws whenever the mission window moves and it redraws by replacing its own
+// markup, so the box being typed in went with it. It waits while the field has focus now.
+await mission.fill('#ymca-mm-panel [data-num="emsChiefFrom"]', '9');
+await mission.locator('#ymca-mm-panel [data-num="emsChiefFrom"]').blur();
+await mission.waitForTimeout(900);
+const raised = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.trim())));
+console.log('threshold raised  :', JSON.stringify(raised.map((r) => r[4])));
+assert.ok(!raised.some((r) => /EMS Chief/i.test(r[4])),
+  'four patients is under nine, so no chief is asked for');
+// AND THE NUMBER DID NOT FLIP THE SWITCH IT SITS INSIDE.
+assert.equal(
+  await mission.$eval('#ymca-mm-panel [data-cfg="emsChief"]', (b) => b.checked), true,
+  'typing in the number is not a press on the switch wrapped around it');
+await mission.evaluate(() => {
+  const n = document.querySelector('#ymca-mm-panel [data-num="emsChiefFrom"]');
+  n.value = '3';
+  n.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await mission.waitForTimeout(900);
+// Exactly one chief is ticked, never both.
+await mission.click('#ymca-mm-panel [data-do="select"]');
+await mission.waitForTimeout(400);
+const chiefTicked = await mission.$$eval('.vehicle_checkbox:checked', (b) => b.map((x) => x.value));
+console.log('ems chief ticked  :', JSON.stringify(chiefTicked));
+assert.equal(chiefTicked.filter((v) => v === '701' || v === '702').length, 1,
+  'one chief goes, never two');
+await mission.evaluate(() => {
+  document.getElementById('patient_button_text')?.remove();
+  for (const b of document.querySelectorAll('.vehicle_checkbox')) {
+    b.checked = false;
+    b.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+});
+
 // ---- a patient transport wants a CCTU, and that is the player's own rule ----
 // Nothing in the game states it: every mission in the ambulance branch carries an empty
 // `requirements`, the window states a patient rather than what to send, and #missing_text is

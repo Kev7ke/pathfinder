@@ -569,6 +569,25 @@ is still missing**, the same arithmetic the patient line already does, and the
 larger of the two figures stands. Where the catalogue is right the window says
 nothing and nothing changes.
 
+**And `Missing Vehicles` counts against what has ARRIVED, not against what is
+committed — which is the crew's mistake again, on the other table.** Mission 99
+proved it: nothing at the mission, **twenty-six vehicles driving**, and the
+game's line read `6 firetrucks, 2 platform trucks, 2 Battalion chief units, 1
+Mobile Command Vehicle, 2 Heavy Rescue Vehicles, 2 Patrol cars` — *character for
+character* the catalogue's whole requirement for Commercial Fire. If a vehicle
+on its way counted for that line, it would have been empty.
+
+Adding the shortfall to what is **committed** therefore counts every driving
+vehicle twice: twelve engines on the way plus a shortfall of six came out as
+eighteen wanted, and the panel asked for eleven more on a call that already had
+twenty-six coming. So a shortfall off the window is added to **what has
+arrived**, by `mmArrivedCount`, and the older `#missing_text` path — which had
+the same fault since it was written — goes through it too. What the **There**
+column shows is unchanged: that stays what is committed, because a vehicle on
+its way does meet the requirement and the player's own switch decides whether it
+counts. Only the arithmetic against the game's own sentence uses the narrower
+number.
+
 **The window names a requirement in the words the game uses for it, not in the
 key the catalogue files it under.** Of those four, `firetrucks` and
 `platform_trucks` are keys and `battalion_chief_unit` and `patrol_cars` are not,
@@ -626,6 +645,27 @@ something nobody here has heard of*. The report carries `missionName` — the
 catalogue's own wording, the same string on every account that has the mission —
 and `addedRules`, so one press inside a transport window settles it and the rule
 keys on the type id from then on.
+
+**One EMS Chief from a patient count the player sets** is the third rule here
+that no page of the game asks for. No mission's `requirements` names an EMS
+Chief and no window mentions one, so it is the player's, for their own game, and
+the row says so under the cursor. **One, whatever the count** — it is a
+commander, and a second commands nothing. It is answered by the flag rather than
+a type id, because there is one to answer with: the chief's own checkbox carries
+`kdow_orgl`. It only ever fires where the window actually counted the patients;
+`possible_patient` has never sent anything here and is not going to start by
+sending a chief.
+
+**The threshold sits beside its own switch**, as a plain `number` input — the
+up-and-down the browser already has — because a number two clicks away in a
+lightbox is one nobody changes.
+
+**A redraw in the middle of typing swallows what is being typed.** The panel is
+redrawn whenever the mission window moves, by replacing its own markup, so a
+half-typed threshold went with the box it was in. It waits while a number in it
+has focus: nothing is lost, because the field's own `change` redraws as soon as
+the number is committed. That is the HighFive bar's lesson from the other end —
+a control that writes itself back on every redraw.
 
 **The ambulance beside it is not this rule.** A transport whose window states a
 patient asks for an ambulance too, and that is the window's own arithmetic from
