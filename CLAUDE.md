@@ -556,6 +556,30 @@ a label this cannot turn into a requirement is left alone rather than invented,
 and the row says **as this window states** so it is never mistaken for a
 catalogue line.
 
+**The game outranks the catalogue, and a stale entry is why.** Mission 640 came
+back with every line covered — 2 platform trucks wanted and 2 there, 1 battalion
+chief and 1 there — while the game's own line read `Missing Vehicles: 2
+firetrucks, 1 platform trucks, 1 Battalion chief unit, 2 Patrol cars`. Both
+cannot be true, and the one to believe is the window: `/einsaetze.json` is a
+list this account downloaded once, and the window is the mission the game is
+running now. **Skipping a key the catalogue already had is what threw it away** —
+the window's shortfall was only ever taken for a key nothing else asked for. It
+is taken for every key now: the total it implies is **what has arrived plus what
+is still missing**, the same arithmetic the patient line already does, and the
+larger of the two figures stands. Where the catalogue is right the window says
+nothing and nothing changes.
+
+**The window names a requirement in the words the game uses for it, not in the
+key the catalogue files it under.** Of those four, `firetrucks` and
+`platform_trucks` are keys and `battalion_chief_unit` and `patrol_cars` are not,
+so half the sentence resolved to nothing. They are what the game calls those
+vehicles in its **dispatch-order editor**, which is exactly where this panel's
+labels came from — `police_cars` is labelled "Patrol cars" because the AAO is
+called Patrol Car. So a window word is matched against the labels as well as the
+keys: the same reading from a second page of the game rather than a resemblance.
+`patients` is excluded from that table, because it is not a requirement key and
+shares its label with `ambulances`.
+
 **And where no page of the game states it at all, it is written down here and
 says so on the row.** The skateboard accident cannot be finished until an
 ambulance goes: `requirements` is empty of it, no patient spawns, the treatment
@@ -595,6 +619,13 @@ the skateboard's name: `Patient Transfer`, `Patient transfer from flight`,
 `Interfacility transport`. **One per patient**, which is what "one per
 transport" comes to — the window counts patients and a transport carries one, so
 on the ordinary transfer the two readings are the same number.
+
+**A rule keyed on a name cannot say why it did not fire**, and "no CCTU was
+asked for" cannot tell *this is not a transport* from *this transport is called
+something nobody here has heard of*. The report carries `missionName` — the
+catalogue's own wording, the same string on every account that has the mission —
+and `addedRules`, so one press inside a transport window settles it and the rule
+keys on the type id from then on.
 
 **The ambulance beside it is not this rule.** A transport whose window states a
 patient asks for an ambulance too, and that is the window's own arithmetic from

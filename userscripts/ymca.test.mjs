@@ -463,12 +463,14 @@ assert.ok(!gap.types['13'], 'the Quint is shipped, so it is not in what is missi
 // ---- a type you own that nothing has ever read ----
 // Every store above is written by something that already read a vehicle, so a type nobody could
 // read is in none of them and therefore in no report either. That is how one Type 1 fire engine
-// (vehicle_type 0, and zero is falsy) stayed invisible through a dozen rounds of exports. Owned
-// and unread is a third state and it has to say so on its own.
+// (vehicle_type 0, and zero is falsy) stayed invisible through a dozen rounds of exports — until
+// a report finally carried its flags and the repo took them. Type 2 is the one still unread:
+// the buy page names it and no checkbox anybody sent has ever carried a word for it. Owned and
+// unread is a third state and it has to say so on its own.
 await pg.evaluate(() => {
   localStorage.setItem('ymca-cache-/api/vehicles', JSON.stringify({
     at: Date.now(),
-    value: [{ id: 1, vehicle_type: 0 }, { id: 2, vehicle_type: 13 }],
+    value: [{ id: 1, vehicle_type: 2 }, { id: 2, vehicle_type: 13 }],
   }));
 });
 await pg.click('#ymca-back');
@@ -481,10 +483,10 @@ assert.match(blindSaid, /1 vehicle type you own is still unread/,
 await pg.click('[data-do="gap"]');
 await pg.waitForFunction(() => document.querySelector('#ymca-diag-out')?.value.includes('ownedUnknown'));
 const blind = JSON.parse(await pg.inputValue('#ymca-diag-out'));
-console.log('owned but unread  :', JSON.stringify(blind.types['0']));
+console.log('owned but unread  :', JSON.stringify(blind.types['2']));
 assert.equal(blind.counts.ownedUnknown, 1, 'exactly the one nothing can read');
-assert.equal(blind.types['0'].youOwn, 1, 'and it says how many of them this game has');
-assert.match(blind.types['0'].why.join(' '), /nothing here knows what it covers/,
+assert.equal(blind.types['2'].youOwn, 1, 'and it says how many of them this game has');
+assert.match(blind.types['2'].why.join(' '), /nothing here knows what it covers/,
   'in the words that say what to do about it');
 assert.ok(!blind.types['13'], 'the Quint is read, so it is not blind');
 
@@ -1816,6 +1818,71 @@ assert.match(covered, /^9/, 'ticking counts the seats the game measured, 3 apiec
 await mission.evaluate(() => {
   document.getElementById('ymca-test-personnel')?.remove();
   document.getElementById('mission_vehicle_driving')?.remove();
+});
+
+// ---- the game outranks the catalogue, and a stale entry is why ----
+// Mission 640 came back with every line covered — 2 platform trucks wanted and 2 there, 1
+// battalion chief and 1 there — while the game's own line read `Missing Vehicles: 2 firetrucks,
+// 1 platform trucks, 1 Battalion chief unit, 2 Patrol cars`. Both cannot be true. The window is
+// the mission the game is running; the catalogue is a list downloaded once.
+await mission.evaluate(() => {
+  // EVERY one of them: getElementById returns the first, so a stale table left by an earlier
+  // block is what the panel would read while the new one sat below it doing nothing.
+  for (const t of document.querySelectorAll('#mission_vehicle_at_mission, #mission_vehicle_driving')) {
+    t.remove();
+  }
+  // A patrol car taught from one window carried `fustw` alone, and what this game taught wins —
+  // so it is taught the whole set here, the way a real selection table would.
+  const types = JSON.parse(localStorage.getItem('ymca-missionmagician-types') || '{}');
+  types['10'] = { caps: ['fustw', 'fustw_or_police_motorcycle'], name: 'Patrol car' };
+  localStorage.setItem('ymca-missionmagician-types', JSON.stringify(types));
+  window.__catalogue = [{
+    id: '640', name: 'Stale catalogue fire', average_credits: 1000,
+    requirements: { platform_trucks: 2, battalion_chief_vehicles: 1, firetrucks: 1, police_cars: 2 },
+  }];
+  localStorage.removeItem('ymca-cache-/einsaetze.json');
+  document.getElementById('mission_general_info').setAttribute('data-mission-type', '640');
+  // Two Quints, one battalion chief and two patrol cars have already arrived.
+  const at = document.createElement('table');
+  at.id = 'mission_vehicle_at_mission';
+  at.innerHTML = `<tbody>${[13, 13, 3, 10, 10].map((t, i) => `<tr id="vehicle_row_7${i}">
+      <td><a href="/vehicles/7${i}" vehicle_type_id="${t}">there</a></td></tr>`).join('')}</tbody>`;
+  document.body.append(at);
+  // And the game says, out loud, that it wants more anyway. The window already has the element,
+  // so this fills it rather than adding a second one nothing would read.
+  document.getElementById('missing_text').textContent =
+    'Missing Vehicles: 2 firetrucks, 1 platform trucks, 1 Battalion chief unit, '
+    + '2 Patrol cars, 1 Heavy rescue';
+  document.getElementById('vehicle_show_table_body_all').append(document.createElement('tr'));
+});
+await mission.waitForTimeout(1400);
+const stale = await mission.$$eval('#ymca-mm-panel tbody tr', (trs) =>
+  trs.map((tr) => [...tr.cells].map((c) => c.textContent.replace(/\s+/g, ' ').trim())));
+console.log('stale catalogue   :', JSON.stringify(stale));
+const wantOf = (label) => {
+  const row = stale.find((r) => new RegExp(label, 'i').test(r[4]));
+  return row && { wanted: row[0], there: row[1] };
+};
+// Wanted becomes what has arrived plus what the game says is still missing, so the shortfall on
+// screen is the game's own figure rather than nought.
+assert.deepEqual(wantOf('Platform trucks'), { wanted: '3', there: '2' },
+  'two there and one still missing is three wanted, not the catalogue\'s two');
+assert.deepEqual(wantOf('Battalion chief'), { wanted: '2', there: '1' },
+  'and the window corrects the battalion chief line the same way');
+// THE WINDOW NAMES THESE IN THE GAME'S OWN WORDS, not in the catalogue's keys. Neither
+// `battalion_chief_unit` nor `patrol_cars` is a requirement key; both are the labels the
+// dispatch-order editor uses, which is where this panel's own labels came from.
+assert.deepEqual(wantOf('Patrol cars'), { wanted: '4', there: '2' },
+  '"Patrol cars" is the game\'s word for police_cars and resolves to it');
+assert.deepEqual(wantOf('Fire engines'), { wanted: '4', there: '2' },
+  'and the engines line goes to what is there plus what is missing');
+// A word the catalogue never mentioned still lands, by the same route: "Heavy rescue" is the
+// label, `heavy_rescue_vehicles` is the key, and the window knows only the first.
+assert.deepEqual(wantOf('Heavy rescue'), { wanted: '1', there: '–' },
+  'a line the catalogue does not carry at all comes straight off the window');
+await mission.evaluate(() => {
+  document.getElementById('missing_text').textContent = '';
+  document.getElementById('mission_vehicle_at_mission')?.remove();
 });
 
 // ---- a patient transport wants a CCTU, and that is the player's own rule ----

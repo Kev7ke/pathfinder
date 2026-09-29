@@ -362,10 +362,44 @@ function mmMissingFromWindow() {
     return out;
 }
 
-/** The same key, however the window spelled it: as itself, or as a plural. */
+/**
+ * THE WINDOW NAMES A REQUIREMENT IN THE WORDS THE GAME USES FOR IT, not in the
+ * key `/einsaetze.json` files it under.
+ *
+ * `Missing Vehicles: 2 firetrucks, 1 platform trucks, 1 Battalion chief unit,
+ * 2 Patrol cars` — the first two are keys and the last two are not. Neither
+ * `battalion_chief_unit` nor `patrol_cars` is anything the catalogue says, so
+ * both were left unmatched and the game's own sentence was thrown away.
+ *
+ * They are what the game calls those vehicles in its **dispatch-order editor**,
+ * which is exactly where these labels came from — `police_cars` is labelled
+ * "Patrol cars" because the AAO is called Patrol Car. So a word off the window
+ * that matches a label is the same reading a key match is, from a second page
+ * of the game rather than a resemblance.
+ *
+ * First wins, so `ambulances` keeps the label it shares with `patients` — which
+ * is not a requirement key at all and must never be what a window word resolves
+ * to.
+ */
+const MM_BY_LABEL = (() => {
+    const by = {};
+    for (const [key, rule] of Object.entries(MM_REQUIREMENTS)) {
+        if (!rule.label || key === 'patients') continue;
+        const word = rule.label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        for (const form of [word, word.replace(/s$/, '')]) {
+            if (form && by[form] === undefined) by[form] = key;
+        }
+    }
+    return by;
+})();
+
+/** The same key, however the window spelled it: as itself, as a plural, or as
+ * the words the game uses for it. */
 function mmRuleFor(key, vocab) {
     for (const candidate of [key, `${key}s`, key.replace(/s$/, '')]) {
         if (MM_REQUIREMENTS[candidate]) return { rule: MM_REQUIREMENTS[candidate], key: candidate };
+        const named = MM_BY_LABEL[candidate];
+        if (named) return { rule: MM_REQUIREMENTS[named], key: named, byLabel: true };
         const found = mmDeriveRule(candidate, vocab);
         if (found) {
             const label = mmPretty(candidate);
@@ -1363,10 +1397,36 @@ async function mmPlan(page, ctx, cfg) {
         for (const { key, wanted } of mmMissingFromWindow()) {
             const found = mmRuleFor(key, vocab);
             if (!found) continue;
-            if (wants.some(([k]) => k === found.key)) continue;
             if (found.key === 'patients' || MM_AMOUNTS[found.key]) continue;
-            wants.push([found.key, wanted, true]);
-            mmFromWindow.add(found.key);
+            const existing = wants.find(([k]) => k === found.key);
+            if (!existing) {
+                wants.push([found.key, wanted, true]);
+                mmFromWindow.add(found.key);
+                continue;
+            }
+            /* THE GAME OUTRANKS THE CATALOGUE, AND A STALE ENTRY IS WHY.
+             *
+             * Mission 640 came back with every line covered — 2 platform trucks
+             * wanted and 2 there, 1 battalion chief and 1 there — while the
+             * game's own line read `Missing Vehicles: 2 firetrucks, 1 platform
+             * trucks, 1 Battalion chief unit, 2 Patrol cars`. Both cannot be
+             * true, and the one to believe is the window: `/einsaetze.json` is
+             * a list this account downloaded once, and the mission it describes
+             * is the mission the game is running right now.
+             *
+             * Skipping a key the catalogue already had was what threw it away.
+             * The window states a SHORTFALL, so the total it implies is what
+             * has arrived plus what is still missing — the same arithmetic the
+             * patient line already does — and the larger of the two figures
+             * stands. Where the catalogue is right the window says nothing and
+             * nothing changes; where it is behind, the game corrects it. */
+            const there = mmSceneCount(scene, found.rule);
+            const total = there + wanted;
+            if (total > existing[1]) {
+                existing[1] = total;
+                existing[2] = false;
+                mmFromWindow.add(found.key);
+            }
         }
 
         /* And the one thing no page of the game states at all. It is added only
@@ -2869,6 +2929,21 @@ async function mmCopyState(ctx, plan, panel) {
         planned: !!plan?.requirements,
         requirementKeys: plan?.requirements ? Object.keys(plan.requirements) : [],
         source: plan?.fromHelpPage ? 'mission help page' : 'einsaetze.json',
+        /* WHAT THE GAME CALLS THIS MISSION, AND WHETHER A RULE OF OURS FIRED.
+         *
+         * The CCTU rule is keyed on the catalogue's own names until a type id
+         * is reported, and a report that says only "no CCTU was asked for"
+         * cannot tell "this is not a transport" from "the transport is called
+         * something this has never heard of". Both the name and the match are
+         * here now, so one press inside a transport window settles it and the
+         * rule keys on the id from then on — exactly as mission 1167 replaced
+         * the skateboard accident's name.
+         *
+         * The name is the catalogue's own wording for a kind of mission, not
+         * anything of this player's: the same string every account with that
+         * mission unlocked would report. */
+        missionName: plan?.name || null,
+        addedRules: mmAddedFor(plan?.name || null, page.missionType).map((r) => r.key),
         lines: (plan?.lines || []).map((l) => ({
             key: l.key, wanted: l.wanted, there: l.onScene, ticked: l.ticked, unmatched: !!l.unmatched,
         })),
