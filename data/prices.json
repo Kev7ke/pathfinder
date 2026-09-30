@@ -1,0 +1,319 @@
+{
+ "_comment": "MissionChief US (missionchief.com) prices. 'source' is the provenance and is the most important field in this file. build_menu = read by the player from the live in-game build menu, treat as truth. wiki_table = a building list the player pasted that has since been shown to contain outdated entries, treat as weak. estimate = a heuristic guess by Claude, NOT data, must be replaced. name_mapped = a build_menu price whose in-game name differs from the name used in the official mission list; the mapping is an assumption.",
+ "_currency": "credits",
+ "stations": {
+  "fire_station": {
+   "price": 100000,
+   "source": "build_menu"
+  },
+  "fire_station_small": {
+   "price": 50000,
+   "source": "build_menu"
+  },
+  "ambulance_station": {
+   "price": 200000,
+   "source": "build_menu"
+  },
+  "ambulance_station_small": {
+   "price": 100000,
+   "source": "build_menu"
+  },
+  "police_station": {
+   "price": 100000,
+   "source": "build_menu"
+  },
+  "police_station_small": {
+   "price": 50000,
+   "source": "build_menu"
+  }
+ },
+ "station_rules": {
+  "small_counts_same": {
+   "value": true,
+   "source": "player_report",
+   "note": "A small station counts identically to a full station toward a mission's station-count requirement. It holds 6 vehicles and can carry only ONE extension. Upgrading to a full station later costs the difference and takes 24 hours. Because of this the planner prices growth with SMALL stations by default."
+  },
+  "price_escalation": {
+   "value": "rises after the 24th station of a type",
+   "source": "community",
+   "note": "Exact formula unconfirmed. A community formula 100000+(200000*log2(n-22)) was posted and then disputed in the same thread. Do NOT hardcode it. Let the user type the real price of their next station instead."
+  },
+  "dispatch_centers": {
+   "value": "1 + 1 per 15 buildings, dispatch centers themselves not counted",
+   "source": "build_menu",
+   "note": "Free to build. This corrects two earlier wrong numbers: the official help centre said station_count/25 and a fan table said 1 per 10. Both were used in earlier reasoning and both are wrong."
+  }
+ },
+ "buildings": {
+  "dispatch_center": {
+   "price": 0,
+   "source": "build_menu"
+  },
+  "fire_academy": {
+   "price": 500000,
+   "source": "build_menu",
+   "alliance_buildable": true
+  },
+  "police_academy": {
+   "price": 500000,
+   "source": "build_menu",
+   "alliance_buildable": true
+  },
+  "rescue_ems_academy": {
+   "price": 500000,
+   "source": "build_menu",
+   "alliance_buildable": true
+  },
+  "coastal_rescue_school": {
+   "price": 500000,
+   "source": "build_menu",
+   "alliance_buildable": true
+  },
+  "hospital": {
+   "price": 200000,
+   "source": "build_menu",
+   "alliance_buildable": true
+  },
+  "clinic": {
+   "price": 100000,
+   "source": "build_menu",
+   "note": "10 patient cap, general internal extension only"
+  },
+  "prison": {
+   "price": 100000,
+   "source": "build_menu",
+   "note": "paid from the alliance fund"
+  },
+  "police_aviation": {
+   "price": 1000000,
+   "source": "build_menu"
+  },
+  "medical_helicopter_station": {
+   "price": 1000000,
+   "source": "build_menu"
+  },
+  "rescue_boat_dock": {
+   "price": 500000,
+   "source": "build_menu"
+  },
+  "fire_boat_dock": {
+   "price": 500000,
+   "source": "build_menu"
+  },
+  "coastal_rescue_station": {
+   "price": 500000,
+   "source": "build_menu"
+  },
+  "lifeguard_post": {
+   "price": 50000,
+   "source": "build_menu"
+  },
+  "tow_truck_station": {
+   "price": 300000,
+   "source": "build_menu"
+  },
+  "coastal_air_station": {
+   "price": 1000000,
+   "source": "wiki_table",
+   "note": "not present in the player's build menu, probably locked. Unlock rate disputed: 1 per 6 coastal rescue stations (wiki table) vs 1 per 20 (other source)."
+  },
+  "firefighting_plane_station": {
+   "price": 1500000,
+   "source": "wiki_table",
+   "note": "not present in the player's build menu, probably locked"
+  },
+  "staging_area": {
+   "price": 0,
+   "source": "wiki_table",
+   "note": "max 4 at a time, lasts 24h"
+  }
+ },
+ "classroom_expansion": {
+  "price": 400000,
+  "max_per_school": 4,
+  "source": "leitstellenspiel",
+  "WARNING": "This came from a Leitstellenspiel source, NOT from MissionChief. It is used in the alliance kit's ratio rules and must be verified in a MissionChief academy build menu before it is trusted."
+ },
+ "extensions": {
+  "_comment": "Keys are the names EXACTLY as they appear in the mission list requirements, because that is what the planner matches against.",
+  "Riot Police Extension": {
+   "price": 250000,
+   "source": "build_menu"
+  },
+  "Water Police Extension": {
+   "price": 200000,
+   "source": "build_menu"
+  },
+  "Detention Unit Extension": {
+   "price": 200000,
+   "source": "build_menu",
+   "note": "corrected from 25000; 25000 was the price of a prison cell, a different thing"
+  },
+  "Forestry Expansion": {
+   "price": 50000,
+   "source": "build_menu"
+  },
+  "Foam Extension": {
+   "price": 100000,
+   "source": "build_menu"
+  },
+  "Water Rescue Extension": {
+   "price": 100000,
+   "source": "build_menu"
+  },
+  "Airport Extension": {
+   "price": 100000,
+   "source": "build_menu"
+  },
+  "Fire Marshal's Office": {
+   "price": 250000,
+   "source": "wiki_table"
+  },
+  "Game Warden Expansion": {
+   "price": 20000,
+   "source": "wiki_table"
+  },
+  "Federal Police Station": {
+   "price": 200000,
+   "source": "name_mapped",
+   "menu_name": "Federal Police Extension",
+   "note": "The mission list says 'Federal Police Station'. The player's police station build menu has a 'Federal Police Extension' at 200000 and there is NO standalone Federal Police Station in their building menu. An older wiki table claimed a 500000 standalone building requiring rank Staff Captain; that table has proven unreliable. ASSUMPTION: they are the same thing. Affects 55 missions including most top-tier fire missions."
+  },
+  "Traffic Police Extension": {
+   "price": 200000,
+   "source": "name_mapped",
+   "menu_name": "Traffic Control Extension",
+   "note": "The player's POLICE station menu has 'Traffic Control Extension' at 200000. A FIRE station 'Traffic Control Extension' was also mentioned in an earlier conversation. If these are two different extensions this price may belong to the wrong one."
+  },
+  "Police Helicopter Station": {
+   "price": 1000000,
+   "source": "name_mapped",
+   "menu_name": "Police Aviation",
+   "note": "assumed identical"
+  },
+  "Rescue Boat Dock": {
+   "price": 500000,
+   "source": "build_menu"
+  },
+  "Fire Boat Dock": {
+   "price": 500000,
+   "source": "build_menu"
+  },
+  "Coastal Rescue Station": {
+   "price": 500000,
+   "source": "build_menu"
+  },
+  "Lifeguard Post or Coastal Rescue Station": {
+   "price": 50000,
+   "source": "build_menu",
+   "note": "requirement is satisfied by either; priced as the cheaper Lifeguard Post"
+  },
+  "Coastal Helicopter Hangar": {
+   "price": 1000000,
+   "source": "wiki_table",
+   "note": "assumed = Coastal Air Station"
+  },
+  "Coastal Plane Hangar": {
+   "price": 1000000,
+   "source": "wiki_table",
+   "note": "assumed = Coastal Air Station"
+  },
+  "Firefighting Plane Station": {
+   "price": 1500000,
+   "source": "wiki_table"
+  },
+  "ATF Expansion": {
+   "price": 200000,
+   "source": "estimate"
+  },
+  "Bomb Squad Extension or Federal Police Station": {
+   "price": 200000,
+   "source": "estimate"
+  },
+  "Container Slot": {
+   "price": 50000,
+   "source": "estimate"
+  },
+  "DEA Expansion": {
+   "price": 200000,
+   "source": "estimate"
+  },
+  "Disaster Response Extension": {
+   "price": 100000,
+   "source": "estimate",
+   "priority": "HIGH \u2014 gates the fire path at ~1.85M"
+  },
+  "Fire Crane Equipment": {
+   "price": 50000,
+   "source": "estimate",
+   "priority": "HIGH"
+  },
+  "Flood Control Extension": {
+   "price": 100000,
+   "source": "estimate",
+   "priority": "HIGH \u2014 gates the fire path at ~1.85M"
+  },
+  "Litter Equipment": {
+   "price": 50000,
+   "source": "estimate"
+  },
+  "Mountain Rescue Station": {
+   "price": 200000,
+   "source": "estimate",
+   "priority": "MEDIUM \u2014 carries the EMS avalanche branch"
+  },
+  "Police Drone Equipment": {
+   "price": 50000,
+   "source": "estimate"
+  },
+  "Rotator Truck Extension": {
+   "price": 100000,
+   "source": "estimate"
+  },
+  "Search and Rescue Equipment": {
+   "price": 50000,
+   "source": "estimate"
+  },
+  "Sked Equipment": {
+   "price": 50000,
+   "source": "estimate",
+   "priority": "MEDIUM"
+  },
+  "Smoke Jumper Team": {
+   "price": 100000,
+   "source": "estimate"
+  },
+  "Technical Rescue Equipment": {
+   "price": 50000,
+   "source": "estimate",
+   "priority": "MEDIUM \u2014 gates Roller Coaster Derailment, 40000 credits"
+  },
+  "Wildland Air Command Extension": {
+   "price": 100000,
+   "source": "estimate"
+  },
+  "Wildland Commando Extension": {
+   "price": 100000,
+   "source": "estimate"
+  },
+  "Prison cell": {
+   "price": null,
+   "source": "unknown",
+   "note": "Owned by the player and named by the game, but gates no mission, so it never reaches the ladder. docs/CORRECTIONS.md mentions 25,000 while correcting a different mistake; that figure was never confirmed on its own. Takes 7 days to build - see docs/VERIFICATION.md."
+  },
+  "Additional cell": {
+   "price": null,
+   "source": "unknown",
+   "note": "Second cell on a police station or prison. Gates no mission. Build time measured at exactly 7.000 days across five stations."
+  },
+  "Mass Casualty Trailer Extension": {
+   "price": null,
+   "source": "unknown",
+   "note": "On an ambulance station. Gates no mission in the current dataset."
+  }
+ },
+ "not_required_by_any_mission": [
+  "K9 Carrier Extension",
+  "Medical Helicopter Station"
+ ]
+}

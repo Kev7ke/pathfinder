@@ -1,0 +1,799 @@
+/* ==========================================================================
+ * YMCA — Your Mission Chief Alpha
+ * The shell: a full-screen window, a module registry, and the services every
+ * module needs. Modules never talk to the game or the DOM chrome directly;
+ * they get a context and render into the panel they are handed.
+ * ========================================================================== */
+
+const YMCA = {
+    version: '__VERSION__',
+    modules: [],
+    /** Register a module. Order here is the order in the sidebar. */
+    register(mod) {
+        this.modules.push(mod);
+    },
+};
+
+const LS = {
+    ui: 'ymca-ui',
+    log: 'ymca-log',
+    elements: 'ymca-elements',
+};
+
+// ---------- small helpers every module uses ----------
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const fmt = (n) => Number(n).toLocaleString('en-US');
+
+function readStore(key, fallback) {
+    try {
+        return JSON.parse(localStorage.getItem(key)) ?? fallback;
+    } catch (e) {
+        return fallback;
+    }
+}
+function writeStore(key, value) {
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) { /* private window: nothing is remembered, everything still works */ }
+}
+
+/* ---------- which parts are switched on ----------
+ *
+ * ElementFriend owns this switchboard; the shell only reads it, so a module
+ * never has to ask whether it is allowed to be there.
+ *
+ * A module that declares `optional: true` carries a switch. `defaultOn` says
+ * what it is before anybody has touched it — off for anything that does not
+ * work yet, on for everything that shipped before the switchboard existed,
+ * because an update that hides tools somebody was already using is an update
+ * that broke.
+ *
+ * `mainTile: false` keeps a module out of the launcher altogether. Those are
+ * the element tiles: they live inside ElementFriend and do their work in the
+ * game's own page, so a tile of their own on the front would open nothing.
+ */
+function elementStates() {
+    return readStore(LS.elements, {});
+}
+
+/**
+ * Is this module switched on? Anything not optional always is.
+ *
+ * A module may name a `group` — EagleEye is the first — and then its own switch
+ * is only half the answer: switching the group off switches off everything
+ * inside it, which is what makes a group worth having. One master switch for
+ * "none of these layout changes, thank you".
+ */
+YMCA.isOn = function isOn(mod) {
+    const m = typeof mod === 'string' ? this.modules.find((x) => x.id === mod) : mod;
+    if (!m) return false;
+    if (m.group && !this.isOn(m.group)) return false;
+    if (!m.optional) return true;
+    const held = elementStates()[m.id];
+    return typeof held === 'boolean' ? held : m.defaultOn !== false;
+};
+
+/** The modules inside a group, in register order. */
+YMCA.inGroup = function inGroup(groupId) {
+    return this.modules.filter((m) => m.group === groupId);
+};
+
+/** The only writer is ElementFriend. */
+YMCA.switchElement = function switchElement(id, on) {
+    const states = elementStates();
+    states[id] = !!on;
+    writeStore(LS.elements, states);
+    logger.info('shell', `${id} switched ${on ? 'on' : 'off'}`);
+    /* Start it where it belongs, now. A switch that only takes effect after a
+     * reload is a switch that reads as broken. */
+    const changed = [id, ...this.inGroup(id).map((m) => m.id)];
+    for (const each of changed) {
+        if (this.isOn(each)) this.startInjection(each);
+        /* Switching OFF has to undo whatever was done to the page. An injection
+         * cannot be un-run, so a module that changes the game's own markup says
+         * how to take it back. */
+        const mod = this.modules.find((m) => m.id === each);
+        if (mod?.onSwitch) {
+            try {
+                mod.onSwitch(this.isOn(mod), YMCA.contextFor(mod.id));
+            } catch (err) {
+                logger.error(each, 'onSwitch failed', err.message);
+            }
+        }
+    }
+};
+
+/** Re-run a module's injection, if it asked for one. Set by the shell below. */
+YMCA.startInjection = () => {};
+
+/** Every switch, for the problem report and for ElementFriend's own tiles. */
+YMCA.elementState = function elementState() {
+    return Object.fromEntries(this.modules.filter((m) => m.optional)
+        .map((m) => [m.id, this.isOn(m)]));
+};
+
+/**
+ * A rolling log of what YMCA did and what went wrong.
+ *
+ * This exists because the person running it can see the game and I cannot.
+ * When something misbehaves, the Diagnostics module hands the last entries
+ * over in one copyable block, so a bug report is a paste rather than a
+ * description.
+ */
+const LOG_MAX = 200;
+function log(level, where, message, detail) {
+    const entries = readStore(LS.log, []);
+    entries.push({
+        at: new Date().toISOString(),
+        level,
+        where,
+        message: String(message),
+        detail: detail === undefined ? undefined
+            : String(detail).slice(0, 400),
+    });
+    writeStore(LS.log, entries.slice(-LOG_MAX));
+    if (level === 'error') console.error('[YMCA]', where, message, detail ?? '');
+}
+const logger = {
+    info: (where, msg, detail) => log('info', where, msg, detail),
+    warn: (where, msg, detail) => log('warn', where, msg, detail),
+    error: (where, msg, detail) => log('error', where, msg, detail),
+    read: () => readStore(LS.log, []),
+    clear: () => writeStore(LS.log, []),
+};
+
+// ---------- the game ----------
+/** Every game request goes through here, so every failure is logged once. */
+async function getJSON(path) {
+    const started = Date.now();
+    try {
+        const res = await fetch(path, { credentials: 'include' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        logger.info('api', `${path} ok`, `${Date.now() - started}ms`);
+        return data;
+    } catch (err) {
+        logger.error('api', `${path} failed`, err.message);
+        throw err;
+    }
+}
+
+function gameLocale() {
+    try {
+        const w = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
+        return w.I18n?.locale || '';
+    } catch (e) {
+        return '';
+    }
+}
+
+function download(filename, text) {
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    logger.info('download', filename, `${text.length} bytes`);
+}
+
+/** Cross-origin fetch that CORS and the page's content policy cannot block. */
+function fetchExternal(url) {
+    if (typeof GM_xmlhttpRequest === 'function') {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'GET', url, timeout: 20000,
+                onload: (res) => {
+                    if (res.status < 200 || res.status >= 300) {
+                        reject(new Error(`answered ${res.status}`));
+                        return;
+                    }
+                    try {
+                        resolve(JSON.parse(res.responseText));
+                    } catch (err) {
+                        reject(new Error('the answer was not JSON'));
+                    }
+                },
+                onerror: () => reject(new Error('the request was refused')),
+                ontimeout: () => reject(new Error('the request timed out')),
+            });
+        });
+    }
+    return fetch(url).then((res) => {
+        if (!res.ok) throw new Error(`answered ${res.status}`);
+        return res.json();
+    });
+}
+
+/**
+ * Game data, fetched once per open and shared between modules, so switching
+ * from the Pathfinder to the Renamer does not refetch 1,500 missions.
+ */
+const cache = new Map();
+
+/**
+ * Throw the cache away, so the next read is fresh.
+ *
+ * The cache lives as long as the page does, which is right for switching
+ * between tools but wrong after buying a station or moving a vehicle. The
+ * refresh button in the title bar calls this so the page does not have to be
+ * reloaded for YMCA to see the change.
+ */
+function forgetGameData() {
+    cache.clear();
+    logger.info('shell', 'game data forgotten, next read is fresh');
+}
+
+async function gameData(path) {
+    if (!cache.has(path)) cache.set(path, getJSON(path));
+    try {
+        return await cache.get(path);
+    } catch (err) {
+        cache.delete(path);   // a failure must not be cached
+        throw err;
+    }
+}
+
+// ---------- the window ----------
+const WINDOW_ID = 'ymca-window';
+
+/**
+ * The palette is the game's own, read out of it with Diagnostics -> Copy
+ * interface probe rather than guessed:
+ *
+ *   body and modal   rgb(80,80,80) with white text   -> the game is DARK
+ *   navbar           rgb(0,73,151)
+ *   panel borders    black
+ *   radii            modal 6px, panel 4px, button 3px
+ *   type             "Helvetica Neue", Helvetica, Arial, 14px; buttons 12px
+ *
+ * Two readings from that probe were NOT copied, because they cannot be what
+ * they appear to be: .btn-default came back as white on white, and
+ * .panel-heading as #ddd on #f5f5f5. Both would be invisible, so they were
+ * measured on an element with something else overriding it. Where a reading
+ * was implausible the Bootstrap 3 default was used instead, and that is the
+ * only place in here that is not straight from the game.
+ */
+function styles() {
+    return `
+#${WINDOW_ID}{--g-ground:#505050;--g-raise:#5a5a5a;--g-navy:#004997;--g-ink:#fff;
+  --g-dim:rgba(255,255,255,.62);--g-line:rgba(0,0,0,.45);--g-soft:rgba(255,255,255,.14);
+  --g-red:#c9302c;--g-font:"Helvetica Neue",Helvetica,Arial,sans-serif;
+  position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;
+  background:rgba(0,0,0,.5);font:14px/1.42857 var(--g-font);color:var(--g-ink)}
+#${WINDOW_ID} *{box-sizing:border-box}
+#${WINDOW_ID} .ymca-sheet{margin:auto;width:min(1100px,94vw);max-height:92vh;display:flex;
+  flex-direction:column;background:var(--g-ground);border:1px solid rgba(0,0,0,.2);
+  border-radius:6px;box-shadow:0 5px 15px rgba(0,0,0,.5);overflow:hidden}
+#${WINDOW_ID} .ymca-bar{display:flex;align-items:center;gap:12px;padding:11px 15px;flex:none;
+  background:var(--g-navy);color:#fff;border-bottom:1px solid rgba(0,0,0,.35)}
+#${WINDOW_ID} .ymca-logo{font-weight:700;letter-spacing:.06em}
+#${WINDOW_ID} .ymca-logo small{font-weight:400;opacity:.75;margin-left:8px;letter-spacing:0}
+#${WINDOW_ID} .ymca-spacer{flex:1}
+#${WINDOW_ID} .ymca-back{background:rgba(255,255,255,.16);border:0;color:#fff;border-radius:3px;
+  padding:5px 11px;cursor:pointer;font:600 12px/1.2 var(--g-font)}
+#${WINDOW_ID} .ymca-back:hover{background:rgba(255,255,255,.28)}
+#${WINDOW_ID} .ymca-refresh{background:none;border:0;color:#fff;font-size:19px;line-height:1;
+  cursor:pointer;padding:0 6px;opacity:.8}
+#${WINDOW_ID} .ymca-refresh:hover{opacity:1}
+#${WINDOW_ID} .ymca-refresh.spin{animation:ymca-spin .6s linear infinite}
+@keyframes ymca-spin{to{transform:rotate(360deg)}}
+#${WINDOW_ID} .ymca-close{background:none;border:0;color:#fff;font-size:24px;line-height:1;
+  cursor:pointer;padding:0 4px;opacity:.8}
+#${WINDOW_ID} .ymca-close:hover{opacity:1}
+#${WINDOW_ID} .ymca-main{flex:1;overflow:auto;padding:16px 18px;background:var(--g-ground)}
+
+/* the launcher */
+#${WINDOW_ID} .ymca-tiles{display:grid;gap:12px;
+  grid-template-columns:repeat(auto-fill,minmax(228px,1fr))}
+#${WINDOW_ID} .ymca-tile{display:flex;flex-direction:column;gap:5px;text-align:left;
+  background:var(--g-raise);border:1px solid var(--g-line);border-radius:4px;padding:15px;
+  cursor:pointer;font:inherit;color:var(--g-ink);transition:border-color .12s,background .12s}
+#${WINDOW_ID} .ymca-tile:hover{border-color:var(--g-navy);background:#636363}
+#${WINDOW_ID} .ymca-tile .ymca-ico{width:32px;height:32px;color:#8ab4f8}
+#${WINDOW_ID} .ymca-tile b{font-size:15px}
+#${WINDOW_ID} .ymca-tile span{color:var(--g-dim);font-size:12.5px}
+#${WINDOW_ID} .ymca-tile.soon{opacity:.5;cursor:default}
+#${WINDOW_ID} .ymca-tile.soon:hover{border-color:var(--g-line);background:var(--g-raise)}
+#${WINDOW_ID} .ymca-lead{margin:0 0 14px;color:var(--g-dim)}
+
+/* An element tile: the same tile with a switch along its foot. It is a div,
+   not a button, because a switch inside a button is a control inside a
+   control — the click handler simply stands aside for the switch. */
+#${WINDOW_ID} .ymca-tile.el{gap:6px}
+#${WINDOW_ID} .ymca-tile.el.off{opacity:.62}
+#${WINDOW_ID} .ymca-tile.el.off:hover{opacity:1}
+#${WINDOW_ID} .ymca-tile .ymca-foot{display:flex;align-items:center;justify-content:space-between;
+  gap:9px;margin-top:4px;padding-top:9px;border-top:1px solid var(--g-soft)}
+#${WINDOW_ID} .ymca-switch{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+  font:600 12px/1.2 var(--g-font);user-select:none}
+#${WINDOW_ID} .ymca-switch input{position:absolute;opacity:0;width:0;height:0}
+#${WINDOW_ID} .ymca-switch i{flex:none;width:34px;height:19px;border-radius:19px;position:relative;
+  background:rgba(0,0,0,.45);border:1px solid var(--g-line);transition:background .12s}
+#${WINDOW_ID} .ymca-switch i::after{content:"";position:absolute;top:2px;left:2px;width:13px;
+  height:13px;border-radius:50%;background:#fff;transition:left .12s}
+#${WINDOW_ID} .ymca-switch input:checked + i{background:var(--g-navy)}
+#${WINDOW_ID} .ymca-switch input:checked + i::after{left:17px}
+#${WINDOW_ID} .ymca-switch input:focus-visible + i{outline:2px solid #8ab4f8;outline-offset:1px}
+#${WINDOW_ID} .ymca-switch input:disabled + i{opacity:.45}
+
+#${WINDOW_ID} h2.ymca-h{margin:0 0 4px;font-size:19px;color:#fff}
+#${WINDOW_ID} p.ymca-sub{margin:0 0 14px;color:var(--g-dim);font-size:13px}
+#${WINDOW_ID} .ymca-btn{border:1px solid #252525;background:#fff;border-radius:3px;
+  padding:6px 12px;cursor:pointer;font:600 12px/1.42857 var(--g-font);color:#252525}
+#${WINDOW_ID} .ymca-btn:hover{background:#e6e6e6}
+#${WINDOW_ID} .ymca-btn.primary{background:var(--g-navy);border-color:#003a78;color:#fff}
+#${WINDOW_ID} .ymca-btn.primary:hover{background:#005cbf}
+#${WINDOW_ID} .ymca-btn.danger{background:var(--g-red);border-color:#a02622;color:#fff}
+#${WINDOW_ID} .ymca-btn:disabled{opacity:.45;cursor:default}
+#${WINDOW_ID} input,#${WINDOW_ID} select,#${WINDOW_ID} textarea{font:14px/1.42857 var(--g-font);
+  color:#252525;background:#fff;border:1px solid #252525;border-radius:3px;padding:5px 9px}
+#${WINDOW_ID} table{border-collapse:collapse;width:100%}
+#${WINDOW_ID} th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--g-dim);border-bottom:1px solid var(--g-soft);padding:7px 9px;font-weight:600}
+#${WINDOW_ID} td{padding:7px 9px;border-bottom:1px solid var(--g-soft);vertical-align:top}
+#${WINDOW_ID} .ymca-card{background:var(--g-raise);border:1px solid var(--g-line);
+  border-radius:4px;padding:13px;margin-bottom:11px}
+#${WINDOW_ID} .ymca-note{border-left:3px solid var(--g-navy);background:rgba(0,0,0,.18);
+  border-radius:0 3px 3px 0;padding:9px 12px;margin:8px 0;font-size:13px}
+#${WINDOW_ID} .ymca-note.warn{border-left-color:#ec971f;background:rgba(236,151,31,.14)}
+#${WINDOW_ID} .ymca-note.bad{border-left-color:var(--g-red);background:rgba(201,48,44,.16)}
+#${WINDOW_ID} .ymca-status{font-size:12px;opacity:.9;margin-left:6px}
+#${WINDOW_ID} .ymca-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+#${WINDOW_ID} .ymca-pick{max-height:190px;overflow:auto;border:1px solid var(--g-line);
+  border-radius:3px;padding:6px;background:rgba(0,0,0,.18)}
+#${WINDOW_ID} .ymca-pick label{display:block;font-weight:400;margin-bottom:3px;cursor:pointer}
+#${WINDOW_ID} code{background:rgba(0,0,0,.3);border-radius:3px;padding:1px 5px;font-size:12.5px}
+#${WINDOW_ID} small{color:var(--g-dim)}
+/* Named roles, so a module never writes a colour of its own. A hardcoded grey
+   from the light era is exactly what made the first dark build unreadable. */
+#${WINDOW_ID} .ymca-dim{color:var(--g-dim)}
+#${WINDOW_ID} .ymca-accent{color:#8ab4f8}
+#${WINDOW_ID} .ymca-warn{color:#f0ad4e}
+#${WINDOW_ID} .ymca-bad{color:#e88a86}
+#${WINDOW_ID} .ymca-num{font-variant-numeric:tabular-nums}
+
+/* ---- StatBoard ----------------------------------------------------------
+ * A BOARD NEEDS THE ROOM AND THE WINDOW IS THE SHELL'S OWN. Twice the width
+ * while a board is open, rather than a second lightbox over the first: Escape
+ * has to go on stepping back the way it does everywhere else.
+ *
+ * THE CARD IS #333 AND THAT IS A MEASUREMENT. The categorical slots the board
+ * draws with come off the documented palette's dark column, and on the game's
+ * own #505050 every one of them came back under 3:1 against it — which is what
+ * makes a chart unreadable rather than merely plain. On #333 all six pass. It
+ * is a darker step of the game's own neutral, not a colour of YMCA's own. */
+#${WINDOW_ID}.ymca-wide .ymca-sheet{width:min(1780px,98vw);height:94vh;max-height:94vh}
+#${WINDOW_ID} .sb-root{display:flex;flex-direction:column;height:100%;min-height:520px;gap:12px}
+#${WINDOW_ID} .sb-body{flex:1;display:flex;gap:14px;min-height:0}
+#${WINDOW_ID} .sb-left{flex:1 1 32%;min-width:290px;display:flex;flex-direction:column;gap:12px;
+  overflow:auto}
+#${WINDOW_ID} .sb-right{flex:1 1 68%;min-width:0;display:flex}
+#${WINDOW_ID} .sb-stats{display:flex;flex-direction:column;gap:12px}
+#${WINDOW_ID} .sb-stats-wide{flex-direction:row;flex-wrap:wrap;align-items:flex-start}
+#${WINDOW_ID} .sb-stats-wide .sb-tile{flex:1 1 300px}
+#${WINDOW_ID} .sb-tile{background:#333;border:1px solid #1d1d1d;border-radius:4px;
+  padding:14px 16px 16px}
+#${WINDOW_ID} .sb-tile header{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
+#${WINDOW_ID} .sb-tile h3{margin:0;font-size:13px;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;opacity:.82}
+#${WINDOW_ID} .sb-src{margin-left:auto;font-size:10px;letter-spacing:.03em;padding:2px 6px;
+  border-radius:2px;background:rgba(255,255,255,.09);opacity:.75;white-space:nowrap}
+#${WINDOW_ID} .sb-src-unread{background:rgba(217,89,38,.2)}
+#${WINDOW_ID} .sb-tile-unread{border-color:#5a3a2a}
+#${WINDOW_ID} .sb-big{margin:6px 0 0;font-size:40px;line-height:1.05;font-weight:300;
+  font-variant-numeric:tabular-nums}
+#${WINDOW_ID} .sb-big small{font-size:14px;font-weight:400;opacity:.7;margin-left:7px}
+#${WINDOW_ID} .sb-sub{margin:3px 0 0;font-size:12px;opacity:.72}
+#${WINDOW_ID} .sb-note{margin:10px 0 0;font-size:11.5px;line-height:1.5;opacity:.72}
+#${WINDOW_ID} .sb-note code{font-size:11px;background:rgba(0,0,0,.3);padding:1px 4px;
+  border-radius:2px}
+#${WINDOW_ID} .sb-dim{opacity:.55}
+#${WINDOW_ID} .sb-donut{display:flex;gap:14px;align-items:center;margin-top:12px;flex-wrap:wrap}
+#${WINDOW_ID} .sb-seg{animation:sb-grow .7s cubic-bezier(.3,1,.4,1) both}
+@keyframes sb-grow{from{stroke-dasharray:0 9999}}
+#${WINDOW_ID} .sb-donut-n{fill:#fff;font-size:21px;text-anchor:middle;
+  font-variant-numeric:tabular-nums}
+#${WINDOW_ID} .sb-donut-l{fill:#fff;opacity:.6;font-size:10px;text-anchor:middle;
+  letter-spacing:.06em}
+#${WINDOW_ID} .sb-keys{list-style:none;margin:0;padding:0;flex:1 1 130px;font-size:11.5px}
+#${WINDOW_ID} .sb-keys li{display:flex;align-items:center;gap:6px;padding:1px 0}
+#${WINDOW_ID} .sb-keys i{width:9px;height:9px;border-radius:2px;flex:none}
+#${WINDOW_ID} .sb-keys span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#${WINDOW_ID} .sb-keys b{font-variant-numeric:tabular-nums;opacity:.85}
+#${WINDOW_ID} .sb-bars{list-style:none;margin:12px 0 0;padding:0;font-size:11.5px}
+#${WINDOW_ID} .sb-bars li{display:flex;align-items:center;gap:8px;padding:2px 0}
+#${WINDOW_ID} .sb-bar-l{flex:0 0 40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#${WINDOW_ID} .sb-bar-t{flex:1;height:8px;background:rgba(255,255,255,.08);border-radius:4px}
+#${WINDOW_ID} .sb-bar-t i{display:block;height:100%;border-radius:4px;
+  animation:sb-wide .6s cubic-bezier(.3,1,.4,1) both}
+@keyframes sb-wide{from{width:0 !important}}
+#${WINDOW_ID} .sb-bars b{font-variant-numeric:tabular-nums;opacity:.85}
+#${WINDOW_ID} .sb-list{list-style:none;margin:10px 0 0;padding:0;font-size:11.5px}
+#${WINDOW_ID} .sb-list li{display:flex;gap:8px;padding:2px 0;border-top:1px solid rgba(255,255,255,.07)}
+#${WINDOW_ID} .sb-list span{flex:1;opacity:.78}
+#${WINDOW_ID} .sb-ok{color:#199e70}
+#${WINDOW_ID} .sb-wait{color:#c98500}
+#${WINDOW_ID} .sb-filter,#${WINDOW_ID} .sb-spans{display:flex;gap:8px;align-items:center;
+  flex-wrap:wrap;font-size:12px}
+#${WINDOW_ID} .sb-filter select{background:Field;color:FieldText;color-scheme:light dark;
+  border:1px solid rgba(128,128,128,.6);border-radius:3px;padding:3px 6px}
+#${WINDOW_ID} .sb-table{flex:1;overflow:auto;background:#333;border:1px solid #1d1d1d;
+  border-radius:4px}
+#${WINDOW_ID} .sb-table table{font-size:12px}
+#${WINDOW_ID} .sb-table thead th{position:sticky;top:0;background:#2b2b2b;cursor:pointer;
+  white-space:nowrap;text-align:left;padding:8px 10px;font-weight:600;letter-spacing:.03em}
+#${WINDOW_ID} .sb-table thead th.sb-on{color:#8ab4f8}
+#${WINDOW_ID} .sb-table thead th.sb-on::after{content:" \\2191"}
+#${WINDOW_ID} .sb-table thead th.sb-desc::after{content:" \\2193"}
+#${WINDOW_ID} .sb-table td{padding:6px 10px;border-top:1px solid rgba(255,255,255,.07);
+  font-variant-numeric:tabular-nums}
+#${WINDOW_ID} .sb-table tbody tr:hover td{background:rgba(255,255,255,.05)}
+#${WINDOW_ID} .sb-table a{color:#8ab4f8;text-decoration:none}
+#${WINDOW_ID} .sb-table a:hover{text-decoration:underline}
+#${WINDOW_ID} .sb-statcell{width:34px;text-align:center}
+#${WINDOW_ID} .sb-statbtn{background:#fff;border:2px solid #3987e5;color:#256abf;width:24px;
+  height:24px;border-radius:50%;cursor:pointer;display:inline-flex;align-items:center;
+  justify-content:center;padding:0}
+#${WINDOW_ID} .sb-statbtn:hover{background:#3987e5;color:#fff}
+#${WINDOW_ID} .sb-drill{flex:1;display:flex;flex-direction:column;gap:10px;min-height:0}
+#${WINDOW_ID} .sb-drill-bar{display:flex;gap:10px;align-items:center;font-size:12px}
+#${WINDOW_ID} .sb-frame{flex:1;width:100%;border:1px solid #1d1d1d;border-radius:4px;
+  background:#fff;min-height:420px}
+#${WINDOW_ID} .sb-nav{display:flex;justify-content:center;gap:14px;flex:none;
+  padding:6px 0 2px;border-top:1px solid rgba(255,255,255,.12)}
+#${WINDOW_ID} .sb-dot{display:flex;flex-direction:column;align-items:center;gap:4px;
+  background:none;border:0;cursor:pointer;color:#fff;font:600 10px/1 inherit;
+  letter-spacing:.05em;opacity:.62;padding:6px 4px 2px}
+#${WINDOW_ID} .sb-dot svg{background:#fff;color:var(--sb-dot);border:2px solid var(--sb-dot);
+  border-radius:50%;padding:6px;width:34px;height:34px;transition:background .18s,color .18s}
+#${WINDOW_ID} .sb-dot:hover{opacity:.9}
+#${WINDOW_ID} .sb-dot-on{opacity:1}
+#${WINDOW_ID} .sb-dot-on svg{background:var(--sb-dot);color:#fff}
+@media (prefers-reduced-motion:reduce){
+  #${WINDOW_ID} .sb-seg,#${WINDOW_ID} .sb-bar-t i{animation:none}
+}
+#ymca-fab{position:fixed;right:14px;bottom:14px;z-index:2147482000;padding:9px 15px;
+  border-radius:3px;border:1px solid #003a78;cursor:pointer;background:#004997;color:#fff;
+  font:700 12px/1 "Helvetica Neue",Helvetica,Arial,sans-serif;letter-spacing:.06em;
+  box-shadow:0 2px 8px rgba(0,0,0,.5)}
+@media (max-width:620px){
+  #${WINDOW_ID} .ymca-sheet{width:100vw;max-height:100vh;height:100%;border-radius:0;border:0}
+  #${WINDOW_ID} .ymca-tiles{grid-template-columns:1fr}
+}`;
+}
+
+/** Small, flat icons. A module may bring its own; these are the fallbacks. */
+const ICONS = {
+    statboard: '<path d="M5 27 V15"/><path d="M13 27 V7"/><path d="M21 27 V19"/>'
+        + '<path d="M29 27 V11"/><path d="M3 31 H31"/>',
+    stepops: '<path d="M4 29 H10 V23 H16 V17 H22 V11 H28 V5"/><path d="M4 29 H30"/>',
+    renamer: '<path d="M6 22 L20 8 L26 14 L12 28 H6 Z"/><path d="M6 30 H30"/>',
+    diagnostics: '<circle cx="15" cy="15" r="9"/><path d="M22 22 L30 30"/>',
+    missionmagician: '<path d="M7 27 L24 10"/><path d="M22 5 L24 10 L29 12 L24 14 L22 19 L20 14 '
+        + 'L15 12 L20 10 Z"/>',
+    recruitroom: '<circle cx="13" cy="11" r="5"/><path d="M4 29c0-5 4-9 9-9s9 4 9 9"/>'
+        + '<path d="M24 9v10M19 14h10"/>',
+    trackops: '<path d="M5 29 H30"/><rect x="7" y="18" width="5" height="11"/>'
+        + '<rect x="15" y="11" width="5" height="18"/><rect x="23" y="5" width="5" height="24"/>',
+    eagleeye: '<path d="M2 17s5.5-8 15-8 15 8 15 8-5.5 8-15 8-15-8-15-8Z"/>'
+        + '<circle cx="17" cy="17" r="4.5"/>',
+    shuteye: '<path d="M3 13c3 4.5 8 7.5 14 7.5S28 17.5 31 13"/><path d="M8 19l-2.5 4"/>'
+        + '<path d="M17 20.5V25"/><path d="M26 19l2.5 4"/>',
+    stationfascination: '<path d="M5 29V15l12-8 12 8v14"/><path d="M13 29v-8h8v8"/>'
+        + '<path d="M2 29h30"/>',
+    elementfriend: '<circle cx="17" cy="17" r="4"/><path d="M17 4v5M17 25v5M4 17h5M25 17h5"/>'
+        + '<path d="M8.4 8.4l3.5 3.5M22.1 22.1l3.5 3.5M25.6 8.4l-3.5 3.5M11.9 22.1l-3.5 3.5"/>',
+    easyedit: '<path d="M6 24 L20 10 L24 14 L10 28 H6 Z"/><path d="M19 7 L21 5a2 2 0 0 1 3 0'
+        + ' l3 3a2 2 0 0 1 0 3 l-2 2"/><path d="M20 30 H30"/>',
+    switchdispatch: '<rect x="4" y="13" width="10" height="10" rx="1"/>'
+        + '<rect x="18" y="13" width="10" height="10" rx="1"/>'
+        + '<path d="M11 8 H24 M21 5 L24 8 L21 11"/>',
+    highfive: '<path d="M11 17V8a2 2 0 0 1 4 0v8"/><path d="M15 16V6a2 2 0 0 1 4 0v10"/>'
+        + '<path d="M19 16v-7a2 2 0 0 1 4 0v12a7 7 0 0 1-7 7h-2a7 7 0 0 1-7-7v-6a2 2 0 0 1 4 0"/>',
+    simpleaao: '<rect x="4" y="6" width="26" height="8" rx="2"/>'
+        + '<rect x="4" y="20" width="14" height="8" rx="2"/>'
+        + '<path d="M23 24h7 M26.5 20.5v7"/>',
+    heatmap: '<path d="M5 27 L12 9 L19 21 L24 14 L29 27 Z"/>'
+        + '<circle cx="12" cy="9" r="2.5"/><circle cx="24" cy="14" r="2.5"/>',
+    default: '<rect x="6" y="6" width="9" height="9"/><rect x="19" y="6" width="9" height="9"/>'
+        + '<rect x="6" y="19" width="9" height="9"/><rect x="19" y="19" width="9" height="9"/>',
+};
+function iconFor(id) {
+    return `<svg class="ymca-ico" viewBox="0 0 34 34" fill="none" stroke="currentColor"
+    stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">
+    ${ICONS[id] || ICONS.default}</svg>`;
+}
+
+let current = null;
+
+function openWindow(moduleId) {
+    document.getElementById(WINDOW_ID)?.remove();
+    if (!document.getElementById('ymca-style')) {
+        const st = document.createElement('style');
+        st.id = 'ymca-style';
+        st.textContent = styles();
+        document.head.append(st);
+    }
+
+    const win = document.createElement('div');
+    win.id = WINDOW_ID;
+    win.innerHTML = `
+    <div class="ymca-sheet">
+      <div class="ymca-bar">
+        <button class="ymca-back" id="ymca-back" hidden>&larr; All tools</button>
+        <span class="ymca-logo">YMCA <small>Your Mission Chief Alpha ${esc(YMCA.version)}</small></span>
+        <span class="ymca-spacer"></span>
+        <span class="ymca-status" id="ymca-bar-status"></span>
+        <button class="ymca-refresh" id="ymca-refresh"
+          title="Re-read the game — use this after buying or moving something">&#10227;</button>
+        <button class="ymca-close" title="Close">&times;</button>
+      </div>
+      <main class="ymca-main" id="ymca-main"></main>
+    </div>`;
+    document.body.append(win);
+    document.body.style.overflow = 'hidden';
+
+    const close = () => {
+        win.remove();
+        document.body.style.overflow = '';
+        document.removeEventListener('keydown', onKey);
+    };
+    // Escape steps back the way the game's own lightboxes do: out of a tool
+    // first, out of the window only from the launcher.
+    const onKey = (e) => {
+        if (e.key !== 'Escape') return;
+        if (current) showLauncher(); else close();
+    };
+    win.querySelector('.ymca-close').addEventListener('click', close);
+    document.addEventListener('keydown', onKey);
+
+    const main = win.querySelector('#ymca-main');
+    const back = win.querySelector('#ymca-back');
+    back.addEventListener('click', () => showLauncher());
+
+    const refresh = win.querySelector('#ymca-refresh');
+    refresh.addEventListener('click', async () => {
+        forgetGameData();
+        refresh.classList.add('spin');
+        setStatus('Re-reading the game\u2026');
+        const mod = YMCA.modules.find((m) => m.id === current);
+        if (mod) showModule(mod); else showLauncher();
+        // The spin is honest about the work: modules fetch inside mount().
+        setTimeout(() => refresh.classList.remove('spin'), 900);
+    });
+
+    function showLauncher() {
+        current = null;
+        back.hidden = true;
+        setStatus('');
+        main.innerHTML = `<p class="ymca-lead">Pick a tool.</p>
+      <div class="ymca-tiles">
+        ${YMCA.modules.filter((m) => m.mainTile !== false && YMCA.isOn(m))
+        .map((m) => `<button class="ymca-tile" data-mod="${esc(m.id)}">
+          ${iconFor(m.id)}<b>${esc(m.title)}</b><span>${esc(m.tagline || '')}</span>
+        </button>`).join('')}
+        <div class="ymca-tile soon">${iconFor('default')}<b>More to come</b>
+          <span>This is where the next tools land.</span></div>
+      </div>`;
+        main.querySelectorAll('[data-mod]').forEach((b) => {
+            b.addEventListener('click', () => {
+                const mod = YMCA.modules.find((m) => m.id === b.dataset.mod);
+                if (mod) showModule(mod);
+            });
+        });
+    }
+
+    function showModule(mod) {
+        current = mod.id;
+        YMCA.lastModule = mod.id;
+        back.hidden = false;
+        writeStore(LS.ui, { last: mod.id });
+        main.innerHTML = `<h2 class="ymca-h">${esc(mod.title)}</h2>
+      <p class="ymca-sub">${esc(mod.description)}</p><div id="ymca-panel"></div>`;
+        const panel = main.querySelector('#ymca-panel');
+        logger.info('shell', `opened ${mod.id}`);
+        try {
+            mod.mount(panel, context(mod.id));
+        } catch (err) {
+            logger.error(mod.id, 'failed to open', err.stack || err.message);
+            panel.innerHTML = `<div class="ymca-note bad"><b>${esc(mod.title)} could not open.</b>
+        ${esc(err.message)}<br>Diagnostics \u2192 Copy problem report has the details.</div>`;
+        }
+    }
+
+    function setStatus(text) {
+        const el = win.querySelector('#ymca-bar-status');
+        if (el) el.textContent = text;
+    }
+
+    const wanted = moduleId && YMCA.modules.find((m) => m.id === moduleId);
+    if (wanted) showModule(wanted); else showLauncher();
+}
+
+/**
+ * Run a module's code on the game's own page, outside YMCA's window.
+ *
+ * Almost every module only ever renders into the panel it is handed. A few
+ * belong in the game's own markup instead — MissionMagician sits inside the
+ * mission window the way LSS-Manager's helper does, because a tool you have to
+ * open a lightbox to reach is a tool you stop using. Those get a context
+ * without a mount.
+ *
+ * `fn` returns truthy once it has done its job. Until then it is tried again
+ * whenever the page grows, because **waiting for DOMContentLoaded was the
+ * mistake**: a mission window pulls in the game's application bundle and
+ * whatever else the player has installed, and the log showed the panel landing
+ * as much as sixteen seconds after the markup it needed already existed. The
+ * markup is what matters, not the last script.
+ *
+ * A throw is logged rather than left to break the game's page.
+ */
+/**
+ * What each module asked to run in the game's own page, kept so switching it on
+ * can start it there and then.
+ *
+ * Without this, switching a module on did nothing until the page was reloaded:
+ * the injection had already given up, and the player was left looking at a
+ * switch that appeared to do nothing. A switch has to take effect where it is
+ * flicked.
+ */
+const injections = new Map();
+
+function runInjection(moduleId, fn) {
+    /* A module that has not registered yet is not a module that is switched
+     * off — and `isOn` cannot tell the two apart. Four files called
+     * `YMCA.inject` above their own `YMCA.register` and every one of them read
+     * as off on the page they were injected into. */
+    if (!YMCA.modules.some((m) => m.id === moduleId)) {
+        logger.error(moduleId, 'injected before it was registered', 'register first, then inject');
+    }
+
+    const held = injections.get(moduleId);
+    if (held?.done) return;              // it has already done its job
+    held?.observer?.disconnect();        // never two observers for one module
+
+    const ctx = context(moduleId);
+    const state = { fn, done: false, observer: null, said: false };
+    injections.set(moduleId, state);
+
+    const attempt = () => {
+        if (state.done) return true;
+        /* A switched-off module does not reach the game's page either. The
+         * switch has to mean the whole module, not only its tile —
+         * MissionMagician's panel lives in the mission window, so a switch that
+         * left it there would switch off nothing the player can see. */
+        if (!YMCA.isOn(moduleId)) {
+            if (!state.said) { logger.info(moduleId, 'not injected, switched off'); state.said = true; }
+            return false;
+        }
+        try {
+            state.done = !!fn(ctx);
+        } catch (err) {
+            state.done = true;                 // a module that throws is not retried into a loop
+            logger.error(moduleId, 'injection failed', err.message);
+        }
+        return state.done;
+    };
+    if (attempt()) return;
+
+    /* Retry as the page fills in. Coalesced into a frame so a page building
+     * itself does not run this once per node. */
+    let queued = false;
+    state.observer = new MutationObserver(() => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => {
+            queued = false;
+            if (attempt()) state.observer.disconnect();
+        });
+    });
+    state.observer.observe(document.documentElement, { childList: true, subtree: true });
+
+    /* A page that never grows what was wanted stops being watched rather than
+     * observing for the rest of the session. */
+    setTimeout(() => state.observer.disconnect(), 30000);
+}
+
+/**
+ * Run a module's code on the game's own page, outside YMCA's window.
+ *
+ * Almost every module only ever renders into the panel it is handed. A few
+ * belong in the game's own markup instead — MissionMagician sits inside the
+ * mission window the way LSS-Manager's helper does, because a tool you have to
+ * open a lightbox to reach is a tool you stop using. Those get a context
+ * without a mount.
+ *
+ * `fn` returns truthy once it has done its job. Until then it is tried again
+ * whenever the page grows, because **waiting for DOMContentLoaded was the
+ * mistake**: a mission window pulls in the game's application bundle and
+ * whatever else the player has installed, and the log showed the panel landing
+ * as much as sixteen seconds after the markup it needed already existed. The
+ * markup is what matters, not the last script.
+ *
+ * A throw is logged rather than left to break the game's page.
+ */
+YMCA.inject = function inject(moduleId, fn) {
+    runInjection(moduleId, fn);
+};
+
+YMCA.startInjection = (moduleId) => {
+    const held = injections.get(moduleId);
+    if (!held) return;
+    /* Switched off and on again means "do it again", even for an injection that
+     * finished: what it placed was taken away when it went off, and refusing to
+     * re-run left the switch looking dead on the very page it was flicked. */
+    held.done = false;
+    runInjection(moduleId, held.fn);
+};
+
+/**
+ * Another module's context.
+ *
+ * ElementFriend renders a module's own settings into its own panel, and those
+ * settings have to be stored where the module reads them — under the module's
+ * namespace, not under ElementFriend's. This is the only caller.
+ */
+YMCA.contextFor = (moduleId) => context(moduleId);
+
+/** What a module is handed. Nothing here touches the shell's own chrome. */
+function context(moduleId) {
+    return {
+        esc, fmt, sleep, download, fetchExternal,
+        game: gameData,
+        rawGame: getJSON,
+        locale: gameLocale,
+        store: {
+            read: (key, fallback) => readStore(`ymca-${moduleId}-${key}`, fallback),
+            write: (key, value) => writeStore(`ymca-${moduleId}-${key}`, value),
+        },
+        /**
+         * Game JSON that survives a page load.
+         *
+         * `game()` caches for the page, which is right on the map and wrong
+         * inside a mission: every mission is its own page load, so the whole
+         * mission catalogue was being refetched each time a window opened, and
+         * that is what made the panel take a second to appear. /einsaetze.json
+         * is the game's static list — it changes when the game is updated, not
+         * while you play — so it is worth keeping across loads.
+         *
+         * `shrink` runs once before storing, so only what is actually used
+         * takes up room. A stale read is served immediately and refreshed in
+         * the background, because a catalogue a day old is better than a panel
+         * that waits.
+         */
+        async gameCached(path, maxAgeMs, shrink) {
+            const key = `ymca-cache-${path}`;
+            const held = readStore(key, null);
+            const fresh = held && Date.now() - held.at < maxAgeMs;
+            const load = async () => {
+                const data = await getJSON(path);
+                const value = shrink ? shrink(data) : data;
+                writeStore(key, { at: Date.now(), value });
+                return value;
+            };
+            if (!held) return load();
+            if (!fresh) load().catch(() => { /* the held copy still answers */ });
+            return held.value;
+        },
+        log: {
+            info: (m, d) => logger.info(moduleId, m, d),
+            warn: (m, d) => logger.warn(moduleId, m, d),
+            error: (m, d) => logger.error(moduleId, m, d),
+        },
+        status(text) {
+            const el = document.getElementById('ymca-bar-status');
+            if (el) el.textContent = text;
+        },
+        clipboard(text, what) {
+            return navigator.clipboard.writeText(text)
+                .then(() => { this.status(`Copied ${what}.`); return true; })
+                .catch(() => { this.status('Clipboard refused.'); return false; });
+        },
+        open: openWindow,
+    };
+}

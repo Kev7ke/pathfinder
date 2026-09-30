@@ -1,0 +1,336 @@
+{
+  "note": "Every capability the game has a word for, read off the dispatch-order editor's own form at /aaos/new: one checkbox per flag, named aao[<flag>], because an order can say \"every vehicle that can do this\". It is the whole vocabulary, including flags no vehicle on any one account carries — which is what a requirement key is matched against. `branch` is which of the editor's own tabs the flag sits in, so it says which service the flag belongs to and NOTHING about which type carries it: the flag boxes and the type boxes are siblings on that form, never a mapping. Three entries are figures the editor filters on rather than capabilities, and are marked so.",
+  "source": "the game's own /aaos/new form, via Diagnostics -> What the dispatch orders know, reported 2026-09-23",
+  "updated": "2026-09-23",
+  "flags": {
+    "air_tanker": {
+      "branch": [
+        "brush"
+      ]
+    },
+    "any_rtw": {
+      "branch": [
+        "rescue"
+      ]
+    },
+    "any_traffic_car": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "arff": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "boot": {
+      "branch": [
+        "water_rescue"
+      ]
+    },
+    "brush_truck": {
+      "branch": [
+        "brush"
+      ]
+    },
+    "brush_truck_1": {
+      "branch": [
+        "brush"
+      ]
+    },
+    "brush_truck_2": {
+      "branch": [
+        "brush"
+      ]
+    },
+    "brush_truck_3": {
+      "branch": [
+        "brush"
+      ]
+    },
+    "brush_truck_4": {
+      "branch": [
+        "brush"
+      ]
+    },
+    "brush_truck_5": {
+      "branch": [
+        "brush"
+      ]
+    },
+    "brush_vehicle": {
+      "branch": [
+        "brush"
+      ]
+    },
+    "car_carrier": {
+      "branch": [
+        "tow_trucks"
+      ]
+    },
+    "coastal_boat": {
+      "branch": [
+        "coastalrescue"
+      ]
+    },
+    "crew_carrier": {
+      "branch": [
+        "fire",
+        "brush"
+      ]
+    },
+    "dlk": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "dozer_trailer": {
+      "branch": [
+        "brush"
+      ]
+    },
+    "elw": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "elw2": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "fbi_bomb_tech": {
+      "branch": [
+        "fbi"
+      ]
+    },
+    "fbi_drone": {
+      "branch": [
+        "fbi"
+      ]
+    },
+    "fbi_investigation_unit": {
+      "branch": [
+        "fbi"
+      ]
+    },
+    "fbi_mobile_command": {
+      "branch": [
+        "fbi"
+      ]
+    },
+    "fbi_unit": {
+      "branch": [
+        "fbi"
+      ]
+    },
+    "fire": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "fire_aviation": {
+      "branch": [
+        "brush"
+      ]
+    },
+    "fire_investigation": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "fireboat": {
+      "branch": [
+        "water_rescue"
+      ]
+    },
+    "flood_equipment": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "fly_car": {
+      "branch": [
+        "rescue"
+      ]
+    },
+    "foam": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "foam_amount": {
+      "branch": [
+        "fire"
+      ],
+      "isAmount": true
+    },
+    "fustw": {
+      "branch": [
+        "police"
+      ]
+    },
+    "fustw_or_police_motorcycle": {
+      "branch": [
+        "police"
+      ]
+    },
+    "fwk": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "gkw": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "grtw": {
+      "branch": [
+        "rescue"
+      ]
+    },
+    "gwa": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "gwgefahrgut": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "gwl2wasser": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "gwl2wasser_only": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "heavy_air_tanker": {
+      "branch": [
+        "brush"
+      ]
+    },
+    "hems": {
+      "branch": [
+        "rescue"
+      ]
+    },
+    "k9": {
+      "branch": [
+        "police"
+      ]
+    },
+    "kdow_orgl": {
+      "branch": [
+        "rescue"
+      ]
+    },
+    "ktw": {
+      "branch": [
+        "rescue"
+      ]
+    },
+    "mountain_lift": {
+      "branch": [
+        "mountain_rescue"
+      ]
+    },
+    "mountain_lift_2": {
+      "branch": [
+        "mountain_rescue"
+      ]
+    },
+    "police_drone": {
+      "branch": [
+        "police"
+      ]
+    },
+    "police_motorcycle": {
+      "branch": [
+        "police"
+      ]
+    },
+    "polizeihubschrauber": {
+      "branch": [
+        "police"
+      ]
+    },
+    "rescueboat": {
+      "branch": [
+        "water_rescue"
+      ]
+    },
+    "riot_police": {
+      "branch": [
+        "police"
+      ]
+    },
+    "rtw": {
+      "branch": [
+        "rescue"
+      ]
+    },
+    "rw": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "search_and_rescue": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "sheriff_unit": {
+      "branch": [
+        "police"
+      ]
+    },
+    "swat": {
+      "branch": [
+        "police"
+      ]
+    },
+    "swat_armored_vehicle": {
+      "branch": [
+        "police"
+      ]
+    },
+    "swat_suv": {
+      "branch": [
+        "police"
+      ]
+    },
+    "technical_rescue": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "wasser_amount": {
+      "branch": [
+        "brush"
+      ],
+      "isAmount": true
+    },
+    "water_damage_pump": {
+      "branch": [
+        "fire"
+      ]
+    },
+    "water_damage_pump_value": {
+      "branch": [
+        "fire"
+      ],
+      "isAmount": true
+    },
+    "water_drop_helicopter": {
+      "branch": [
+        "brush"
+      ]
+    }
+  }
+}

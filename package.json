@@ -1,0 +1,14 @@
+{
+  "name": "ymca",
+  "version": "0.0.0",
+  "description": "YMCA \u2014 Your Mission Chief Alpha: a tool set for MissionChief, plus the Pathfinder build planner",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "start": "python3 -m http.server 8000",
+    "build": "python3 tools/build_offline.py",
+    "build:ymca": "node tools/build_ymca.mjs",
+    "test:ymca": "node userscripts/ymca.test.mjs"
+  }
+}
